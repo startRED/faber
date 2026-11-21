@@ -151,6 +151,71 @@ async fn rewind_real_contained_edit_only_turn_keeps_an_unreported_descendant_unt
 }
 
 #[tokio::test(start_paused = true)]
+async fn provider_clipped_background_output_is_not_a_complete_capture() {
+    use faber_engine::{
+        background::{Commands, Update},
+        model::Vendor,
+    };
+
+    let (spawn, mut input, mut output) = support::controlled();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = start_claude(
+        ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(Area::Project), spawn, sandbox: None },
+        Arc::new(move |event| drop(tx.send(event))),
+    );
+    tokio::time::timeout(Duration::from_secs(3), async {
+        session.send(UserTurn::text("read sample"));
+        support::read_message(&mut input).await;
+        support::emit(&mut output, json!({"type":"assistant", "message":{"content":[{
+            "type":"tool_use", "id":"call", "name":"PowerShell", "input":{"command":"Get-Content -Raw fixture.txt","run_in_background":true}
+        }]}})).await;
+        support::emit(
+            &mut output,
+            json!({"type":"system","subtype":"task_started","task_type":"local_bash","task_id":"task","tool_use_id":"call"}),
+        )
+        .await;
+        let first = support::read_message(&mut input).await;
+        assert_eq!(first["request"]["subtype"], "get_task_output");
+        // The ending arrives while the progress read is in flight. They must retain distinct provenance.
+        support::emit(&mut output, json!({"type":"system","subtype":"task_notification","task_id":"task","status":"completed"})).await;
+        support::emit(
+            &mut output,
+            json!({"type":"control_response","response":{"subtype":"success","request_id":first["request_id"],
+            "response":{"output":"","total_bytes":0,"truncated":false}}}),
+        )
+        .await;
+        let final_read = support::read_message(&mut input).await;
+        assert_eq!(final_read["request"]["subtype"], "get_task_output");
+        assert_ne!(final_read["request_id"], first["request_id"]);
+        let tail = "q".repeat(8192);
+        support::emit(
+            &mut output,
+            json!({"type":"control_response","response":{"subtype":"success","request_id":final_read["request_id"],
+            "response":{"output":tail,"total_bytes":9046,"truncated":true}}}),
+        )
+        .await;
+
+        let mut commands = Commands::default();
+        while let Some(event) = rx.recv().await {
+            if let EngineEvent::Background(update) = event {
+                let final_output = matches!(&update, Update::Output { text, .. } if text == &tail);
+                commands.update("reader", 1, Vendor::Claude, &session, update, 2);
+                if final_output {
+                    break;
+                }
+                assert!(commands.recent("reader", None, 1).iter().all(|row| !row.terminal_output));
+            }
+        }
+        let done = commands.recent("reader", None, 1);
+        assert_eq!(done[0].output, tail);
+        assert!(done[0].output_truncated, "the provider cut the log before Faber received it");
+        assert!(done[0].terminal_output, "the clipped capture was requested after the terminal notification");
+    })
+    .await
+    .expect("the final capture must be delivered");
+}
+
+#[tokio::test(start_paused = true)]
 async fn rewind_normal_close_keeps_background_writers_until_their_exit_after_the_main_result() {
     for (result_before_close, interrupt_result) in [(true, true), (true, false), (false, true)] {
         let (spawn, mut input, mut output) = support::controlled();

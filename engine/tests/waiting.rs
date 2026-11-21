@@ -592,6 +592,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         tentative: BTreeMap::new(),
         command_gate: false,
         codex_plan: false,
+        codex_goal_intent: None,
         cost_base: BTreeMap::new(),
         allow_always: None,
         allow_always_epochs: Default::default(),

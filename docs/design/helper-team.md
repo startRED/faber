@@ -71,6 +71,29 @@ with a hard cap of 15 minutes from the question's arrival even if a question car
 "No answer: decide yourself and say what you assumed in your report." Stop, closing the conversation and a dead
 helper release pending asks and lead calls. No team task or timer exists until a question is asked.
 
+An unsuccessful helper report carries any observed stop reason and tells the lead to check the same folder before
+recovering edits. An unexpected confirmed exit reports an unknown stop cause. An unconfirmed exit is stated explicitly.
+When the CLI process closes its output, the fatal helper report carries the writer confirmation and the CLI
+exit detail together. An unresolved separate command or an unconfirmed process outside the Unix process group
+keeps the Codex exit unconfirmed. A stop reason already observed by the engine stays in the report.
+A successful reply with a command still running in that helper's session stays open within the original helper deadline.
+After the last command, Claude Code can take its own next turn for up to two minutes. If no turn arrives, the lead gets
+a failed report with that reason. Codex gets one follow-up after two seconds if account evidence and the project limit
+allow it. A note to an idle Codex helper starts its next turn and is acknowledged on the native start event. Claude
+notes remain queued until its native follow-up starts. If the helper ends first, its report points to the saved notes.
+An accepted note, Stop, a stricter permission or a replaced session cancels the pending wake. Reported costs count
+before the next admission. The same session keeps its worker slot, with no extra resident process.
+`conversation({action: "workspace"})` reads the caller's active separate project copy without a path or target id. It
+returns a bounded Git snapshot, operation markers from the linked worktree, conflicted filenames and the conversation's
+registered helpers and reported background command state. The worktree's metadata must point back to this copy and to its
+source repository. Relative metadata pointers are checked from the real copy path so Windows path aliases keep working.
+Missing or incomplete evidence is explicit. The status scan covers the project scope and excludes
+changes within submodules. A scan of a subfolder cannot establish that the rest of the worktree is conflict-free. Merge,
+rebase, mail application and the cherry-pick and revert head markers apply to the whole worktree. The result is a
+point-in-time file and activity reading. Writer exit requires separate evidence.
+The read uses the existing safe Git runner and a shared three-second Git deadline off the engine lock. At most two reads
+can run at once. There is no resident process. Older Codex threads can retain a tool schema without this action.
+
 `ToolUse.team` keeps the name, job, title, files, state and ordered exchanges. Each exchange records sender and
 recipient call ids (or lead/engine), their display names, kind, text, Unix milliseconds, and the question link;
 questions retain waiting, answered or lapsed. These travel in normal reply updates, persist with the conversation,

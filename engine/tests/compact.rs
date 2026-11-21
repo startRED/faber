@@ -437,14 +437,19 @@ async fn stop_during_a_compaction_interrupts_it_and_nothing_goes_out_after_it() 
     engine.shutdown();
 }
 
-/// A Codex app-server that answers like the recorded one: a turn that calls the conversation tool once, a compaction that runs
-/// as a turn of its own, and a context update after every request.
-fn codex(seen: Arc<Mutex<Vec<Value>>>) -> Spawner {
-    codex_with(seen, true)
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CompactReplay {
+    Ordinary,
+    OverlappingGoal,
+    OverlappingGoalFailed,
+    OverlappingInlineCompaction,
+    FailedBeforeApplying,
+    FinishedWithoutItems,
+    Legacy,
 }
 
 /// The small app-server; `asks` makes the first turn call `compact` itself.
-fn codex_with(seen: Arc<Mutex<Vec<Value>>>, asks: bool) -> Spawner {
+fn codex_with(seen: Arc<Mutex<Vec<Value>>>, asks: bool, replay: CompactReplay) -> Spawner {
     Arc::new(move |_bin, _argv, _cwd| {
         let (driver_in, fake_in) = tokio::io::duplex(1 << 20);
         let (mut out, driver_out) = tokio::io::duplex(1 << 20);
@@ -498,10 +503,60 @@ fn codex_with(seen: Arc<Mutex<Vec<Value>>>, asks: bool) -> Spawner {
                     }
                     Some("thread/compact/start") => {
                         say.push(json!({ "id": id, "result": {} }));
+                        if matches!(
+                            replay,
+                            CompactReplay::OverlappingGoal
+                                | CompactReplay::OverlappingGoalFailed
+                                | CompactReplay::OverlappingInlineCompaction
+                        ) {
+                            // The goal's notifications can arrive after Faber sent the request. Codex interrupts
+                            // that turn before starting the requested compaction on a separate turn ID.
+                            say.push(started("turn-goal"));
+                            if replay != CompactReplay::OverlappingInlineCompaction {
+                                say.push(json!({ "method": "item/agentMessage/delta", "params": {
+                                    "threadId": thread, "turnId": "turn-goal", "itemId": "native", "delta": "Already resumed."
+                                }}));
+                            } else {
+                                for method in ["item/started", "item/completed"] {
+                                    say.push(json!({ "method": method, "params": { "threadId": thread, "turnId": "turn-goal",
+                                        "item": { "type": "contextCompaction", "id": "inline" }
+                                    }}));
+                                }
+                            }
+                            let mut goal = json!({ "id": "turn-goal", "items": [], "status": "interrupted" });
+                            if replay == CompactReplay::OverlappingGoalFailed {
+                                goal["status"] = json!("failed");
+                                goal["error"] = json!({ "message": "Provider problem", "codexErrorInfo": "badRequest" });
+                            }
+                            say.push(json!({ "method": "turn/completed", "params": { "threadId": thread, "turn": goal }}));
+                        }
                         say.push(started("turn-compact"));
-                        say.push(json!({ "method": "item/started", "params": { "threadId": thread, "turnId": "turn-compact", "item": { "type": "contextCompaction", "id": "k" } } }));
-                        say.push(usage(13_808));
-                        say.extend(finish("turn-compact", json!({ "type": "contextCompaction", "id": "k" })));
+                        let compact = json!({ "type": "contextCompaction", "id": "k" });
+                        let completed = json!({ "method": "turn/completed", "params": { "threadId": thread,
+                            "turn": { "id": "turn-compact", "items": [], "status": "completed" }
+                        }});
+                        match replay {
+                            CompactReplay::FinishedWithoutItems => say.push(completed),
+                            CompactReplay::Legacy => {
+                                say.push(usage(13_808));
+                                say.push(
+                                    json!({ "method": "thread/compacted", "params": { "threadId": thread, "turnId": "turn-compact" } }),
+                                );
+                                say.push(completed);
+                            }
+                            _ => {
+                                say.push(json!({ "method": "item/started", "params": { "threadId": thread, "turnId": "turn-compact", "item": compact } }));
+                                if replay == CompactReplay::FailedBeforeApplying {
+                                    // No applied item follows a model failure, regardless of how the wrapper reports its end.
+                                    say.push(json!({ "method": "error", "params": { "threadId": thread, "turnId": "turn-compact",
+                                        "error": { "message": "Compaction failed." }, "willRetry": false } }));
+                                    say.push(completed);
+                                } else {
+                                    say.push(usage(13_808));
+                                    say.extend(finish("turn-compact", compact));
+                                }
+                            }
+                        }
                     }
                     None if id == 900 => say.extend(finish("turn-1", message.clone())),
                     _ => {}
@@ -519,6 +574,40 @@ fn codex_with(seen: Arc<Mutex<Vec<Value>>>, asks: bool) -> Spawner {
 
 #[tokio::test]
 async fn codex_reports_its_context_compacts_on_request_and_continues_with_next() {
+    codex_compacts_and_continues(CompactReplay::Ordinary).await;
+}
+
+#[tokio::test]
+async fn codex_keeps_a_native_reply_that_races_a_requested_compaction() {
+    codex_compacts_and_continues(CompactReplay::OverlappingGoal).await;
+}
+
+#[tokio::test]
+async fn codex_requires_the_compaction_item_to_complete_before_reporting_success() {
+    codex_compacts_and_continues(CompactReplay::FailedBeforeApplying).await;
+}
+
+#[tokio::test]
+async fn codex_does_not_use_the_goals_own_inline_compaction_to_settle_the_requested_one() {
+    codex_compacts_and_continues(CompactReplay::OverlappingInlineCompaction).await;
+}
+
+#[tokio::test]
+async fn codex_does_not_bypass_failure_backoff_after_a_requested_compaction() {
+    codex_compacts_and_continues(CompactReplay::OverlappingGoalFailed).await;
+}
+
+#[tokio::test]
+async fn codex_holds_the_continuation_when_a_compaction_cannot_be_confirmed() {
+    codex_compacts_and_continues(CompactReplay::FinishedWithoutItems).await;
+}
+
+#[tokio::test]
+async fn codex_accepts_its_legacy_compaction_event_for_the_same_turn() {
+    codex_compacts_and_continues(CompactReplay::Legacy).await;
+}
+
+async fn codex_compacts_and_continues(replay: CompactReplay) {
     let (dir, project) = (crate::support::DataFolder::new(), crate::support::work_folder());
     let seen = Arc::new(Mutex::new(vec![]));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -527,7 +616,7 @@ async fn codex_reports_its_context_compacts_on_request_and_continues_with_next()
         #[cfg(windows)]
         chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]),
-        spawn: codex(seen.clone()),
+        spawn: codex_with(seen.clone(), true, replay),
         windows: false,
         claude_env_billed: false,
         max_warm: 3,
@@ -550,14 +639,45 @@ async fn codex_reports_its_context_compacts_on_request_and_continues_with_next()
             choice: Choice { vendor: "codex".into(), model: None, effort: Some(Effort::High) },
         })
         .unwrap();
+    if matches!(replay, CompactReplay::FinishedWithoutItems | CompactReplay::OverlappingGoalFailed) {
+        let c = until(&engine, &id, |c| !c.compacting && c.queued.len() == 1 && c.messages.last().is_some_and(|m| m.error.is_some())).await;
+        if replay == CompactReplay::FinishedWithoutItems {
+            assert_eq!(c.messages.len(), 2);
+            assert_eq!(c.messages[1].error.as_deref(), Some("error.rewind.stopUnconfirmed"));
+        } else {
+            assert_eq!(c.messages.len(), 4);
+            assert_eq!(c.messages[3].text, "Already resumed.");
+            assert_eq!(c.queued[0].wake.as_ref().map(|w| w.why.as_str()), Some("wake.compacted"));
+        }
+        assert_eq!(c.queued.len(), 1);
+        assert!(c.queued[0].text.ends_with("Write the lexer section."));
+        assert_eq!(seen.lock().unwrap().iter().filter(|m| m["method"] == "turn/start").count(), 1);
+        engine.shutdown();
+        return;
+    }
     // The follow-up is Faber's own message, which Codex receives as the second turn.
-    let c = until(&engine, &id, |c| c.messages.len() >= 4 && idle(c)).await;
+    let expected = if replay == CompactReplay::OverlappingGoal { 6 } else { 4 };
+    let c = until(&engine, &id, |c| c.messages.len() >= expected && !c.compacting && idle(c)).await;
+    let continued_at = if replay == CompactReplay::OverlappingGoal {
+        assert_eq!(c.messages[2].wake.as_ref().map(|w| w.why.as_str()), Some("wake.nativeContinuation"));
+        assert_eq!(c.messages[3].text, "Already resumed.");
+        assert_eq!(c.messages[3].status, Some(Status::Stopped));
+        4
+    } else {
+        2
+    };
     let methods: Vec<String> = seen.lock().unwrap().iter().filter_map(|m| m["method"].as_str().map(String::from)).collect();
     let at = |name: &str| methods.iter().position(|m| m == name).unwrap_or_else(|| panic!("{name} missing in {methods:?}"));
     assert!(at("turn/start") < at("thread/compact/start"), "the compaction waits for the turn: {methods:?}");
     let compact = seen.lock().unwrap().iter().find(|m| m["method"] == "thread/compact/start").cloned().unwrap();
     assert_eq!(compact["params"]["threadId"], "thread-1");
     let second = seen.lock().unwrap().iter().filter(|m| m["method"] == "turn/start").nth(1).cloned().expect("a turn after the compaction");
+    let wake = c.messages[continued_at].wake.as_ref().map(|w| w.why.as_str());
+    if replay == CompactReplay::FailedBeforeApplying {
+        assert_eq!(wake, Some("wake.compactFailed"));
+        engine.shutdown();
+        return;
+    }
     // E1: Codex, too, gets the person's first request again ahead of the agent's own next.
     let text = second["params"]["input"][0]["text"].as_str().unwrap();
     assert!(
@@ -565,7 +685,7 @@ async fn codex_reports_its_context_compacts_on_request_and_continues_with_next()
             && text.ends_with("---\n\nThe conversation was compacted. Continue: Write the lexer section."),
         "{text}"
     );
-    assert_eq!(c.messages[2].wake.as_ref().map(|w| w.why.as_str()), Some("wake.compacted"));
+    assert_eq!(wake, Some("wake.compacted"));
     // The meter followed: 40000 before, what was left after, against the window Codex names.
     let seen = context_events(&mut rx);
     assert!(seen.contains(&Some(ContextFill { used: 40_000, window: 258_400 })), "{seen:?}");
@@ -580,7 +700,7 @@ fn codex_engine(dir: &crate::support::DataFolder, seen: Arc<Mutex<Vec<Value>>>) 
         #[cfg(windows)]
         chat_dir: dir.chat_path().into(),
         clis: BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]),
-        spawn: codex_with(seen, false),
+        spawn: codex_with(seen, false, CompactReplay::Ordinary),
         windows: false,
         claude_env_billed: false,
         max_warm: 3,

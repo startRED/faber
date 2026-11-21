@@ -50,7 +50,9 @@ export function screenFolder(production: string): string {
 
 /** The page the window opens: the checks page when the runner asked for the checks. */
 export function startPage(): string {
-  return checksOut ? 'index.html?checks' : 'index.html';
+  if (!checksOut) return 'index.html';
+  const filter = env('FABER_CHECKS_FILTER');
+  return filter === undefined ? 'index.html?checks' : `index.html?checks&${new URLSearchParams({ filter })}`;
 }
 
 /** Offscreen, out of the taskbar and never focused, as the Tauri test build places its window. */
@@ -59,16 +61,12 @@ export const placement: Partial<Electron.BrowserWindowConstructorOptions> = test
   : {};
 
 /**
- * Before the page loads: the checks page must see no reduced-motion preference (a CI runner asks for it) and the
- * runner's name filter. Both are run by Chromium before any script of the page, as an initialization script is.
- * Returns once they are registered.
+ * Before the page loads: the checks page must see no reduced-motion preference (a CI runner asks for it).
+ * Register the initialization script before loading the checks.
  */
 export async function beforeLoad(contents: WebContents, root: string, origin: string): Promise<void> {
   if (!checksOut) return;
-  const filter = env('FABER_CHECKS_FILTER');
-  const source =
-    readFileSync(path.join(root, 'tests', 'ui', 'system-motion.js'), 'utf8') +
-    (filter === undefined ? '' : `\nwindow.__faberChecksFilter = ${JSON.stringify(filter)};`);
+  const source = readFileSync(path.join(root, 'tests', 'ui', 'system-motion.js'), 'utf8');
   // Stay on the same origin so navigation cannot replace the renderer that owns the debugger's initialization script.
   await contents.loadURL(`${origin}/__test_blank__`);
   contents.debugger.attach('1.3');

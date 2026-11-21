@@ -342,7 +342,12 @@ impl Core {
     /// Whether Auto's pacing lets Faber spend a turn of its own here: the vendor the conversation runs on is usable without
     /// the person's say and none of its windows is nearly used up. A "no" goes to the person instead (R92).
     pub(super) fn may_spend(&self, conv: &str) -> bool {
-        let Some(c) = self.convs.get(conv) else { return false };
+        self.autonomous_spend_blocker(conv).is_none()
+    }
+
+    /// The admission blocker for a turn Faber would start on its own.
+    pub(super) fn autonomous_spend_blocker(&self, conv: &str) -> Option<&'static str> {
+        let Some(c) = self.convs.get(conv) else { return Some("error.conversationGone") };
         let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
         let fallback = pick_model(&choice, &self.vendors(), self.codex_recommended.as_deref());
         // The vendor `send` will use: the one picked by hand, or under Auto the one the conversation runs on.
@@ -351,14 +356,18 @@ impl Core {
         } else {
             fallback
         };
-        let Some(pick) = pick else { return false };
+        let Some(pick) = pick else { return Some("error.noSubscription") };
         let now = self.secs();
         let family = pick.model.as_deref().and_then(family_of);
         // Over 90% in a window of the vendor or of the model's family: the person decides how to spend the rest.
         let tight = self.snap(pick.vendor, now).windows.iter().any(|(name, w)| {
             w.used > NEAR && w.resets_at > now && (crate::budget::vendor_wide(name) || family.is_some_and(|f| family_of(name) == Some(f)))
         });
-        self.allows(pick.vendor, family, Purpose::UserTurn { by_hand: false }, false).is_ok() && !tight
+        match self.allows(pick.vendor, family, Purpose::UserTurn { by_hand: false }, false) {
+            Err(crate::budget::Why::Billing) => Some("error.noSubscription"),
+            Ok(()) if !tight => None,
+            _ => Some("reason.budget.other"),
+        }
     }
 
     fn stop_following(&mut self, conv: &str, problem: &str) {

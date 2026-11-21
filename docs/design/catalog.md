@@ -3,8 +3,8 @@
 Stageshow adds optional demos in More; [delivery and the Faber scene](../product/frontend.md#evidence-and-limits)
 use existing controls and keep the kit outside the app.
 
-Faber's own frontend and media skills ride its guide, not the catalog: no cards, switches or layout; third-party
-skills keep their own rules ([frontend](../product/frontend.md), [media](../product/media.md)).
+Faber's own frontend, media and workflow proof skills ride its guide. They have no Catalog cards or switches
+([frontend](../product/frontend.md), [media](../product/media.md)).
 
 An installed browser tool can match a browser performance request without its name being mentioned. This adds no
 screen control and preserves the existing project, permission and on/off boundaries.

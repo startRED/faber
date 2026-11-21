@@ -108,6 +108,7 @@ mod platform {
     use windows_sys::Win32::System::JobObjects::{
         IsProcessInJob, JOBOBJECT_BASIC_PROCESS_ID_LIST, JobObjectBasicProcessIdList, QueryInformationJobObject,
     };
+    use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS_EX2};
     use windows_sys::Win32::System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 
     fn open(pid: u32, access: u32) -> io::Result<OwnedHandle> {
@@ -122,6 +123,25 @@ mod platform {
             return Err(io::Error::last_os_error());
         }
         Ok(ProcessIdentity { pid, created: (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime) })
+    }
+
+    /// Private resident pages, using the same handle that verified the process creation time.
+    pub fn resident_bytes(expected: ProcessIdentity) -> io::Result<u64> {
+        let handle = open(expected.pid, PROCESS_QUERY_LIMITED_INFORMATION)?;
+        if identity(&handle, expected.pid)? != expected {
+            return Err(io::Error::other("process identity changed before memory sample"));
+        }
+        let size = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX2>() as u32;
+        let mut counters = PROCESS_MEMORY_COUNTERS_EX2 { cb: size, ..Default::default() };
+        // SAFETY: the owned handle stays open, and the API writes a counters structure of the passed size.
+        if unsafe { K32GetProcessMemoryInfo(handle.as_raw_handle(), (&raw mut counters).cast(), size) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // A zero extended field cannot distinguish a real zero from an unavailable counter on older builds.
+        if counters.PrivateWorkingSetSize == 0 || counters.PrivateWorkingSetSize > counters.WorkingSetSize {
+            return Err(io::Error::other("private resident memory counter unavailable"));
+        }
+        Ok(counters.PrivateWorkingSetSize as u64)
     }
 
     fn validate(handle: &OwnedHandle, job: isize, expected: ProcessIdentity) -> io::Result<()> {
@@ -142,7 +162,7 @@ mod platform {
         Ok(stable)
     }
 
-    pub fn job_members(job: isize) -> io::Result<Vec<ProcessMember>> {
+    pub fn job_members(job: isize) -> io::Result<Vec<ProcessIdentity>> {
         let mut capacity = 32usize;
         let ids = loop {
             if capacity > 1_048_576 {
@@ -160,31 +180,19 @@ mod platform {
                 }
                 return Err(error);
             }
-            let count = unsafe { (*list).NumberOfProcessIdsInList as usize };
-            if count > capacity {
-                capacity = count;
+            let (count, assigned) = unsafe { ((*list).NumberOfProcessIdsInList as usize, (*list).NumberOfAssignedProcesses as usize) };
+            if count.max(assigned) > capacity {
+                capacity = count.max(assigned);
                 continue;
+            }
+            if count < assigned {
+                return Err(io::Error::other("owned job membership changed during the snapshot"));
             }
             let first = unsafe { std::ptr::addr_of!((*list).ProcessIdList).cast::<usize>() };
             break unsafe { std::slice::from_raw_parts(first, count) }.to_vec();
         };
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let snapshot = crate::processes()?;
-        let mut members = Vec::with_capacity(ids.len());
-        for id in ids {
-            let pid = u32::try_from(id).map_err(io::Error::other)?;
-            let process = open(pid, PROCESS_QUERY_LIMITED_INFORMATION)?;
-            let stable = identity(&process, pid)?;
-            validate(&process, job, stable)?;
-            let entry = snapshot
-                .iter()
-                .find(|entry| entry.pid == pid && entry.created == stable.created)
-                .ok_or_else(|| io::Error::other("owned job membership changed during the snapshot"))?;
-            members.push(ProcessMember { identity: stable, parent: entry.parent });
-        }
-        Ok(members)
+        // A listed PID can exit or be reused before it is opened. Verify job membership on the opened handle.
+        ids.into_iter().map(|id| job_process_identity(job, u32::try_from(id).map_err(io::Error::other)?)).collect()
     }
 }
 
@@ -436,7 +444,7 @@ mod platform {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 pub use platform::resident_bytes;
 #[cfg(unix)]
 pub use platform::{group_members, group_process_identity};
@@ -446,6 +454,16 @@ pub use platform::{job_members, job_process_identity};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn worker_memory_windows_rejects_a_different_identity_for_the_same_pid() {
+        let pid = std::process::id();
+        let process = crate::processes().unwrap().into_iter().find(|process| process.pid == pid).unwrap();
+        let wrong = ProcessIdentity { pid, created: process.created ^ 1 };
+        let error = resident_bytes(wrong).unwrap_err();
+        assert_eq!(error.to_string(), "process identity changed before memory sample");
+    }
 
     #[test]
     fn worker_memory_linux_statm_uses_resident_pages_and_native_page_size() {

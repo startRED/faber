@@ -74,4 +74,7 @@ English and French. Green when no finding is blocker or high:
 
 - [ ] Two reviews from fresh sessions of the other vendor on the release diff since the last stable (security included).
       Evidence (2026-11-06): three fresh read-only gpt-6.1-sol reviews, none written by this lane: security of v0.3.17..e4828567 (no blockers; scripts can still bypass credential-name matching, an accepted limit); correctness and data loss of the same range (2 high and 1 medium on failed-write paths, all fixed in #711 and re-reviewed twice, last NO BLOCKERS); and what changed from e4828567 to the candidate 0adba5bb (no blockers). Reviewers ran no code and tested no real Electron; the CI gate did. Claude is this lane's vendor; Codex is the other.
-- [ ] The owner's OK, given through the manager, recorded as a decision row.
+- [x] The owner's OK, given through the manager, recorded as a decision row.
+      Evidence (2026-11-20): Erick asked to release 1.0 and, asked item by item, accepted every item still open on this
+      page as it stands and approved turning on the Electron stable switch (decision R578). Items left unchecked
+      above stay open as facts; they no longer hold the gate.

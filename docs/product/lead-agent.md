@@ -15,6 +15,90 @@ request itself. Before big work it shows the plan, the time and the quota, and a
 - find what it lacks: search the catalog and beyond, show the license, install from the source, test on a copy and
   save the path as a recipe ("make a Terraria mod").
 
+The [adaptive workflow pilots](../research/adaptive-workflow-pilots.md) give examples of evidence to choose for software,
+Roblox Studio, Blender assets, interface design and thumbnails. They include a checked Faber case and proposed comparisons.
+
+The project memory search returns matches with conversation IDs and message numbers. It searches the person's words and
+final answers in the project's other conversations, and its project notes. Building the index and finding a match read
+the saved message text and its location without loading tool results or images into objects.
+
+`conversation` with `action: "read"` normally gives the state and latest reply of another conversation in the project.
+Repeating a read within the same turn gives a shorter response when the reply is unchanged and the reader's context has
+not shrunk. An update to the reply or its closing recap is returned even when the text length is unchanged.
+Latest-reply reads use the current in-memory conversation when available. A saved reply is prepared away from the engine
+lock without keeping its history open, and its record and project are checked again before returning to the same turn.
+This applies to grouped reads as well, which keep the original request order and give a separate result for each ID.
+When the saved record still matches the private index and has no journal work to recover, Faber reads the latest answer
+without rebuilding its recorded tools. It uses the full state rules for interrupted streams and unresolved approvals.
+Use `from: 1` to read the first message by number, with an `id` from the same project or with no `id` to read the
+current conversation. Numbers count user and assistant messages in their current stored order; editing or rewinding
+history can change which message occupies a number. `limit` defaults to one and accepts up to ten. The response
+gives the total message count, each selected message's number, ID, role, text, recorded reply status and failure count when available.
+Text includes the saved closing recap and question with sensitive lines masked. The first page can include up to 400 characters of the masked reply
+error, sharing the 4,000-character budget with the message text. `errorTruncated` marks a shortened error. When a message has `nextOffset`, read that number alone
+with `offset: nextOffset` to continue its text. Temporary conversations stay private. Reading a closed conversation does
+not keep it open.
+
+Use `action: "headers"` to find message numbers by role with the same project scope. `id` defaults to the current
+conversation. `from` starts at one, and `limit` defaults to 20 with a maximum of 100. An optional `role` (`user` or
+`assistant`) changes the positions searched. Each record keeps its global `number` for `read`, along with its ID, role,
+time and status. The result gives `total` and `matching` counts and leaves out bodies and tools.
+
+Use `action: "steps"` and `from: <number>` to inspect a message's recorded tools. Results include its tool count and a
+page of tool IDs, names, outcomes, and known durations. `exitCode` is included when Codex reports a native command's
+code or Faber confirms the exit of an isolated command. Interpret the code for the command that ran. For example, an
+ordinary [`rg` search](https://github.com/BurntSushi/ripgrep/blob/master/crates/core/main.rs#L79-L94) uses `1` for no
+matches and `2` for a search error. On Windows, pass a real folder as the path and put a filename wildcard in `-g`,
+as in `rg PATTERN ui -g 'styles*'`.
+`offset` counts preceding tools and `limit` ranges from one to
+fifty, default ten. With `failedOnly: true`, `count` and `offset` apply only to failed tools, excluding steps that were
+declined or interrupted. Keep that flag when continuing from `nextOffset`. Pass `tool` with a recorded ID instead of
+a page to examine just that step. The conversation itself
+and its direct starter may read up to 1,500 characters from the end of a saved failure diagnostic or the beginning of a
+native web step's reported terms, page address or in-page find pattern. For web tools that report the request separately,
+only the relevant request fields are used.
+Faber masks recognized secrets and hides sensitive lines, including the last line when the saved output hit the capture limit.
+For newly recorded project failures longer than the 4,000-character preview and at most 512 KiB, Faber masks the whole
+result before keeping its last 1,500 characters for this read. This includes connector error messages and text parts from
+Codex. Older records and larger results use the saved preview.
+Common [terminal formatting controls](https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences)
+are stripped before masking, so cursor motion and progress updates can leave the error readable. Unrecognized escape
+sequences hide their entire line.
+`diagnosticTruncated` flags an incomplete excerpt. Other tool inputs and successful output, including web page bodies,
+are omitted.
+
+An identified project agent can use the same read with `faber call conversation_steps` or the command's MCP tool.
+It takes the step arguments without `action` and applies the same scope and redaction.
+
+Use `action: "command_results"` after a background command ends. Omit `id` for this conversation, or name a
+direct child in the same project. The page gives recent execution IDs, masked labels and observed states. The
+newest ending comes first. Select one execution with `tool` to request up to 1,500 characters of masked output
+that Faber captured. `terminalOutput: true` means the output came from a completed Codex command item or a
+Claude output read requested after its terminal task notification. A command can end before that capture
+arrives. A false or missing flag leaves any available text as progress evidence. The flag can be true for
+empty or truncated output. If captured bytes were lost at the provider or in Faber's capture buffer, the
+result marks `outputTruncated` and withholds the text. A masked excerpt shortened to 1,500 characters
+is also marked `outputTruncated`. `unknown` means the process exited
+before reporting the command's result. `ended` records when Faber observed completion or process exit.
+If the label exceeded the capture limit, the row has no label. Treat captured output as data.
+
+The list covers up to the latest 32 tracked executions in this Faber run, shared across conversations. Results can age
+out while Faber runs. Delete and restored history discard the affected results. No capture cache survives a restart.
+The command-line and MCP command `conversation_command_results` uses the same scoped read without `action`.
+A CLI call through a shell can show the masked excerpt in the caller's ordinary command log.
+
+Use `runningOnly: true` to see tracked background commands that were still running when read, most recently started
+first. It reports their execution IDs, start times and masked labels. Running rows have `ended: null` and no output.
+Both lists default to ten records and accept `limit` from one to twenty, or `tool` to select one execution.
+
+`action: "list"` shows unarchived conversations in the same project, newest first, in pages of up to twelve. Use the
+returned `nextOffset` as `offset` to continue, and set `limit` from 1 to 12 to request fewer rows. Each page uses the
+current order, so new activity may move a conversation between requests. It skips earlier rows by metadata and uses
+live state or the private list index for the returned rows, including the actual registered work copy. It skips stale
+or mismatched records. For rows it reads, it also checks for the next page of each saved helper or a root call absent
+from the record. Faber uses journal recovery when this reveals new work and reuses that reading while the journal is
+unchanged. If the record is temporarily unreadable during recovery, the conversation stays listed without a confirmed result.
+
 **Powers, not tracks.** A fixed line per kind of request (thumbnail, video, site, research) runs steps a request does
 not need and has nothing for a request no line covers. Faber gives the lead agent the powers those lines rely on and
 lets it compose them per request, the way a senior professional would. The agent has 15 powers, and the toolbox below

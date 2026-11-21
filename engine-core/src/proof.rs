@@ -5,6 +5,8 @@
 //! labelled, so the person sees "2 of 4 confirmed" instead of a plain Done, and no agent is ever trapped (a soft label, not a
 //! block: chosen for the owner, "IA (Erick delegou)", 2026-11-13).
 
+use std::borrow::Cow;
+
 use crate::guard::{self, Fact};
 use crate::model::{ConclusionSummary, Conversation, Message, Proof, Role, ToolUse};
 
@@ -56,6 +58,84 @@ fn is_look(tool: &ToolUse) -> bool {
     tool.name == crate::browser::TOOL || name.contains("screenshot") || name.contains("browser")
 }
 
+fn powershell_commands(script: &str) -> Option<Vec<Vec<String>>> {
+    let mut lines = script.lines().map(str::trim).filter(|line| !line.is_empty()).peekable();
+    let first = lines.next()?;
+    if lines.peek().is_none() {
+        return bare_powershell(first);
+    }
+    // The live CLI also emits one executable per line, exiting on each nonzero code before the next command.
+    const EXIT_IF_FAILED: &str = "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }";
+    let mut runs = vec![];
+    let mut command = first;
+    loop {
+        let mut call = bare_powershell(command)?;
+        if call.len() != 1 || !native_process(&call[0]) {
+            return None;
+        }
+        runs.append(&mut call);
+        if lines.next_if(|line| line.eq_ignore_ascii_case(EXIT_IF_FAILED)).is_none() && lines.peek().is_some() {
+            return None;
+        }
+        let Some(next) = lines.next() else { return Some(runs) };
+        command = next;
+    }
+}
+
+/// A quoted expression can print a command without running it, and PowerShell's stop-parsing token can turn later
+/// commands into arguments. Bare lines may contain one command or an `&&` chain.
+fn bare_powershell(script: &str) -> Option<Vec<Vec<String>>> {
+    if script.contains(['\'', '"', '`', '$', '{', '}', '%', '@', '<', '>']) {
+        return None;
+    }
+    let segments = crate::nudge::successful_segments(script)?;
+    segments
+        .iter()
+        .all(|run| {
+            run.first().is_some_and(|head| !matches!(head.to_ascii_lowercase().as_str(), "exit" | "return" | "break" | "continue" | "."))
+        })
+        .then_some(segments)
+}
+
+/// Shell cmdlets can report success while returning a false value. A bare child process has an exit status.
+fn native_process(run: &[String]) -> bool {
+    let Some(first) = run.first() else { return false };
+    let name = crate::nudge::program(first);
+    if matches!(name.as_str(), "cmd" | "pwsh" | "powershell" | "bash" | "sh" | "zsh" | "dash") {
+        return false;
+    }
+    let executable = first.to_ascii_lowercase();
+    [".exe", ".cmd", ".bat"].iter().any(|ext| executable.ends_with(ext))
+        || crate::nudge::runs_check(run, 0)
+        || matches!(
+            name.as_str(),
+            "node"
+                | "npm"
+                | "npx"
+                | "pnpm"
+                | "yarn"
+                | "bun"
+                | "git"
+                | "cargo"
+                | "rustfmt"
+                | "python"
+                | "python3"
+                | "py"
+                | "uv"
+                | "go"
+                | "dotnet"
+                | "make"
+                | "cmake"
+                | "ctest"
+                | "rg"
+        )
+}
+
+fn script(tool: &ToolUse) -> Option<Cow<'_, str>> {
+    let command = crate::nudge::command(tool)?;
+    Some(crate::nudge::native_powershell(tool).map_or(Cow::Borrowed(command), Cow::Owned))
+}
+
 /// The receipt of one call, when it ended well: Faber's verify that ran checks, a command that exited cleanly (a check
 /// command counts as a check), or a page or screen opened.
 fn receipt(tool: &ToolUse) -> Option<Receipt> {
@@ -68,11 +148,21 @@ fn receipt(tool: &ToolUse) -> Option<Receipt> {
     if let Some(command) = crate::nudge::command(tool) {
         // A clean exit says nothing about a command before `||` (`npm test || true`): only what follows the last one counts.
         let (masked, trusted) = command.rsplit_once("||").map_or((false, command), |(_, rest)| (true, rest));
-        let kind = if crate::nudge::is_check(tool) && !masked { Kind::Check } else { Kind::Run };
+        let shell_script = crate::nudge::native_powershell(tool);
+        let nested = shell_script.as_deref().and_then(powershell_commands);
+        let check = if shell_script.is_some() {
+            nested.as_ref().is_some_and(|runs| runs.iter().any(|run| native_process(run) && crate::nudge::runs_check(run, 0)))
+        } else {
+            crate::nudge::is_check(tool)
+        };
+        let kind = if check && !masked { Kind::Check } else { Kind::Run };
         let mut commands = if masked { vec![] } else { vec![normal(command)] };
         // Each command of a chain, without its redirections (`npm test > out.txt 2>&1` reads as `npm test`).
         let plain = |words: Vec<String>| words.into_iter().take_while(|w| !w.contains(['>', '<'])).collect::<Vec<_>>().join(" ");
         commands.extend(crate::nudge::segments(trusted).into_iter().flatten().map(|words| normal(&plain(words))));
+        if !masked {
+            commands.extend(nested.into_iter().flatten().filter(|words| native_process(words)).map(|words| normal(&plain(words))));
+        }
         return Some(Receipt { kind, commands });
     }
     is_look(tool).then(|| Receipt { kind: Kind::Look, commands: vec![] })
@@ -81,6 +171,9 @@ fn receipt(tool: &ToolUse) -> Option<Receipt> {
 /// Whether a check ran and failed: a check command that exited badly, or a verify whose checks failed.
 fn failed_check(tool: &ToolUse) -> Option<bool> {
     if tool.declined {
+        return None;
+    }
+    if tool.ok == Some(true) && crate::nudge::native_powershell(tool).is_some_and(|script| powershell_commands(&script).is_none()) {
         return None;
     }
     crate::nudge::judged(tool).map(|ok| !ok).or_else(|| crate::nudge::is_check(tool).then(|| tool.ok == Some(false)))
@@ -131,8 +224,8 @@ fn command_lines(command: &str) -> Vec<&str> {
 /// `sed -i`, `cp` or `mv`. Agents edit this way too, and an edit Faber does not see would skip the proof. A scratch file
 /// outside the project (`/tmp/x.js`) is not an edit.
 fn written(tool: &ToolUse, root: &str) -> Vec<String> {
-    let Some(command) = crate::nudge::command(tool) else { return vec![] };
-    let lines = command_lines(command).join(" ; ");
+    let Some(command) = script(tool) else { return vec![] };
+    let lines = command_lines(&command).join(" ; ");
     let words: Vec<&str> = lines.split_whitespace().collect();
     let clean = |w: &str| w.trim_matches(['"', '\'', ';', ')', '(']).to_string();
     let mut out = vec![];
@@ -144,14 +237,60 @@ fn written(tool: &ToolUse, root: &str) -> Vec<String> {
         };
         out.extend(target);
     }
-    for run in words.split(|w| matches!(*w, "&&" | ";" | "|" | "||")) {
+    let powershell = matches!(command, Cow::Owned(_));
+    let mut record_run = |run: &[&str]| {
         let args = || run[1..].iter().filter(|w| !w.starts_with('-'));
-        match run.first().map(|w| crate::nudge::program(w)).as_deref() {
+        let named =
+            |flags: &[&str]| run.windows(2).find(|pair| flags.iter().any(|flag| pair[0].eq_ignore_ascii_case(flag))).map(|pair| pair[1]);
+        let positional = |index: usize| {
+            let mut words = run.iter().copied().skip(1);
+            std::iter::from_fn(|| {
+                while let Some(arg) = words.next() {
+                    match arg.to_ascii_lowercase().as_str() {
+                        "-encoding" | "-erroraction" | "-warningaction" | "-path" | "-literalpath" | "-filepath" | "-destination"
+                        | "-newname" | "-value" | "-filter" | "-include" | "-exclude" | "-width" => {
+                            words.next();
+                        }
+                        _ if !arg.starts_with('-') => return Some(arg),
+                        _ => (),
+                    }
+                }
+                None
+            })
+            .nth(index)
+        };
+        match run.first().map(|w| crate::nudge::program(&clean(w))).as_deref() {
             Some("tee") => out.extend(args().map(|w| clean(w))),
             Some("sed") if run.iter().any(|w| w.starts_with("-i")) => out.extend(run.last().map(|w| clean(w))),
-            Some("cp" | "mv" | "copy" | "move") => out.extend(args().next_back().map(|w| clean(w))),
+            Some("cp" | "mv" | "copy" | "move" | "copy-item" | "move-item") if powershell => {
+                out.extend(
+                    named(&["-Destination"]).or_else(|| positional(usize::from(named(&["-Path", "-LiteralPath"]).is_none()))).map(clean),
+                );
+            }
+            Some("cp" | "mv" | "copy" | "move" | "copy-item" | "move-item") => out.extend(args().next_back().map(|w| clean(w))),
+            Some(
+                "set-content" | "sc" | "add-content" | "ac" | "new-item" | "ni" | "clear-content" | "clc" | "remove-item" | "ri" | "rm"
+                | "del" | "erase",
+            ) if powershell => {
+                out.extend(named(&["-Path", "-LiteralPath"]).or_else(|| positional(0)).map(clean));
+            }
+            Some("out-file" | "tee-object") if powershell => {
+                out.extend(named(&["-FilePath", "-LiteralPath"]).or_else(|| positional(0)).map(clean))
+            }
+            Some("rename-item") if powershell => {
+                let path = named(&["-Path", "-LiteralPath"]);
+                out.extend(path.or_else(|| positional(0)).map(clean));
+                out.extend(named(&["-NewName"]).or_else(|| positional(usize::from(path.is_none()))).map(clean));
+            }
             _ => {}
         }
+    };
+    if let Some(runs) = powershell.then(|| crate::nudge::segments(&command)).flatten() {
+        for run in runs {
+            record_run(&run.iter().map(String::as_str).collect::<Vec<_>>());
+        }
+    } else {
+        words.split(|w| matches!(*w, "&&" | ";" | "|" | "||")).for_each(record_run);
     }
     let root = root.replace('\\', "/").trim_end_matches('/').to_lowercase();
     let inside = |p: &String| {
@@ -175,7 +314,12 @@ fn edits_source(tool: &ToolUse, root: &str) -> bool {
 /// What a shell call that edits ran after its last write (`cp new.js form.js && npm test` gives `npm test`), as a call
 /// of its own: a check before the write (`npm test && cp broken.js a.js`) proves nothing about the written file.
 fn after_write(tool: &ToolUse, root: &str) -> Option<ToolUse> {
-    let command = command_lines(crate::nudge::command(tool)?).join("\n");
+    let script = script(tool)?;
+    let powershell = matches!(script, Cow::Owned(_));
+    if powershell && powershell_commands(&script).is_none() {
+        return None;
+    }
+    let command = command_lines(&script).join("\n");
     let end = written(tool, root).iter().filter_map(|t| command.rfind(t.as_str()).map(|i| i + t.len())).max()?;
     let skip = |c: char| c.is_whitespace() || matches!(c, '&' | ';' | '|' | '\'' | '"');
     let mut rest = command[end..].trim_start_matches(skip);
@@ -186,7 +330,8 @@ fn after_write(tool: &ToolUse, root: &str) -> Option<ToolUse> {
     }
     (!rest.trim().is_empty()).then(|| {
         let mut own = tool.clone();
-        own.input = serde_json::json!({ "command": rest });
+        // This is a receipt projection, not a new invocation. Preserve the same restrictions on inner scripts.
+        own.input = if powershell { serde_json::json!(format!("pwsh -Command '{rest}'")) } else { serde_json::json!({ "command": rest }) };
         own
     })
 }
@@ -260,7 +405,7 @@ pub fn assess(c: &Conversation, summary: &ConclusionSummary, root: &str) -> Opti
 /// What the agent reads when its done conclusion is refused.
 pub fn refusal(problems: &[String]) -> String {
     format!(
-        "{REFUSED}: {}. Run what proves each requirement after your last edit and name it in proof (the command, verify, or look), fix what is missing, or conclude needs_you and say what is not verified. Asked at most {MAX_ASKS} times; after that the conclusion shows as not confirmed",
+        "{REFUSED}: {}. Run each missing check as a separate command after your last edit and name the proof (the command, verify, or look). Fix what is missing, or conclude needs_you and say what is not verified. Asked at most {MAX_ASKS} times; after that the conclusion shows as not confirmed",
         problems.join("; ")
     )
 }
@@ -370,6 +515,71 @@ mod tests {
         assert_eq!(a.problems.len(), 1, "something ran, but nothing says what it proves: {:?}", a.problems);
         let a = assess(&c, &summary(&[("fix a", "cargo test")]), "/w").unwrap();
         assert!(a.problems.is_empty() && worth_showing(&a.proof));
+    }
+
+    #[test]
+    fn native_powershell_receipts_name_the_command_executed_inside_the_wrapper() {
+        let call = |script| powershell(script, true);
+        let c = conversation(vec![edit("/w/invoice.mjs"), call("node --test"), call("git diff --exit-code HEAD -- README.md")]);
+        let summary = summary(&[("tests the invoice", "node --test"), ("keeps the README", "git diff --exit-code HEAD -- README.md")]);
+        let a = assess(&c, &summary, "/w").unwrap();
+        assert_eq!(a.requirements, [true, true], "{:?}", a.problems);
+
+        let c = conversation(vec![edit("/w/invoice.mjs"), call("node --test && git diff --exit-code HEAD -- README.md")]);
+        assert_eq!(assess(&c, &summary, "/w").unwrap().requirements, [true, true]);
+        // The live invoice pilot checked each native exit code before starting the next command.
+        let guarded = "node --test\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\ngit diff --exit-code HEAD -- README.md";
+        let c = conversation(vec![edit("/w/invoice.mjs"), call(guarded)]);
+        assert_eq!(assess(&c, &summary, "/w").unwrap().requirements, [true, true]);
+        for script in [
+            "echo node --test && echo git diff --exit-code HEAD -- README.md",
+            "node --test; git diff --exit-code HEAD -- README.md; exit 0",
+            "node --test && git diff --exit-code HEAD -- README.md || exit 0",
+            "exit 0 && node --test && git diff --exit-code HEAD -- README.md",
+            "node --test\nif ($LASTEXITCODE -ne 0) { exit 0 }\ngit diff --exit-code HEAD -- README.md",
+            "node --test\ngit diff --exit-code HEAD -- README.md",
+            r#""node --test" && "git diff --exit-code HEAD -- README.md""#,
+            "cmd /c echo --% && node --test && git diff --exit-code HEAD -- README.md",
+        ] {
+            let c = conversation(vec![edit("/w/invoice.mjs"), call(script)]);
+            assert_eq!(assess(&c, &summary, "/w").unwrap().requirements, [false, false], "{script}");
+        }
+        let c = conversation(vec![edit("/w/invoice.mjs"), powershell("node --test && git diff --exit-code HEAD -- README.md", false)]);
+        assert_eq!(assess(&c, &summary, "/w").unwrap().requirements, [false, false]);
+
+        for (script, expected) in [("npm test", Kind::Check), ("npm test; exit 0", Kind::Run)] {
+            assert_eq!(receipt(&call(script)).unwrap().kind, expected);
+        }
+        let bypass = tool("commandExecution", json!("pwsh.exe -NoLogo -ExecutionPolicy Bypass -c 'npm test; exit 0'"), true);
+        assert_eq!(receipt(&bypass).unwrap().kind, Kind::Run);
+        assert_eq!(failed_check(&powershell("cargo test 2>&1", false)), Some(true));
+        let test_path = "Test-Path absent.mjs";
+        assert!(!matches(test_path, &[receipt(&call(test_path)).unwrap()]));
+    }
+
+    fn powershell(script: &str, ok: bool) -> ToolUse {
+        tool("commandExecution", json!(format!(r#""C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command '{script}'"#)), ok)
+    }
+
+    #[test]
+    fn native_powershell_copy_invalidates_earlier_proof() {
+        let summary = summary(&[("tests the invoice", "node --test")]);
+        for (script, expected) in [
+            ("cp b.mjs invoice.mjs", false),
+            ("Copy-Item -Force C:/tmp/b.mjs invoice.mjs", false),
+            ("Copy-Item -Destination invoice.mjs -Path C:/tmp/b.mjs", false),
+            (r#"Set-Content -Value "new content" -LiteralPath invoice.mjs"#, false),
+            ("Set-Content -Value 'new content' invoice.mjs", false),
+            (r#"(Get-Content source.mjs) -replace "x", "y" | Set-Content -Encoding utf8 invoice.mjs"#, false),
+            ("Remove-Item -Force invoice.mjs", false),
+            ("node --test && Copy-Item b.mjs invoice.mjs", false),
+            ("Copy-Item b.mjs invoice.mjs && node --test", true),
+            ("Copy-Item b.mjs invoice.mjs; node --test; exit 0", false),
+        ] {
+            let c = conversation(vec![edit("invoice.mjs"), powershell("node --test", true), powershell(script, true)]);
+            assert_eq!(assess(&c, &summary, "/w").unwrap().requirements, [expected], "{script}");
+        }
+        assert_eq!(guard::deleted_by_command(&powershell("Remove-Item tests/invoice.test.mjs", true)), ["tests/invoice.test.mjs"]);
     }
 
     #[test]

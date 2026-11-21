@@ -7,6 +7,8 @@ use std::io::Read;
 use std::path::Path;
 use std::time::{Duration, Instant};
 mod cache;
+mod recovery;
+pub use recovery::snapshot as recovery_snapshot;
 
 pub const PATCH_BYTES: usize = 400 * 1024;
 pub const PATCH_LINES: usize = 4_000;

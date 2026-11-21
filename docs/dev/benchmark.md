@@ -23,6 +23,16 @@ Start it by hand at below-normal priority so a game in front keeps the processor
 | `--busy-account` | off | Skip the wait for a quiet account (below). Each request's dollars come from the CLI's own report and stay exact; `results.json` records `accountQuiet: false`, and the run says nothing about the account's windows |
 | `--dir`, `--run-id` | the system temp folder's `faber-bench`, the time | Where the run folder `<dir>/<run-id>/` goes |
 
+Choose an output outside Cargo's `target` for receipts you need to keep. Build storage is replaceable and can be swept.
+
+### Compare prompts for an adaptive workflow
+
+Use `--workflow-pair --dry-run` to preview the invoice pilot. Remove `--dry-run` to run up to two separate Faber project conversations on the same pinned model and effort. Both use Accept edits, separate disposable folders from one starting tree and the same invoice request. The trial folders are already isolated, so these projects turn off automatic worktree creation for the trial only. The guided prompt adds a request to open and use `workflow-proof`. Standard Faber can discover the same skill on its own. The CLI model overrides above apply only to the plain comparison.
+
+On Windows, run with `--dir` pointing outside the system temporary directory. Before each model turn, a guarded PowerShell command must edit its own fixture, fail to write the neighboring test file, and fail to read or write the test file in the engine data folder. Live turns keep normal guarded read and network behavior. Each side requires a fresh subscription reading with paid credits explicitly unavailable. An incomplete side, missing isolated proof, unknown cost, different profile or observed delegation stops the run. The native sandbox runs the independent proof with no network, read-only proof inputs and an independent writable scratch folder. As with the plain comparison, estimates and caps use reported boundaries, so in-flight work can cross a cap. The result records successful steps that referenced the skill file and any rejected completion receipts. Skill references show observed tool activity.
+
+Give `blind-review.json` to a fresh reviewer by itself. It contains the request, submitted files and proof outcomes with each side labeled A or B. Evaluate the requested behavior, the test's ability to catch the original bug and maintainability in both presentation orders. Resolve the labels with `review-key.json` after the verdict. Compare the recorded API-price equivalents and wall time after quality. A single pair describes the observed task and profile; it cannot establish a general advantage or set an app default.
+
 ## What a run does
 
 Before any account reading or model work, a real run copies `bench/requests/`, `bench/fixtures/` and `bench/proofs/`
@@ -41,6 +51,8 @@ For each request in `bench/requests/` (a header and the prompt exactly as a pers
 5. Writes `results.json` (everything, raw) and `tables.md` into the run folder, and each Faber CLI start's arguments to `<request>/faber/spawns.log`.
 
 The folder-organizing fixture includes an existing backup with the same content as another file. Its proof preserves the original count of each file's content: losing one of those originals fails, keeping both passes, and adding another copy fails. Older runs without that backup are not matched baselines for this updated fixture.
+
+The invoice proof runs the submitted tests through Node's normal discovery in two temporary copies. In one copy it reintroduces only the zero-quantity charge. Both copies retain input validation and the module's exports. The same tests must pass in the first copy and fail in the second. The separate invoice contract checks still apply. Earlier runs only established that the submitted tests ran. [Node test runner](https://nodejs.org/api/test.html) · [Mutation testing](https://stryker-mutator.io/docs/)
 
 Measured per request and side: the verdict and its reason, the proof, the reply's own time (the plain run, or Faber's reply `took`; wall time is in `results.json`), and reported tokens and API-equivalent cost. Claude supplies `total_cost_usd`. Plain Codex tokens use the existing model pricing when one completed turn has every token counter (including explicit cache writes) and its total input fits the short-context tier; unknown models, missing counters/turns and larger totals have unknown cost because the CLI events do not identify each request's context tier. Faber's cost is the difference between its private engine ledger before setup and after shutdown, including routing, helpers and other auxiliary work. Any new unmetered ledger entry makes that cost unknown. Missing costs stay unknown in rows and totals and suppress cost ratios. The current upstream [exec event schema](https://github.com/openai/codex/blob/main/codex-rs/exec/src/exec_events.rs) includes `cache_write_input_tokens`; older events missing it remain incomplete, as in the engine adapter.
 
@@ -107,7 +119,7 @@ Flows in one call (`steps`): the sign-up form as one flow is two reads (the firs
 - Routing and auxiliary tokens are unavailable in the public ledger; reports mark Faber token counts as partial. Their ledger costs are counted.
 - The plain side is unguarded: it runs with bypassPermissions (or danger-full-access) and without the secret-path deny list Faber passes in its settings, and it loads this PC's hooks, instructions and MCP servers. The ten prompts are benign.
 - `spawns.log` writes each argument, except the values of `--settings`, `--mcp-config` and the system-prompt flags, which are logged as their length.
-- The proofs run the agent's code on this PC, as the agent itself already did.
+- The plain comparison proofs run the agent's code on this PC, as the agent itself already did. The workflow pair requires the isolated proof runner described above.
 - The research proof checks at most 20 distinct cited links; extra links make coverage incomplete and the proof fails. Reachability (including 401, 403 and 429) does not verify the cited facts, official authorship or page contents. A passing link check alone does not qualify research accuracy.
 - The full ~40 requests, creative media (thumbnail, video, 3D, mod), live-model speed to first token, precision and memory are measured elsewhere or not yet. The engine-only first-word budget above does not certify the full 2 s goal.
 

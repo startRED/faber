@@ -68,22 +68,26 @@ impl Core {
             return;
         }
         let c = &self.convs[conv];
-        let step =
-            c.messages.iter().find(|m| m.id == turn).and_then(|m| m.tools.iter().flatten().rev().find(|t| t.parent.is_none())).map(|t| {
-                match crate::nudge::command(t) {
-                    Some(command) => crate::conversation_state::line(command, 80),
-                    None => t.name.clone(),
-                }
-            });
+        let step = c
+            .messages
+            .iter()
+            .enumerate()
+            .find(|(_, m)| m.id == turn)
+            .and_then(|(index, m)| {
+                let offset = m.tools.as_ref()?.iter().rposition(|t| t.parent.is_none())?;
+                // A clipped command can still contain a secret. Give the lead the step's address instead.
+                let args = serde_json::json!({"action":"steps","id":conv,"from":index + 1,"offset":offset,"limit":1});
+                Some(format!(" Inspect its latest recorded step with `conversation({args})`."))
+            })
+            .unwrap_or_default();
         let what = match why {
             Why::Quiet(m) => format!("has said nothing for {m} minutes while a step of its own runs"),
             Why::Repeat => "keeps starting the same step with no file changed".into(),
             Why::Failing => "failed the same step three times with no file changed".into(),
             Why::Barren(m) => format!("has worked for {m} minutes without changing a file or passing a check"),
         };
-        let step = step.map(|s| format!(" (its latest step: {s})")).unwrap_or_default();
         let text = format!(
-            "The conversation \"{}\" (id {conv}) that you started {what}{step}. It still runs: Faber stopped nothing. Look at it \
+            "The conversation \"{}\" (id {conv}) that you started {what}. It still runs: Faber stopped nothing.{step} Look at it \
              with `read`, then stop it, ask it with a narrower instruction, or let it go on; tell the person in one line if it \
              changes what they get.",
             c.title
@@ -155,11 +159,47 @@ mod tests {
         let told = notices(&engine, &parent);
         assert_eq!(told.len(), 1, "half an hour without a word reaches the lead");
         assert!(told[0].text.contains("has said nothing for 30 minutes"), "{}", told[0].text);
-        assert!(told[0].text.contains("cargo test"));
+        assert!(told[0].text.contains("\"from\":2") && told[0].text.contains("\"offset\":0"));
         assert!(told[0].text.contains(&kid));
         walk(&engine, &clock, 1000.0 + 2700.0, None);
         assert_eq!(notices(&engine, &parent).len(), 1, "once per reply, not once a minute");
         assert_eq!(engine.with(|c| c.live[&kid].turn.clone()).as_deref(), Some("work"), "nothing was stopped");
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_child_stall_notice_points_to_the_step_without_copying_shell_input() {
+        let (engine, parent, kid, clock, _dir) = child_at_work();
+        engine.with(|core| {
+            core.handle(
+                &kid,
+                1,
+                EngineEvent::Tool {
+                    id: "fixture-command".into(),
+                    name: "PowerShell".into(),
+                    input: json!({"command":"$env:APP_TOKEN = 'fixture-private-value'; run-local-check"}),
+                    parent: None,
+                },
+            );
+        });
+        walk(&engine, &clock, 1000.0 + 1830.0, None);
+        let told = notices(&engine, &parent);
+        assert_eq!(told.len(), 1);
+        let text = &told[0].text;
+        assert!(!text.contains("fixture-private") && !text.contains("APP_TOKEN"));
+        let (_, call) = text.split_once("`conversation(").expect("the notice must include the lookup");
+        let (args, _) = call.split_once(")`").expect("the lookup must end");
+        let args = serde_json::from_str(args).unwrap();
+        let crate::sibling::Request::ReadSteps { id: Some(id), from, offset, limit: 1, failed_only: false, .. } =
+            crate::sibling::request(&args).expect("the conversation tool must accept the lookup")
+        else {
+            panic!("the lookup must target one step in the child");
+        };
+        assert_eq!(id, kid);
+        engine.with(|core| {
+            let tool = &core.convs[&id].messages[from - 1].tools.as_ref().unwrap()[offset];
+            assert_eq!(tool.id, "fixture-command");
+        });
         engine.shutdown();
     }
 
@@ -181,7 +221,11 @@ mod tests {
         engine.with(|core| {
             let edit = EngineEvent::Tool { id: "e".into(), name: "Edit".into(), input: json!({"file_path": "a.rs"}), parent: None };
             core.handle(&kid, 1, edit);
-            core.handle(&kid, 1, EngineEvent::ToolResult { id: "e".into(), ok: true, declined: false, text: String::new() });
+            core.handle(
+                &kid,
+                1,
+                EngineEvent::ToolResult { id: "e".into(), ok: true, declined: false, exit_code: None, text: String::new() },
+            );
         });
         walk(&engine, &clock, 1000.0 + BARREN + 60.0, Some(&kid));
         assert!(notices(&engine, &parent).is_empty());

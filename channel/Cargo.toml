@@ -41,3 +41,7 @@ tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-threa
 [[test]]
 name = "host"
 required-features = ["host"]
+
+[[example]]
+name = "external_wake_host"
+required-features = ["host"]

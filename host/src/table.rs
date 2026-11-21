@@ -5,13 +5,14 @@ use super::*;
 use crate::queues::{PromptReads, SearchQueue};
 use crate::{folder, look, project_commands, setup, terminal, tools, views};
 use base64::Engine as _;
-use faber_engine::model::{Area, Conversation, Project};
+use faber_engine::model::{Area, Conversation, Project, Role};
 use faber_engine::project::checks;
 use faber_engine::{AppState, BranchRequest, SendRequest, WarmRequest};
 use look::{Look, ThemeFile};
 use serde_json::Map;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use views::ListState;
 
 /// What `state` answers: the engine's state, with the look of the saved appearance (the screen applies it before it renders),
 /// the models this account can use, and the version running.
@@ -46,6 +47,8 @@ const IMAGE_TYPES: [(&str, &str); 6] = [
     ("webp", "image/webp"),
     ("svg", "image/svg+xml"),
 ];
+static LISTING_CHANGES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static READING_PATCH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 const JSON_FILES: Filter = Filter { name: "JSON", extensions: &["json"] };
 const MARKDOWN_FILES: Filter = Filter { name: "Markdown", extensions: &["md"] };
@@ -130,38 +133,94 @@ table! {
         Ok(h.engine.messages_before(&id, &message_id, 40))
     }
     /// The conversations, the running ones first, then pinned, then the newest, each with its state in plain words
-    /// (`working`, `waiting`, `idle`; read one conversation for how it ended). `state` keeps only these states (`running` is
-    /// working or waiting); `archived` true lists only archived ones and false every one; `family` keeps the family of a
-    /// conversation (who started whom); `query` keeps titles holding its words. Reads no conversation's messages.
+    /// (`working`, `waiting`, `idle`). `state` can also select an exact ending (`concluded`, `ended`, `interrupted`,
+    /// `stopped`, `failed`, `new`); matching rows show that state. `running` means working or waiting. `archived` true
+    /// lists only archived ones and false every one; `family` keeps the family of a conversation (who started whom);
+    /// `query` keeps titles holding its words. Uses list metadata, not message bodies.
     Read Free fn conversations(
         h,
-        state: Option<Vec<String>>,
+        state: Option<Vec<ListState>>,
         archived: Option<bool>,
         project_id: Option<String>,
         family: Option<String>,
         query: Option<String>,
         limit: Option<usize>,
     ) -> Vec<views::Row> {
-        let filter = views::Filter { states: state.unwrap_or_default(), archived, project_id, family, query, limit };
-        Ok(views::rows(&h.engine.state(), &filter))
+        let states = state.unwrap_or_default().into_iter().map(String::from).collect();
+        let filter = views::Filter { states, archived, project_id, family, query, limit };
+        let (summaries, running) = h.engine.conversation_list();
+        Ok(views::rows(&summaries, &running, &filter))
     }
     /// One conversation: its state (`concluded` only when its AI concluded the whole request), its last `last` messages (all
-    /// when missing) with the tools each used, and the AI's latest conclusion. Unlike opening it on the screen, reading it
-    /// leaves its done mark for the person.
-    Read Free fn conversation(h, id: String, last: Option<usize>) -> views::Read {
-        let running = h.engine.state().running.items.into_iter().find(|i| i.conversation_id == id).map(|i| i.state);
+    /// when missing) with the tools each used, and the AI's latest conclusion. For numbered messages, pass `from` (first
+    /// is 1) and optionally `limit` (1 to 10, default 1) instead of `last`. `count` always holds the total. Unlike opening
+    /// it on the screen, reading leaves its done mark for the person.
+    Read Free fn conversation(h, id: String, last: Option<usize>, from: Option<usize>, limit: Option<usize>) -> views::Read {
+        let (start, limit, first) = match (from, limit, last) {
+            (None, None, Some(last)) => (None, last, None),
+            (None, None, None) => (Some(0), usize::MAX, None),
+            (Some(from), limit, None) if from > 0 && (1..=10).contains(&limit.unwrap_or(1)) => (Some(from - 1), limit.unwrap_or(1), Some(from)),
+            _ => return Err("error.host.badArgs".into()),
+        };
         let engine = h.engine.clone();
-        let conversation = off("error.conversationGone", move || engine.open(&id)).await?.ok_or("error.conversationGone")?;
-        Ok(views::read(&conversation, running, last))
+        off("error.conversationGone", move || {
+            engine.view_history(&id, start, limit, |page, active, in_panel| views::read(page, active, in_panel, first))
+        })
+            .await?.ok_or_else(|| "error.conversationGone".into())
+    }
+    /// Message numbers, IDs, roles, times and statuses, without message bodies or tools. `from` starts at 1 and `limit`
+    /// defaults to 20 (1 to 100). With `role`, `from` counts only that role. Pass each global `number` to `conversation` as `from`.
+    /// `total` counts every message; `matching` counts the requested role, or every message with no filter.
+    Read Free fn conversation_headers(
+        h, id: String, from: Option<usize>, limit: Option<usize>, role: Option<Role>,
+    ) -> faber_engine::history::Headers {
+        let from = from.unwrap_or(1);
+        let limit = limit.unwrap_or(20);
+        if from == 0 || !(1..=100).contains(&limit) {
+            return Err("error.host.badArgs".into());
+        }
+        let engine = h.engine.clone();
+        off("error.conversationGone", move || engine.conversation_headers(&id, from - 1, limit, role))
+            .await?.ok_or_else(|| "error.conversationGone".into())
+    }
+    /// Tool steps of one message in the caller's project. The caller must be an identified project agent.
+    /// Number messages from 1. Omit `id` for the caller, and use `offset`, `limit` (1 to 50, default 10) or `failedOnly`
+    /// to page steps. Or pass one `tool` ID to read a masked diagnostic of the caller or its direct child.
+    Read Free fn conversation_steps(
+        h,
+        by: Option<String>,
+        id: Option<String>,
+        from: usize,
+        limit: Option<usize>,
+        offset: Option<usize>,
+        tool: Option<String>,
+        failed_only: Option<bool>,
+    ) -> Value [Failure] {
+        let reader = agent_by(by)?;
+        let id = id.unwrap_or_else(|| reader.clone());
+        let input = json!({"action":"steps","id":id,"from":from,"limit":limit,"offset":offset,"tool":tool,"failedOnly":failed_only});
+        let engine = h.engine.clone();
+        off("error.session.refused", move || engine.project_steps(&reader, &input)).await?.map_err(|why| refused(why.into()))
+    }
+    /// Recent background command endings in this Faber run, for an identified project agent's own conversation or direct child.
+    /// Omit `id` for the caller. Page with `limit` (1 to 20, default 10) or select one execution `tool` ID for masked output.
+    /// Set `runningOnly` to true for active command metadata without partial output.
+    Read Free fn conversation_command_results(
+        h, by: Option<String>, id: Option<String>, tool: Option<String>, limit: Option<usize>, running_only: Option<bool>,
+    ) -> Value [Failure] {
+        let reader = agent_by(by)?;
+        let input = json!({"action":"command_results","id":id,"tool":tool,"limit":limit,"runningOnly":running_only});
+        let engine = h.engine.clone();
+        off("error.session.refused", move || engine.project_command_results(&reader, &input)).await?.map_err(|why| refused(why.into()))
     }
     /// The projects Faber knows, with their folders.
     Read Free fn projects(h) -> Vec<Project> {
-        Ok(h.engine.state().projects)
+        Ok(h.engine.projects())
     }
     /// Each vendor's quota windows (how much is used, when each resets) and what Faber has spent of them.
     Read Free fn quota(h) -> Value {
-        let state = h.engine.state();
-        Ok(json!({ "quotas": state.quotas, "usage": state.usage }))
+        let (quotas, usage) = h.engine.quota_view();
+        Ok(json!({ "quotas": quotas, "usage": usage }))
     }
     /// The settings as Settings shows them.
     Read Free fn settings(h) -> Settings {
@@ -173,7 +232,7 @@ table! {
         if let Some(dir) = faber_engine::claude_sessions::config_dir(&|key| std::env::var(key).ok()) {
             files.push(dir.join("settings.json"));
         }
-        for project in h.engine.state().projects {
+        for project in h.engine.projects() {
             files.push(PathBuf::from(project.path).join(".claude").join("settings.json"));
         }
         off("error.settings.loadFailed", move || faber_engine::claude::list_hooks(&files)).await
@@ -251,6 +310,13 @@ table! {
     /// Go on with a reply Faber was closed under (R477): one fixed turn, refused once it is no longer the last.
     Write Own("/id") fn continue_closed(h, id: String, turn_id: String) -> () {
         h.engine.continue_closed(&id, &turn_id)
+    }
+    /// Recheck an overdue saved project wait, using its observed `since` and `until` from `waitingOn`.
+    /// Uses the existing automatic admission and receipt. No message or override can be supplied.
+    Write Ask fn wake_wait(h, id: String, since: u64, until: u64) -> faber_engine::engine::WaitCheck {
+        if until <= since { return Err("error.host.badArgs".into()); }
+        let engine = h.engine.clone();
+        off("error.conversationGone", move || engine.wake_wait(&id, since, until)).await
     }
     Read Screen fn warm(h, req: WarmRequest) -> () {
         h.engine.warm(req);
@@ -516,39 +582,52 @@ table! {
         h.engine.stop_background(&id).await.map_err(str::to_string)
     }
     /// At most one git listing runs and one waits; a newer request replaces the waiting one.
-    Read Free fn changes(h, id: String, cursor: Option<String>) -> faber_engine::changes::ChangeList {
-        static LISTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    Read Free fn changes(h, id: String, cursor: Option<String>) -> faber_engine::changes::ChangeList [Failure] {
         static WAITING: Mutex<Option<tokio::sync::oneshot::Sender<()>>> = Mutex::new(None);
         let (replaced, gone) = tokio::sync::oneshot::channel();
         if let Some(older) = lock(&WAITING).replace(replaced) {
             let _ = older.send(());
         }
-        let _one = tokio::select! {
+        let one = tokio::select! {
             biased;
-            _ = gone => return Ok(faber_engine::changes::ChangeList::default()),
-            one = LISTING.lock() => one,
+            _ = gone => return Err(Failure::with("error.changes.read", "A newer request replaced this read.")),
+            one = LISTING_CHANGES.lock() => one,
         };
         let engine = h.engine.clone();
-        Ok(tokio::task::spawn_blocking(move || engine.changes_page(&id, cursor.as_deref())).await.unwrap_or_default())
+        Ok(off("error.changes.read", move || {
+            let _one = one;
+            engine.changes_page(&id, cursor.as_deref())
+        })
+        .await?)
     }
-    Read Free fn change_patch(h, id: String, path: String) -> faber_engine::changes::ChangePatch {
-        // The newest read waiting for each (conversation, file); a newer one answers the older with nothing.
+    Read Free fn change_patch(h, id: String, path: String) -> faber_engine::changes::ChangePatch [Failure] {
+        // A newer request for the same file replaces its older waiting read.
         type Waiting = std::collections::HashMap<(String, String), tokio::sync::oneshot::Sender<()>>;
-        static READING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
         static WAITING: std::sync::LazyLock<Mutex<Waiting>> = std::sync::LazyLock::new(|| Mutex::new(Waiting::new()));
         let key = (id.clone(), path.clone());
-        let (replaced, gone) = tokio::sync::oneshot::channel();
+        let (replaced, mut gone) = tokio::sync::oneshot::channel();
         if let Some(older) = lock(&WAITING).insert(key.clone(), replaced) {
             let _ = older.send(());
         }
-        let _one = tokio::select! {
+        let one = tokio::select! {
             biased;
-            _ = gone => return Ok(faber_engine::changes::ChangePatch::default()),
-            one = READING.lock() => one,
+            _ = &mut gone => return Err(Failure::with("error.changes.read", "A newer request replaced this read.")),
+            one = READING_PATCH.lock() => one,
         };
-        lock(&WAITING).remove(&key);
+        drop(gone);
+        {
+            let mut waiting = lock(&WAITING);
+            // A newer request may have entered while this read acquired its slot.
+            if waiting.get(&key).is_some_and(tokio::sync::oneshot::Sender::is_closed) {
+                waiting.remove(&key);
+            }
+        }
         let engine = h.engine.clone();
-        Ok(tokio::task::spawn_blocking(move || engine.change_patch(&id, &path)).await.unwrap_or_default())
+        Ok(off("error.changes.read", move || {
+            let _one = one;
+            engine.change_patch(&id, &path)
+        })
+        .await?)
     }
     Read Free fn answer_changes(h, id: String, message_id: String, offset: usize) -> faber_engine::rewind::AnswerChanges {
         let engine = h.engine.clone();
@@ -1165,6 +1244,79 @@ mod revoke_tests {
     }
 
     #[tokio::test]
+    async fn superseded_change_reads_return_an_error_instead_of_empty_success() {
+        use faber_engine::project::git::{Executor, GitError, Invocation, Output};
+        use std::future::Future;
+        use std::task::{Context, Waker};
+        use tokio::sync::oneshot;
+
+        type First = Arc<Mutex<Option<(oneshot::Sender<()>, std::sync::mpsc::Receiver<()>)>>>;
+        struct Git(First);
+        impl Executor for Git {
+            fn execute(&mut self, call: &Invocation) -> Result<Output, GitError> {
+                let first = lock(&self.0).take();
+                if let Some((started, release)) = first {
+                    let _ = started.send(());
+                    release.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+                let stdout = if call.args.iter().any(|word| word == "rev-parse" || word == "merge-base") {
+                    "a".repeat(40).into_bytes()
+                } else {
+                    vec![]
+                };
+                Ok(Output { success: true, stdout })
+            }
+        }
+
+        let (host, dir) = host().await;
+        let path = dir.path().join("copy");
+        std::fs::create_dir(&path).unwrap();
+        let record: Conversation = serde_json::from_value(json!({
+            "id":"copy", "title":"Copy", "area":"project", "messages":[], "createdAt":1, "updatedAt":1,
+            "copy":{"path":path,"branch":"faber/copy","root":path}
+        }))
+        .unwrap();
+        faber_engine::store::Store::new(&dir.path().join("data")).save_checked(&record).unwrap();
+        let who = Caller::Person;
+        let mut outcomes = vec![];
+        for (command, args, slot) in
+            [("changes", json!({"id":"copy"}), &LISTING_CHANGES), ("change_patch", json!({"id":"copy","path":"file.txt"}), &READING_PATCH)]
+        {
+            let (started, entered) = oneshot::channel();
+            let (release, hold) = std::sync::mpsc::channel();
+            let first = Arc::new(Mutex::new(Some((started, hold))));
+            host.engine.set_git(Arc::new(move || Some(Box::new(Git(first.clone())))));
+
+            let read = || host.dispatch_as(&who, command, args.clone());
+            let mut running = Box::pin(read());
+            tokio::select! {
+                biased;
+                result = running.as_mut() => panic!("the first read did not reach git: {result:?}"),
+                started = tokio::time::timeout(Duration::from_secs(5), entered) => started.unwrap().unwrap(),
+            };
+            drop(running);
+            assert!(slot.try_lock().is_err(), "the first Git read keeps its slot after its caller leaves");
+
+            let mut waiting = std::pin::pin!(read());
+            let mut newer = std::pin::pin!(read());
+            {
+                let mut context = Context::from_waker(Waker::noop());
+                assert!(waiting.as_mut().poll(&mut context).is_pending());
+                assert!(newer.as_mut().poll(&mut context).is_pending());
+            }
+            let skipped = tokio::time::timeout(Duration::from_secs(5), waiting).await.unwrap();
+            release.send(()).unwrap();
+            assert!(newer.await.is_ok());
+            outcomes.push(skipped);
+        }
+        for skipped in outcomes {
+            let error = skipped.expect_err("a replaced read must report that it did not run");
+            assert_eq!(error.key, "error.changes.read");
+            assert_eq!(error.detail.as_deref(), Some("A newer request replaced this read."));
+        }
+    }
+
+    #[tokio::test]
     async fn app_bootstrap_and_refresh_hide_foreign_command_output_and_running_details() {
         use faber_engine::model::{RunState, RunningItem, Vendor};
         let (host, _dir) = host().await;
@@ -1224,6 +1376,277 @@ mod revoke_tests {
         let caller = Caller::Agent { conversation: Some("owner".into()) };
         assert_eq!(with_by(&caller, json!({"by":"other"}))["by"], "owner");
         assert!(with_by(&Caller::Agent { conversation: None }, json!({"by":"other"})).get("by").is_none());
+    }
+
+    #[tokio::test]
+    async fn conversation_list_filters_saved_endings_without_broadening_a_family() {
+        let (host, dir) = host().await;
+        let store = faber_engine::store::Store::new(&dir.path().join("data"));
+        for (id, status, closing) in [
+            ("failed", "error", false),
+            ("stopped", "stopped", false),
+            ("interrupted", "streaming", false),
+            ("ended", "done", false),
+            ("concluded", "done", true),
+            ("new", "", false),
+        ] {
+            let messages = if status.is_empty() {
+                vec![]
+            } else {
+                vec![json!({"id":"reply", "role":"assistant", "text":"Reply", "status":status, "at":1,
+                    "wrapUp":closing.then(|| json!({"done":true, "recap":"Done"}))})]
+            };
+            let saved: Conversation = serde_json::from_value(json!({
+                "id": id, "title": id, "area":"chat", "createdAt":1, "updatedAt":1, "messages": messages,
+                "startedBy": (id != "failed" && id != "new").then_some("failed"),
+                "archivedAt": (id == "stopped").then_some(2),
+                "waitingOn": matches!(id, "failed" | "interrupted" | "stopped").then(|| json!({"since":1,"until":9})),
+            }))
+            .unwrap();
+            store.save_checked(&saved).unwrap();
+        }
+        let caller = Caller::Agent { conversation: Some("failed".into()) };
+        for state in ["failed", "stopped", "interrupted", "ended", "concluded", "new"] {
+            let rows = host.dispatch_as(&caller, "conversations", json!({"state":[state], "archived":false})).await.unwrap();
+            assert_eq!(rows.as_array().unwrap().len(), 1, "{state}: {rows}");
+            assert_eq!(rows[0]["id"], state);
+            let read = host.dispatch_as(&caller, "conversation", json!({"id":state, "from":1})).await.unwrap();
+            assert_eq!(rows[0]["state"], read["state"]);
+        }
+        let family = host.dispatch_as(&caller, "conversations", json!({"family":"ended"})).await.unwrap();
+        assert_eq!(family.as_array().unwrap().len(), 4);
+        assert!(family.as_array().unwrap().iter().all(|r| r["state"] == "idle" && r["family"] == "failed"));
+        let missing = host.dispatch_as(&caller, "conversations", json!({"family":"missing"})).await.unwrap();
+        assert_eq!(missing, json!([]));
+        let bad_state = host.dispatch_as(&caller, "conversations", json!({"state":["faild"]})).await.unwrap_err();
+        assert_eq!(bad_state.key, "error.host.badArgs");
+    }
+
+    #[tokio::test]
+    async fn quota_and_project_reads_leave_conversation_records_alone() {
+        let (host, dir) = host().await;
+        let data = dir.path().join("data");
+        let store = faber_engine::store::Store::new(&data);
+        let project = Project::new("sample".into(), "Sample".into(), dir.path().to_string_lossy().into_owned());
+        store.save_projects(&[project]).unwrap();
+        let path = data.join("conversations").join("invalid.json");
+        std::fs::write(&path, b"incomplete conversation").unwrap();
+        let damaged = path.with_extension("json.damaged");
+        let who = Caller::Person;
+        // The first unreadable record is retried on the next list before it is preserved.
+        host.dispatch_as(&who, "conversations", json!({})).await.unwrap();
+        assert!(!damaged.exists());
+        let quota = host.dispatch_as(&who, "quota", json!({})).await.unwrap();
+        assert!(quota["quotas"].is_array() && quota["usage"].is_array());
+        assert!(!damaged.exists(), "reading quota must not try to open conversations");
+        let projects = host.dispatch_as(&who, "projects", json!({})).await.unwrap();
+        assert_eq!(projects[0]["id"], "sample");
+        assert!(!damaged.exists(), "reading projects must not try to open conversations");
+        host.dispatch_as(&who, "conversations", json!({})).await.unwrap();
+        assert!(damaged.exists(), "the control: listing notices an unreadable record");
+    }
+
+    #[tokio::test]
+    async fn recent_command_results_use_the_channels_authenticated_agent() {
+        let (host, dir) = host().await;
+        let store = faber_engine::store::Store::new(&dir.path().join("data"));
+        for id in ["lead", "child", "peer"] {
+            let record: Conversation = serde_json::from_value(json!({
+                "id": id, "title": id, "area": "project", "projectId": "test-project",
+                "startedBy": (id == "child").then_some("lead"), "createdAt": 1, "updatedAt": 2, "messages":[]
+            }))
+            .unwrap();
+            store.save_checked(&record).unwrap();
+            host.engine.open(id).unwrap();
+        }
+        let command = "conversation_command_results";
+        let args = json!({"id":"child","by":"lead"});
+        let lead = Caller::Agent { conversation: Some("lead".into()) };
+        let peer = Caller::Agent { conversation: Some("peer".into()) };
+        assert_eq!(host.dispatch_as(&lead, command, args.clone()).await.unwrap()["items"], json!([]));
+        let active = json!({"id":"child","by":"lead","runningOnly":true});
+        assert_eq!(
+            host.dispatch_as(&lead, command, active.clone()).await.unwrap(),
+            json!({"id":"child","scope":"runningInThisFaberRun","items":[]})
+        );
+        assert_eq!(host.dispatch_as(&peer, command, active).await.unwrap_err().key, "error.session.refused");
+        assert_eq!(host.dispatch_as(&peer, command, args.clone()).await.unwrap_err().key, "error.session.refused");
+        assert_eq!(host.dispatch_as(&Caller::Person, command, args.clone()).await.unwrap_err().key, "error.session.agentOnly");
+        assert_eq!(
+            host.dispatch_as(&Caller::Agent { conversation: None }, command, args).await.unwrap_err().key,
+            "error.session.agentOnly"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_command_reads_one_tool_page_with_the_internal_readers_scope() {
+        let (host, dir) = host().await;
+        let store = faber_engine::store::Store::new(&dir.path().join("data"));
+        let save = |id: &str, project: &str, parent: Option<&str>, temporary: bool| -> Conversation {
+            let saved = serde_json::from_value(json!({
+                "id": id, "title": id, "area":"project", "projectId":project, "startedBy":parent,
+                "temporary":temporary, "createdAt":1, "updatedAt":2,
+                "messages":[
+                    {"id":"question", "role":"user", "text":"An unrelated message body", "at":1},
+                    {"id":"answer", "role":"assistant", "text":"An unrelated reply body", "at":2, "status":"error", "tools":[
+                        {"id":"build","name":"Bash","ok":false,"input":{"command":"a private command"},"exitCode":32,
+                         "output":"Permission denied\nPASSWORD=sample-hidden-value"},
+                        {"id":"search","name":"webSearch","ok":true,"input":null,"output":"release notes"}
+                    ]}
+                ]
+            }))
+            .unwrap();
+            store.save_checked(&saved).unwrap();
+            saved
+        };
+        save("lead", "p", None, false);
+        let mut child = save("child", "p", Some("lead"), false);
+        save("grandchild", "p", Some("child"), false);
+        save("peer", "p", None, false);
+        save("other", "q", Some("lead"), false);
+        save("temporary", "p", Some("lead"), true);
+        let lead = Caller::Agent { conversation: Some("lead".into()) };
+        assert!(host.engine.open("lead").is_some());
+        let answer = host.dispatch_as(&lead, "conversation_steps", json!({"id":"child","from":2,"limit":1})).await.unwrap();
+        assert_eq!((answer["messageId"].as_str(), answer["number"].as_u64()), (Some("answer"), Some(2)));
+        assert_eq!(answer["count"], 2);
+        assert_eq!(answer["nextOffset"], 1);
+        assert_eq!(answer["tools"][0]["exitCode"], 32);
+        assert!(answer["tools"][0].get("diagnostic").is_none());
+        let failures = host.dispatch_as(&lead, "conversation_steps", json!({"id":"child","from":2,"failedOnly":true})).await.unwrap();
+        assert_eq!(failures["count"], 1);
+        let own = host.dispatch_as(&lead, "conversation_steps", json!({"from":2,"tool":"search"})).await.unwrap();
+        assert_eq!(own["id"], "lead");
+        assert_eq!(own["tools"][0]["diagnostic"], "release notes");
+        let read = async |caller: &Caller, id: &str| {
+            host.dispatch_as(caller, "conversation_steps", json!({"by":"child","id":id,"from":2,"tool":"build"})).await
+        };
+        let details = read(&lead, "child").await.unwrap();
+        let words = details["tools"][0]["diagnostic"].as_str().unwrap();
+        assert!(words.contains("Permission denied") && !details.to_string().contains("sample-hidden-value"));
+        assert!(!details.to_string().contains("private command") && !details.to_string().contains("unrelated reply body"));
+        for id in ["peer", "grandchild"] {
+            let step = read(&lead, id).await.unwrap();
+            assert_eq!(step["tools"][0]["diagnosticAvailable"], false);
+            assert!(step["tools"][0].get("diagnostic").is_none());
+        }
+        for id in ["other", "temporary"] {
+            assert_eq!(read(&lead, id).await.unwrap_err().key, "error.session.refused");
+        }
+        for caller in [Caller::Person, Caller::Screen, Caller::Agent { conversation: None }] {
+            assert_eq!(read(&caller, "child").await.unwrap_err().key, "error.session.agentOnly");
+        }
+        let missing = Caller::Agent { conversation: Some("missing".into()) };
+        assert_eq!(read(&missing, "child").await.unwrap_err().key, "error.session.refused");
+        let bad = host.dispatch_as(&lead, "conversation_steps", json!({"id":"child","from":2,"limit":1,"tool":"build"})).await.unwrap_err();
+        assert_eq!(bad.key, "error.session.refused");
+
+        child.messages[1].tools.as_mut().unwrap()[0].output = Some("New diagnostic from the saved version".into());
+        store.save_checked(&child).unwrap();
+        assert_eq!(read(&lead, "child").await.unwrap()["tools"][0]["diagnostic"], "New diagnostic from the saved version");
+        child.project_id = Some("q".into());
+        store.save_checked(&child).unwrap();
+        assert_eq!(read(&lead, "child").await.unwrap_err().key, "error.session.refused");
+    }
+
+    #[tokio::test]
+    async fn conversation_tail_reads_new_disk_versions_without_loading_them() {
+        use faber_engine::model::{Message, Role};
+        let (host, dir) = host().await;
+        let store = faber_engine::store::Store::new(&dir.path().join("data"));
+        let mut saved: Conversation = serde_json::from_value(json!({
+            "id":"saved", "title":"Saved", "area":"chat", "createdAt":1, "updatedAt":3,
+            "messages":[
+                {"id":"one", "role":"user", "text":"First", "at":1},
+                {"id":"two", "role":"assistant", "text":"Answer", "at":2, "status":"done", "wrapUp":{"recap":"Done","done":true}},
+                {"id":"three", "role":"user", "text":"Question", "at":3}
+            ]
+        }))
+        .unwrap();
+        store.save_checked(&saved).unwrap();
+        let caller = Caller::Person;
+        let summary = host.dispatch_as(&caller, "conversation", json!({"id":"saved","last":0})).await.unwrap();
+        assert_eq!(summary["count"], 3);
+        assert_eq!(summary["messages"], json!([]));
+        assert_eq!(summary["conclusion"]["recap"], "Done");
+
+        saved.messages.push(Message::new("four".into(), Role::Assistant, "Added on disk".into(), 4));
+        store.save_checked(&saved).unwrap();
+        let newest = host.dispatch_as(&caller, "conversation", json!({"id":"saved","last":1})).await.unwrap();
+        assert_eq!(newest["count"], 4);
+        assert_eq!(newest["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(newest["messages"][0]["text"], "Added on disk");
+        assert!(newest.get("first").is_none());
+
+        saved.messages[3].text = "Updated again".into();
+        store.save_checked(&saved).unwrap();
+        let full = host.dispatch_as(&caller, "conversation", json!({"id":"saved","last":20})).await.unwrap();
+        assert_eq!(full["messages"].as_array().unwrap().len(), 4);
+        assert_eq!(full["messages"][3]["text"], "Updated again");
+    }
+
+    #[tokio::test]
+    async fn conversation_read_selects_message_numbers_without_changing_its_total_state() {
+        let (host, dir) = host().await;
+        let store = faber_engine::store::Store::new(&dir.path().join("data"));
+        let mut saved: Conversation = serde_json::from_value(json!({
+            "id":"saved", "title":"Work", "area":"project", "createdAt":1, "updatedAt":4,
+            "archivedAt":5,
+            "messages":[
+                {"id":"one", "role":"user", "text":"First request", "at":1},
+                {"id":"two", "role":"assistant", "text":"First reply", "at":2, "status":"done",
+                    "wrapUp":{"recap":"First conclusion","done":true},
+                    "tools":[
+                        {"id":"exit","name":"PowerShell","input":{"private":"argument"},"ok":false,"exitCode":7,"output":"raw command output"},
+                        {"id":"refusal","name":"Shell","input":null,"ok":false,"declined":true},
+                        {"id":"lost","name":"webSearch","input":null,"interrupted":true},
+                        {"id":"legacy","name":"Read","input":null,"ok":true}
+                    ]},
+                {"id":"three", "role":"user", "text":"Second request", "at":3},
+                {"id":"four", "role":"assistant", "text":"Interrupted", "at":4, "status":"streaming"}
+            ]
+        }))
+        .unwrap();
+        store.save_checked(&saved).unwrap();
+        let caller = Caller::Agent { conversation: Some("saved".into()) };
+        let page = host.dispatch_as(&caller, "conversation", json!({"id":"saved","from":2})).await.unwrap();
+        assert_eq!(page["count"], 4);
+        assert_eq!(page["first"], 2);
+        assert_eq!(page["state"], "interrupted");
+        assert_eq!(page["interruptedTurn"], "four");
+        assert_eq!(page["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(page["messages"][0]["id"], "two");
+        assert_eq!(
+            page["messages"][0]["tools"],
+            json!([
+                {"name":"PowerShell","ok":false,"exitCode":7},
+                {"name":"Shell","ok":false,"declined":true},
+                {"name":"webSearch","interrupted":true},
+                {"name":"Read","ok":true}
+            ])
+        );
+        assert_eq!(page["conclusion"]["recap"], "First conclusion");
+
+        saved.messages[1].text = "Updated on disk".into();
+        store.save_checked(&saved).unwrap();
+        let updated = host.dispatch_as(&caller, "conversation", json!({"id":"saved","from":2})).await.unwrap();
+        assert_eq!(updated["messages"][0]["text"], "Updated on disk", "a numbered read does not keep a closed conversation resident");
+
+        for args in [json!({"from":0}), json!({"limit":2}), json!({"from":1,"last":1}), json!({"from":1,"limit":11})] {
+            let mut args = args;
+            args["id"] = json!("saved");
+            assert_eq!(host.dispatch_as(&caller, "conversation", args).await.unwrap_err().key, "error.host.badArgs");
+        }
+        let beyond = host.dispatch_as(&caller, "conversation", json!({"id":"saved","from":7})).await.unwrap();
+        assert_eq!(beyond["count"], 4);
+        assert!(beyond.get("first").is_none());
+        assert_eq!(beyond["messages"], json!([]));
+        let tail = host.dispatch_as(&caller, "conversation", json!({"id":"saved","last":1})).await.unwrap();
+        assert!(tail.get("first").is_none());
+        assert_eq!(tail["count"], 4);
+        assert_eq!(tail["messages"][0]["id"], "four");
+        let hot = host.dispatch_as(&caller, "conversation", json!({"id":"saved","from":2})).await.unwrap();
+        assert_eq!(updated, hot);
     }
 
     #[tokio::test]

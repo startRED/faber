@@ -2,6 +2,7 @@
 //! recorded outputs that follow it are sent back. The same rule as the engine's own tests (`engine/tests/support`).
 
 use serde_json::Value;
+use std::collections::HashMap;
 use std::io;
 use std::path::Path;
 
@@ -79,11 +80,13 @@ pub struct Replay {
     entries: Vec<Entry>,
     at: usize,
     pub mismatches: Vec<String>,
+    /// (thread, recorded steer tag) to the tag the app sent: a CLI echoes the live tag, not the recorded one.
+    steering_tags: HashMap<(String, String), String>,
 }
 
 impl Replay {
     pub fn new(entries: Vec<Entry>) -> Replay {
-        Replay { entries, at: 0, mismatches: Vec::new() }
+        Replay { entries, at: 0, mismatches: Vec::new(), steering_tags: HashMap::new() }
     }
 
     /// One line the app wrote. Returns the lines to send back: the recorded outputs up to the next recorded input.
@@ -114,6 +117,14 @@ impl Replay {
                 .is_some_and(|report| report.contains(text))
         });
         if sent == expected && report_matches {
+            let (recorded, live) = (&self.entries[self.at].msg["params"], &msg["params"]);
+            if msg["method"] == "turn/steer"
+                && recorded["threadId"] == live["threadId"]
+                && let Some(thread) = recorded["threadId"].as_str()
+                && let Some((recorded, live)) = recorded["clientUserMessageId"].as_str().zip(live["clientUserMessageId"].as_str())
+            {
+                self.steering_tags.insert((thread.to_string(), recorded.to_string()), live.to_string());
+            }
             self.at += 1;
         } else if !report_matches {
             self.mismatches.push("helper report did not contain the recorded text".into());
@@ -122,7 +133,15 @@ impl Replay {
         }
         let mut out = Vec::new();
         while let Some(entry) = self.entries.get(self.at).filter(|e| !e.input) {
-            out.push(entry.msg.to_string());
+            let mut msg = entry.msg.clone();
+            let params = &msg["params"];
+            if params["item"]["type"] == "userMessage"
+                && let Some(key) = params["threadId"].as_str().zip(params["item"]["clientId"].as_str())
+                && let Some(live) = self.steering_tags.get(&(key.0.to_string(), key.1.to_string()))
+            {
+                msg["params"]["item"]["clientId"] = live.as_str().into();
+            }
+            out.push(msg.to_string());
             self.at += 1;
         }
         Ok(out)
@@ -136,6 +155,17 @@ mod tests {
 
     fn entry(input: bool, msg: Value) -> Entry {
         Entry { input, msg }
+    }
+
+    #[test]
+    fn a_steered_message_echoes_the_tag_the_app_sent() {
+        let steer = |tag: &str| json!({"id":4,"method":"turn/steer","params":{"threadId":"t","clientUserMessageId":tag,"input":[]}});
+        let echo = json!({"method":"item/started","params":{"threadId":"t","item":{"type":"userMessage","clientId":"faber-told-1"}}});
+        let mut replay = Replay::new(vec![entry(true, steer("faber-told-1")), entry(false, echo)]);
+        let out = replay.feed(&steer("live-id").to_string()).unwrap();
+        let sent: Value = serde_json::from_str(&out[0]).unwrap();
+        assert_eq!(sent["params"]["item"]["clientId"], "live-id");
+        assert!(replay.mismatches.is_empty());
     }
 
     #[test]

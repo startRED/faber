@@ -331,7 +331,8 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
             }
             ("subscribe", Some(_)) => {
                 if events.is_none() {
-                    events = Some(tokio::spawn(forward(backend.subscribe(), tx.clone(), secret.clone(), token.clone())));
+                    let state_only = args["stateOnly"].as_bool().unwrap_or(false);
+                    events = Some(tokio::spawn(forward(backend.subscribe(), tx.clone(), secret.clone(), token.clone(), state_only)));
                 }
                 let _ = tx.send(answer(Ok(Value::Bool(true)))).await;
             }
@@ -390,8 +391,14 @@ pub async fn connection_at<S: AsyncRead + AsyncWrite + Send + 'static>(
     }
 }
 
-/// Sends every event to one client. A client too slow to keep up is told how many it missed, so it reads the state again.
-async fn forward(mut events: broadcast::Receiver<Value>, tx: mpsc::Sender<String>, secret: Arc<Secret>, token: Option<String>) {
+/// Sends events or just state notices to one client, and tells a slow client when it missed events.
+async fn forward(
+    mut events: broadcast::Receiver<Value>,
+    tx: mpsc::Sender<String>,
+    secret: Arc<Secret>,
+    token: Option<String>,
+    state_only: bool,
+) {
     let mut changes = secret.changes();
     loop {
         if token.as_deref().is_some_and(|value| secret.conversation_of(value).is_none()) {
@@ -402,6 +409,12 @@ async fn forward(mut events: broadcast::Receiver<Value>, tx: mpsc::Sender<String
             result = changes.changed() => { if result.is_err() { break; } continue; }
         };
         let line = match received {
+            Ok(event) if state_only => {
+                if !wire::state_event(&event) {
+                    continue;
+                }
+                wire::event(&json!({"type": event["type"]}))
+            }
             Ok(event) => wire::event(&event),
             Err(broadcast::error::RecvError::Lagged(skipped)) => wire::event(&json!({ "type": "lagged", "skipped": skipped })),
             Err(broadcast::error::RecvError::Closed) => return,

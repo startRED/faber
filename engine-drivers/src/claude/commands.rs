@@ -24,7 +24,7 @@ impl Commands {
             Some("assistant") => {
                 for call in msg["message"]["content"].as_array().into_iter().flatten() {
                     if call["type"] == "tool_use"
-                        && call["name"] == "Bash"
+                        && matches!(call["name"].as_str(), Some("Bash" | "PowerShell"))
                         && let Some((id, command)) = call["id"].as_str().zip(call["input"]["command"].as_str())
                     {
                         if self.calls.len() == MAX_COMMANDS {

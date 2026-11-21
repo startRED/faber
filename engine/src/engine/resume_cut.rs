@@ -29,7 +29,8 @@ impl Engine {
                     .len()
                     .checked_sub(2)
                     .and_then(|i| conv.messages.get(i))
-                    .is_some_and(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.resumed"));
+                    .is_some_and(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.resumed"))
+                    || wait::cut_while_resuming_wait(conv);
                 conv.ended = Some(Ended { at: now(), kind: EndKind::Interrupted, work_ms: 0, line: ended::conclusion_line(conv) });
                 c.save(&row.id);
                 c.turn_ended(&row.id);
@@ -71,7 +72,9 @@ impl Engine {
                     if times.len() >= closed::CONTINUES {
                         continue;
                     }
-                    let sent = c.send_by_itself(&id, closed::CONTINUE.into(), Wake::of("wake.resumed")).is_ok();
+                    let sent = c
+                        .resume_queued_wait(&id)
+                        .unwrap_or_else(|| c.send_by_itself(&id, closed::CONTINUE.into(), Wake::of("wake.resumed")).is_ok());
                     if sent {
                         c.closed_continues.entry(id.clone()).or_default().push(at);
                     }

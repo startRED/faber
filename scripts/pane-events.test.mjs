@@ -47,6 +47,29 @@ registerHooks({ resolve(specifier, context, next) {
 } });
 const { Pane } = await import('../electron/pane.ts');
 
+test('the blank document starts before opening the DevTools session', async () => {
+  let finish;
+  const answer = new Promise((resolve) => { finish = resolve; });
+  const window = { isDestroyed: () => false, contentView: {
+    addChildView(view) {
+      const contents = view.webContents;
+      let ready = false;
+      contents.loadURL = async (url) => {
+        assert.equal(url, 'about:blank');
+        ready = true;
+      };
+      contents.debugger.sendCommand = async () => {
+        assert.ok(ready, 'DevTools needs the first document');
+      };
+    },
+    removeChildView() {},
+  } };
+  const pane = new Pane({ window: () => window, note: (note) => { if (note.id === 1) finish(note); } });
+  pane.order({ kind: 'pane', op: 'open', view: 'main', profile: 'test', id: 1 });
+  assert.deepEqual(await answer, { kind: 'paneAnswer', id: 1, ok: null });
+  pane.closeAll();
+});
+
 test('overlapping and cancelled navigations finish only when loading stops', async () => {
   const notes = [];
   let view;

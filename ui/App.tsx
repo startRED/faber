@@ -273,6 +273,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // The control that opened the account cards, by its `data-restore`: the shell is drawn again when they close, so focus
   // goes to the new copy of that control.
   let opener: string | undefined;
+  const focusWaitDraft = () => document.querySelector<HTMLTextAreaElement>('.dock .composer textarea')?.focus();
   const openSetup = () => {
     const from = document.activeElement;
     opener = from instanceof HTMLElement ? from.closest<HTMLElement>('[data-restore]')?.dataset.restore : undefined;
@@ -285,7 +286,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         const key = opener;
         if (open || !key) return;
         opener = undefined;
-        setTimeout(() => document.querySelector<HTMLElement>(`[data-restore="${key}"]`)?.focus());
+        setTimeout(() => {
+          const control = document.querySelector<HTMLElement>(`[data-restore="${CSS.escape(key)}"]`);
+          if (control) control.focus();
+          else if (key === 'wait-recovery' || key.startsWith('queue-action:')) focusWaitDraft();
+        });
       },
       { defer: true },
     ),
@@ -1646,6 +1651,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const needsProject = () => area() === 'project' && !project() && state().vendors.length > 0;
   // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
   const newChat = () => !groupPage() && (area() === 'chat' || !!project()) && state().vendors.length > 0 && !current()?.messages.length && !current()?.rewindNotice;
+  const showDock = () => !newChat() && !needsProject() && state().vendors.length > 0;
   // A new conversation the user is in, not a remembered one that is still on its way: the tutorial would open over it and
   // vanish when its messages arrive.
   const startsFresh = () => newChat() && !loading() && !place().id;
@@ -2232,6 +2238,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                 {(c) => (
                                   <Thread
                                     temporary={current()?.temporary}
+                                    archived={archived()}
                                     conversations={linkedConversations()}
                                     running={items()}
                                     onOpenChild={openSummary}
@@ -2244,6 +2251,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                     onRewind={() => go(place())}
                                     conversationNames={Object.fromEntries(state().conversations.map((conversation) => [conversation.id, conversation.title]))}
                                     queued={c().queued}
+                                    noConnectedAccounts={state().vendors.length === 0}
                                     busy={checking()}
                                     onError={fail}
                                     area={current()!.area}
@@ -2254,6 +2262,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                     searchIndex={searchIndex()}
                                     conversationId={c().id}
                                     waitingOn={state().conversations.find((conversation) => conversation.id === c().id)?.waitingOn}
+                                    onOpenWaitAccounts={openSetup}
+                                    onWriteWaitMessage={showDock() ? focusWaitDraft : undefined}
                                     options={options()}
                                     choice={picked()}
                                     onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
@@ -2321,7 +2331,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                           setUntil(undefined);
                         }} />
                       </Show>
-                      <Show when={!newChat() && !needsProject() && state().vendors.length > 0}>
+                      <Show when={showDock()}>
                         <div class="dock" inert={trapped()} onInput={() => setQueuedNotice(undefined)}>
                           <Show when={queuedNotice() && queuedNotice() === current()?.id}>
                             <p class="note" role="status">{t('queue.editRecovered')}</p>

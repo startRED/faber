@@ -35,6 +35,7 @@ pub mod thread_order;
 pub mod thread_scroll;
 pub mod ux_audit;
 pub mod visual_network;
+pub mod wait_restart;
 
 use crate::app::{Ctx, Paths};
 use crate::page::{Page, css};
@@ -70,6 +71,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(first_run::scenarios())
         .chain(homes::scenarios())
         .chain(killed::scenarios())
+        .chain(wait_restart::scenarios())
         .chain(menus::scenarios())
         .chain(mcp_servers::scenarios())
         .chain(chat_groups::scenarios())
@@ -152,6 +154,7 @@ pub const SOLO: &[(&str, &str)] = &[
     (control_walk::WINDOW, "native window maximize, restore and close state"),
     ("reading: a real restart preserves an old reading point within the memory budget", "processor, memory"),
     (reading::PROJECT_NAME, "processor, memory"),
+    (wait_restart::NAME, "native wait restart samples process-tree memory"),
     ("chat groups: ten knowledge files survive reopening within the memory budget", "processor, memory"),
     ("draft attachments: committed bytes survive a real restart, removals stay gone, within the memory budget", "processor, memory"),
     ("draft attachments: refused disk save preserves words and bytes, retry sends once within the memory budget", "processor, memory"),

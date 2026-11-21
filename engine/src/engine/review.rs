@@ -1,40 +1,88 @@
 use super::*;
 use crate::review::{self, Next, Reason, Role, Verdict};
 
-/// The changes a reviewer reads inline, at most this many bytes in all and per file; the rest it reads in the folder.
+/// The inline excerpt, the body of each patch, and the space reserved for omitted paths.
 const DIFF_BYTES: usize = 40_000;
 const FILE_BYTES: usize = 12_000;
+const PATH_BYTES: usize = 2_000;
 /// The person's request as a reviewer reads it.
 const REQUEST_CHARS: usize = 4_000;
 
-/// The real changes of the copy against its base, read with git off the engine lock: each file's patch, cut to a bound, then
-/// the names of the files that did not fit. None when the conversation has no copy to compare.
-fn diff_of(run: GitRunner, copy: &crate::project::copy::WorkCopy) -> Option<String> {
+/// The real changes of the copy against its base, read with git off the engine lock.
+fn diff_of(run: GitRunner, copy: &crate::project::copy::WorkCopy, requested: &[String]) -> Option<String> {
     let mut exec = run()?;
-    let files = crate::changes::list(&mut *exec, copy);
-    if files.is_empty() {
+    let page = crate::changes::list_page(&mut *exec, copy, None);
+    if page.files.is_empty() && !page.incomplete {
         return None;
     }
+    Some(review_excerpt(page.files, page.incomplete, requested, |path| crate::changes::patch(&mut *exec, copy, path)))
+}
+
+fn review_excerpt(
+    mut files: Vec<crate::changes::FileChange>,
+    incomplete: bool,
+    requested: &[String],
+    mut read_patch: impl FnMut(&str) -> crate::changes::ChangePatch,
+) -> String {
+    const CUT: &str = "\n[cut: read the rest in the folder]";
+    let mut unverified: HashSet<&str> = requested.iter().map(String::as_str).collect();
+    // Requested paths affect order only. The change scan decides which paths can be read.
+    files.sort_by_key(|file| !unverified.contains(file.path.as_str()));
     let mut text = String::new();
     let mut left = vec![];
     for file in files {
-        if text.len() >= DIFF_BYTES || file.binary || file.too_large {
+        unverified.remove(file.path.as_str());
+        let header = format!("--- {}\n", file.path);
+        let room = (DIFF_BYTES - PATH_BYTES).saturating_sub(text.len() + header.len() + 1);
+        if room <= CUT.len() || file.binary || file.too_large {
             left.push(file.path);
             continue;
         }
-        let patch = crate::changes::patch(&mut *exec, copy, &file.path);
+        let patch = read_patch(&file.path);
         if patch.error.is_some() || patch.binary || patch.too_large {
             left.push(file.path);
             continue;
         }
-        let cut: String = patch.text.chars().take(FILE_BYTES.min(DIFF_BYTES - text.len().min(DIFF_BYTES))).collect();
-        let whole = cut.len() == patch.text.len();
-        text.push_str(&format!("--- {}\n{cut}{}\n", file.path, if whole { "" } else { "\n[cut: read the rest in the folder]" }));
+        text.push_str(&header);
+        if patch.text.len() <= room.min(FILE_BYTES) {
+            text.push_str(&patch.text);
+        } else {
+            let end = patch.text.floor_char_boundary(FILE_BYTES.min(room - CUT.len()));
+            text.push_str(&patch.text[..end]);
+            text.push_str(CUT);
+        }
+        text.push('\n');
     }
-    if !left.is_empty() {
-        text.push_str(&format!("Also changed, read in the folder: {}\n", left.join(", ")));
+    if incomplete {
+        text.push_str("The change scan was incomplete. Check the change list in the folder.\n");
+        let limit = if left.is_empty() { DIFF_BYTES } else { DIFF_BYTES - PATH_BYTES / 2 };
+        let missing = requested.iter().map(String::as_str).filter(|path| unverified.remove(path));
+        append_review_paths(&mut text, "Author-reported paths to check:", missing, limit);
     }
-    Some(text)
+    append_review_paths(&mut text, "Also changed, read in the folder:", left.iter().map(String::as_str), DIFF_BYTES);
+    text
+}
+
+fn append_review_paths<'a>(text: &mut String, label: &str, paths: impl Iterator<Item = &'a str>, limit: usize) {
+    const MORE: &str = "\nMore paths omitted. Check the change list in the folder.";
+    for (index, path) in paths.enumerate() {
+        let separator = if index == 0 {
+            text.push_str(label);
+            " "
+        } else {
+            ", "
+        };
+        if text.len() + separator.len() + path.len() + MORE.len() + 1 > limit {
+            text.push_str(MORE);
+            text.push('\n');
+            return;
+        }
+        text.push_str(separator);
+        text.push_str(path);
+    }
+    if text.as_bytes().last().is_some_and(|b| *b != b'\n') {
+        text.push('\n');
+    }
 }
 
 pub(super) struct Run {
@@ -110,10 +158,9 @@ impl Core {
             session.helper_reply(&call, false, "error.review.files".into());
             return;
         }
-        let note = format!(
-            "Compare with the copy base. Changed paths:\n{}",
-            files.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("\n")
-        );
+        let requested: Vec<String> = files.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+        let mut note = "Compare with the copy base.\n".to_string();
+        append_review_paths(&mut note, "Author-reported paths to check:", requested.iter().map(String::as_str), DIFF_BYTES);
         let c = &self.convs[conv];
         // The person's words, not the writer's account: the writer's text goes in as a claim to check (task A3).
         let asked: String = crate::proof::asked(c).chars().take(REQUEST_CHARS).collect();
@@ -151,7 +198,7 @@ impl Core {
         };
         let (me, conv) = (self.me.clone(), conv.to_string());
         self.opts.runtime.spawn_blocking(move || {
-            let diff = diff_of(run, &copy).unwrap_or(note);
+            let diff = diff_of(run, &copy, &requested).unwrap_or(note);
             let Some(core) = me.upgrade() else { return };
             let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
             core.start_reviewers(&conv, call, jobs, &asked, &claim, &diff);
@@ -216,6 +263,7 @@ impl Core {
                         id: id.clone(),
                         ok: false,
                         declined: false,
+                        exit_code: None,
                         text: if quota { "error.review.quota" } else { "error.review.failed" }.into(),
                     },
                 );
@@ -303,6 +351,63 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn changed(path: &str) -> crate::changes::FileChange {
+        crate::changes::FileChange {
+            path: path.into(),
+            added: 1,
+            removed: 0,
+            binary: false,
+            counts_known: true,
+            too_large: false,
+            status: "modified".into(),
+        }
+    }
+
+    #[test]
+    fn reviewers_read_requested_changes_first_and_still_see_the_other_paths() {
+        let files = ["a", "b", "c", "d", "z"].map(changed).to_vec();
+        let mut reads = vec![];
+        let excerpt = review_excerpt(files, false, &["z".into(), "unlisted".into()], |path| {
+            reads.push(path.to_string());
+            crate::changes::ChangePatch { text: path.repeat(FILE_BYTES), ..Default::default() }
+        });
+        assert_eq!(reads.first().map(String::as_str), Some("z"));
+        assert!(!reads.iter().any(|path| path == "unlisted"));
+        assert!(!excerpt.contains("unlisted"));
+        assert!(excerpt.contains("Also changed, read in the folder: d"));
+    }
+
+    #[test]
+    fn an_incomplete_change_scan_retains_unverified_requested_paths_without_reading_them() {
+        let paths = ["z".into(), "z".into(), "a".into()];
+        let excerpt = review_excerpt(vec![], true, &paths, |_| panic!("no canonical file was found"));
+        assert!(excerpt.contains("The change scan was incomplete"));
+        assert!(excerpt.contains("Author-reported paths to check: z, a\n"));
+        let excerpt = review_excerpt(vec![changed("a")], true, &paths, |path| {
+            assert_eq!(path, "a");
+            crate::changes::ChangePatch { text: "real patch".into(), ..Default::default() }
+        });
+        assert!(excerpt.contains("--- a\nreal patch"));
+        assert!(excerpt.contains("Author-reported paths to check: z\n"));
+    }
+
+    #[test]
+    fn review_excerpt_counts_utf8_bytes_and_leaves_room_for_the_omission_notice() {
+        let first = "a".repeat(100);
+        let mut files = vec![changed(&first), changed("b"), changed("c"), changed("d")];
+        files.extend((0..100).map(|i| changed(&format!("{i}-{}", "e".repeat(100)))));
+        let excerpt =
+            review_excerpt(files, true, &[], |_| crate::changes::ChangePatch { text: "🙂界".repeat(FILE_BYTES), ..Default::default() });
+        assert!(excerpt.len() <= DIFF_BYTES);
+        let body = excerpt.split('\n').nth(1).unwrap();
+        assert!(body.len() <= FILE_BYTES);
+        assert!(body.len() >= FILE_BYTES - 3);
+        assert!(excerpt.contains("[cut: read the rest in the folder]"));
+        assert!(excerpt.contains("Also changed, read in the folder:"));
+        assert!(excerpt.contains("More paths omitted"));
+        assert!(excerpt.contains("The change scan was incomplete"));
+    }
 
     #[test]
     fn the_ai_that_did_not_write_reviews_first_and_a_fresh_skeptic_of_the_writers_ai_second() {

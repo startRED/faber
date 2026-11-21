@@ -153,7 +153,8 @@ window.__faberMojibake = mojibake;
 export async function runChecksOnBoot(): Promise<void> {
   try {
     await ignoreSystemMotion();
-    report(await runAll(progress, window.__faberChecksFilter, undefined, await shellGaps()));
+    const filter = new URLSearchParams(location.search).get('filter') ?? window.__faberChecksFilter;
+    report(await runAll(progress, filter, undefined, await shellGaps()));
   } catch (error: unknown) {
     crash(String(error));
   }

@@ -82,7 +82,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             assert_ne!(follow.head.as_deref(), Some("synthetic-before-read"));
             assert_eq!(
                 c.waiting_on.as_ref().and_then(|w| w.problem.as_deref()),
-                Some("reason.budget.other"),
+                Some("error.noSubscription"),
                 "the real merge requests a return through normal admission"
             );
             assert!(c.queued.is_empty());

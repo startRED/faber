@@ -180,7 +180,9 @@ impl TestRoot {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let owner = tempfile::tempdir().unwrap();
-        let (data, work) = (owner.path().join("data"), owner.path().join("work"));
+        // A runner's temporary folder can be spelled with 8.3 short names; the engine compares resolved long paths.
+        let base = crate::permissions::working_root(owner.path()).unwrap_or_else(|| owner.path().to_path_buf());
+        let (data, work) = (base.join("data"), base.join("work"));
         std::fs::create_dir(&data).unwrap();
         Self { _owner: owner, data, work }
     }

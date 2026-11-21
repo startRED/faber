@@ -81,6 +81,8 @@ mod tests {
             input,
             ok,
             output: None,
+            failure_tail: None,
+            exit_code: None,
             declined: false,
             interrupted: false,
             parent: parent.map(String::from),
