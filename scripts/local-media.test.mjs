@@ -30,13 +30,3 @@ test('the Electron screen only adds its own media origin to image and media rule
   assert.match(policy, /frame-src \$\{VISUAL_ORIGIN\}/);
   assert.doesNotMatch(policy, /https?:|connect-src/);
 });
-
-test('both shells return web grants through their existing scoped media origin', () => {
-  const host = source('host/src/table.rs');
-  assert.match(host, /Read Screen fn media_grant_web\(h, id: String, url: String\)/);
-  assert.match(host, /engine\.media_read_route\(/);
-  assert.match(source('electron/main.ts'), /\['media_grant', 'media_grant_web'\]\.includes\(command\)/);
-  assert.match(source('src-tauri/src/main.rs'), /matches!\(command\.as_str\(\), "media_grant" \| "media_grant_web"\)/);
-  assert.match(source('src-tauri/src/media.rs'), /engine\.media_read_route\(/);
-  assert.match(source('docs/product-map.md'), /\x60media_grant_web\x60/);
-});

@@ -35,9 +35,8 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
   non-frame destinations are refused, and exact single-use URLs, no CORS grant and the sandbox protect the bytes. Closing invalidates the pane's lease (late preparations are refused),
   drops its reference, sets src to about:blank and removes the frame, including its scripts. Every version keeps the
   opaque sandbox and its own response-header CSP, including the fixed visual loader's hash. The screen's resource CSP
-  admits the visual origin only in frame-src, and the media origin only in img-src and
-  media-src. The screen blocks external reply resources. With Live web access, the host may fetch reply pictures,
-  audio and video through the scoped media origin. Live visual pages allow public HTTPS resources.
+  admits the visual origin only in frame-src, and the local media origin only in img-src and
+  media-src. The screen blocks external reply images, CSS, fonts and media in both web settings. Live visual pages allow public HTTPS resources.
   Their CSP blocks HTTP and Faber's asset, IPC and visual origins; the native filters block private HTTPS destinations.
   Wry may overwrite a later WebView2 denial for its own custom protocols, so asset/IPC isolation relies on CSP and the
   opaque sandbox, never that handler's 403. Child navigation cannot leave the visual origin or exact about:blank.
@@ -94,29 +93,6 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
   `error.media.gone` (missing, unsafe or wrong bytes), or `error.media.limit` (capacity reached). Protocol
   refusals include the key in X-Faber-Media-Error. An element error can re-request the grant to detect a missing
   replacement. A malformed or unsatisfiable range returns 416 and `error.media.range`.
-
-## Web media in a conversation
-
-- `media_grant_web({ id, url })` uses the visible conversation's existing lease. Direct web pictures, video and
-  audio load automatically in Live mode. Off and Cached refuse before DNS or any request. Cached uses only saved
-  search results. Release or leave invalidates the grant, and each new request reads the current setting.
-- The host fetches HTTPS and compares the canonical host against Privacy's blocked sites, including subdomains,
-  before resolving and before connecting. Every address in the DNS answer must be public. The connection uses
-  that checked answer with no DNS fallback. HTTPS certificates are validated against system trust roots without
-  fetching certificate-supplied URLs. Each redirect repeats the
-  check. Requests carry a fixed user agent and the needed byte range, with no proxy, cookies, credentials or
-  referrer. A hostile reply can encode conversation data in its media address, a risk the owner accepted.
-- The host follows up to three redirects, with five seconds to connect and fifteen seconds per operation including
-  queue time, DNS, redirects and reads. Two fetches run at once and up to 62 wait for their turn. The host requires a known length and checks the first
-  4 KiB for the same byte signatures as local media. Pictures are limited to 8 MiB, audio and video to 128 MiB.
-  A video or audio response serves up to 1 MiB per range. Servers must support ranges for larger audio and video.
-  The scoped response has a fixed media type, no sniffing and no caching. SVG is served whole as an image under
-  the existing sandbox. Only the address and token are kept for later requests.
-- Refusals distinguish `error.media.webOff`, `error.media.webCached`, `error.media.webBlocked`,
-  `error.media.webHttps`, `error.media.webPrivate`, `error.media.webSize`, `error.media.webKind` and
-  `error.media.webUnreachable`. Scope, capacity and malformed range still use the local media keys.
-- A video on a web page uses the built-in browser beside the conversation. Only the video card and one reply-link
-  menu action offer this exception to opening links in the person's browser. These page links use the pane flow.
 
 ## Files written by the agent
 

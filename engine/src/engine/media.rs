@@ -9,7 +9,6 @@ use uuid::Uuid;
 
 #[cfg(test)]
 mod tests;
-mod web;
 
 const CHUNK: u64 = 1024 * 1024;
 const IMAGE_LIMIT: u64 = 8 * CHUNK;
@@ -45,13 +44,7 @@ struct View {
     id: String,
     lease: Uuid,
     root: Option<Folder>,
-    grants: HashMap<Uuid, Grant>,
-}
-
-#[derive(Clone)]
-enum Grant {
-    Local(Arc<str>),
-    Web(Arc<reqwest::Url>),
+    grants: HashMap<Uuid, Arc<str>>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -92,14 +85,12 @@ impl Media {
     }
 
     fn grant(&mut self, id: &str, path: &str) -> Result<Uuid, &'static str> {
-        self.insert(id, Grant::Local(Arc::from(path)))
-    }
-
-    fn insert(&mut self, id: &str, grant: Grant) -> Result<Uuid, &'static str> {
         let view = self.0.as_mut().filter(|view| view.id == id).ok_or(CLOSED)?;
-        view.room()?;
+        if view.grants.len() >= GRANTS {
+            return Err("error.media.limit");
+        }
         let token = Uuid::new_v4();
-        view.grants.insert(token, grant);
+        view.grants.insert(token, Arc::from(path));
         Ok(token)
     }
 
@@ -111,8 +102,7 @@ impl Media {
 
     fn source(&self, token: Uuid) -> Option<(Folder, Arc<str>)> {
         let view = self.0.as_ref()?;
-        let Grant::Local(path) = view.grants.get(&token)? else { return None };
-        Some((view.root.as_ref()?.clone(), path.clone()))
+        Some((view.root.as_ref()?.clone(), view.grants.get(&token)?.clone()))
     }
 }
 
@@ -189,66 +179,12 @@ impl Engine {
         })
     }
 
-    pub async fn media_grant_web(&self, id: &str, address: &str) -> Result<String, &'static str> {
-        let lease = self.with(|core| {
-            web::mode(core.store.settings().tuning().web)?;
-            let view = core.media.0.as_ref().filter(|view| view.id == id).ok_or(CLOSED)?;
-            view.room()?;
-            Ok::<_, &'static str>(view.lease)
-        })?;
-        if address.len() > PATH_LIMIT {
-            return Err("error.media.webUnreachable");
-        }
-        let url = reqwest::Url::parse(address).map_err(|_| "error.media.webHttps")?;
-        web::fetch(url.clone(), None, true, |target| self.web_policy(lease, None, target)).await.map_err(|error| error.key)?;
-        self.with(|core| {
-            core.media.0.as_ref().filter(|view| view.lease == lease).ok_or(CLOSED)?;
-            core.media.insert(id, Grant::Web(Arc::new(url))).map(|token| token.simple().to_string())
-        })
-    }
-
-    fn web_policy(&self, lease: Uuid, token: Option<Uuid>, url: &reqwest::Url) -> Result<(), &'static str> {
-        self.with(|core| {
-            let view = core.media.0.as_ref().filter(|view| view.lease == lease).ok_or(CLOSED)?;
-            if token.is_some_and(|token| !view.grants.contains_key(&token)) {
-                return Err(CLOSED);
-            }
-            let settings = core.store.settings();
-            web::policy(settings.tuning().web, settings.blocked_hosts.as_deref().unwrap_or_default(), url)
-        })
-    }
-
-    pub async fn media_read_route(&self, token: &str, range: Option<&str>) -> Result<MediaChunk, MediaError> {
-        let parsed = Uuid::parse_str(token).map_err(|_| CLOSED)?;
-        let (lease, grant) = self
-            .with(|core| {
-                let view = core.media.0.as_ref()?;
-                Some((view.lease, view.grants.get(&parsed)?.clone()))
-            })
-            .ok_or(CLOSED)?;
-        match grant {
-            Grant::Local(_) => {
-                let engine = self.clone();
-                let token = token.to_owned();
-                let range = range.map(str::to_owned);
-                tokio::task::spawn_blocking(move || engine.media_read(&token, range.as_deref())).await.map_err(|_| GONE)?
-            }
-            Grant::Web(url) => web::fetch((*url).clone(), range, false, |target| self.web_policy(lease, Some(parsed), target)).await,
-        }
-    }
-
-    fn media_read(&self, token: &str, range: Option<&str>) -> Result<MediaChunk, MediaError> {
+    pub fn media_read(&self, token: &str, range: Option<&str>) -> Result<MediaChunk, MediaError> {
         let token = Uuid::parse_str(token).map_err(|_| CLOSED)?;
         let (root, path) = self.with(|core| core.media.source(token)).ok_or(CLOSED)?;
         let result = root.open().ok_or(GONE.into()).and_then(|root| read(&root, &path, range));
         self.with(|core| core.media.source(token)).ok_or(CLOSED)?;
         result
-    }
-}
-
-impl View {
-    fn room(&self) -> Result<(), &'static str> {
-        if self.grants.len() >= GRANTS { Err("error.media.limit") } else { Ok(()) }
     }
 }
 

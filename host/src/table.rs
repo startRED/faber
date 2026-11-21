@@ -890,10 +890,6 @@ table! {
         let engine = h.engine.clone();
         off("error.media.gone", move || engine.media_grant(&id, &path).map_err(str::to_string)).await?
     }
-    /// A capability for public HTTPS media, using the visible conversation's existing lease.
-    Read Screen fn media_grant_web(h, id: String, url: String) -> String {
-        h.engine.media_grant_web(&id, &url).await.map_err(str::to_string)
-    }
     Read Screen fn media_clear(h) -> () {
         h.engine.media_clear();
         Ok(())
@@ -901,13 +897,13 @@ table! {
     /// Bounded bytes for the Electron protocol, kept out of the screen's invoke surface.
     Read Screen fn media_chunk(h, token: String, range: Option<String>) -> Value {
         let engine = h.engine.clone();
-        Ok(match engine.media_read_route(&token, range.as_deref()).await {
+        off("error.media.gone", move || match engine.media_read(&token, range.as_deref()) {
             Ok(chunk) => json!({
                 "type": chunk.kind, "body": base64::engine::general_purpose::STANDARD.encode(chunk.bytes),
                 "range": chunk.content_range,
             }),
             Err(error) => json!({"error": error.key, "length": error.length}),
-        })
+        }).await
     }
     /// A conversation's tabs in Faber's browser, kept in its file, so the pane opens the front one again.
     Read Own("/id") fn site_tabs(h, id: String) -> Option<faber_engine::browser::tabs::Tabs> {
@@ -925,7 +921,7 @@ table! {
         terminal::open(&cmd).map_err(|_| "error.terminal.open")?;
         Ok(true)
     }
-    /// Links in answers open in the user's browser. Video cards and the reply link's pane action use a separate command.
+    /// Links in answers open in the user's browser, never inside Faber.
     Write Ask fn open_link(h, url: String) -> () {
         if !(url.starts_with("https://") || url.starts_with("http://")) {
             return Err("error.link.web".into());

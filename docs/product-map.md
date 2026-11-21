@@ -414,7 +414,6 @@ The screen and `faber` [command line](product/cli.md) use the command list in ho
 | Quota | `set_clock`, `quota_attention`, `answer_plan`, `approve_credits`, `move_turn` and `wait_turn` manage quota and waiting turns. |
 | Files and links | `save_file`, `show_file`, `read_image`, `read_file_at`, `open_link`, `mentions`, `changes`, `change_patch` and `commands` handle files and links. |
 | Visual answers | `visual_document` supplies the visual-answer pane's document and security policy. |
-| Web media | `media_grant_web` scopes direct public HTTPS picture, video and audio URLs to the current conversation when web access is Live. The host honors Privacy's blocked sites and delivers bounded bytes on the existing media origin. |
 | Local media | `media_enter`, `media_grant`, `media_release`, and `media_leave` scope local picture, video and audio URLs to the visible conversation. The shell reads bounded ranges from the pinned working folder. |
 | Local media transport | `media_chunk` returns a bounded range to the Electron protocol handler and `media_clear` revokes the open media scope during shell cleanup. Both are internal shell calls refused by the screen bridge. |
 | Technical details | `start_card` reads the start card a conversation's session received. |

@@ -1163,7 +1163,6 @@ dependencies = [
  "junction",
  "pulldown-cmark",
  "reqwest",
- "rustls-native-certs",
  "serde",
  "serde_json",
  "sha2 0.11.1",

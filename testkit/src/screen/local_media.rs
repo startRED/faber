@@ -88,33 +88,6 @@ fn local_media(ctx: &mut Ctx) -> Result {
     "#,
     )?;
     same(errors, json!(["error.media.path", "error.media.path", "error.media.gone"]), "the screen receives typed file refusals")?;
-    let web_errors = app.page.eval(
-        r#"
-        (async () => {
-            const invoke = window.mediaInvoke;
-            const id = 'local-media';
-            const lease = await invoke('media_enter', { id });
-            const grant = (url) => invoke('media_grant_web', { id, url }).then(() => 'allowed', err => err.key ?? err);
-            try {
-                const errors = [];
-                for (const webSearch of ['off', 'cached', 'live']) {
-                    await invoke('save_settings', { patch: { webSearch, blockedHosts: ['blocked.invalid'] } });
-                    errors.push(await grant('https://127.0.0.1/picture'));
-                }
-                errors.push(await grant('http://127.0.0.1/picture'));
-                errors.push(await grant('https://cdn.blocked.invalid/picture'));
-                return errors;
-            } finally {
-                await invoke('media_leave', { lease });
-            }
-        })()
-        "#,
-    )?;
-    same(
-        web_errors,
-        json!(["error.media.webOff", "error.media.webCached", "error.media.webPrivate", "error.media.webHttps", "error.media.webBlocked"]),
-        "the visible screen receives typed web media refusals without contacting a site",
-    )?;
     let (cold, _) = ctx.memory_mb(app.id)?;
     // Compare repeated loads after Chromium has initialized its decoder and media buffers once.
     app.page.eval("window.mediaCheck()")?;
