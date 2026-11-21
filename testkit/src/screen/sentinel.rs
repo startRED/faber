@@ -21,7 +21,87 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "sentinel: the composer grows and shrinks, and the end of the thread stays clear", run: composer },
         Scenario { name: "sentinel: no text is garbled in five languages, and titles survive the engine's files", run: text },
         Scenario { name: "sentinel: the main screens keep their composition, at 1920x1080 and 1280x800", run: composition },
+        Scenario { name: "conversation redesign: reading", run: reading },
     ]
+}
+
+fn reading(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let id = "5f1c0000-0000-4000-8000-0000000000c3";
+    let title = "Reading scenario";
+    let folder = ctx.sb.data.join("conversations");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let messages = json!([
+        { "id": "r-1", "role": "user", "text": "Please review these files.", "attachments": ["notes.txt", "diagram.pdf"], "at": 0, "status": "done" },
+        { "id": "r-2", "role": "assistant", "text": "# Reading report\n\nA paragraph explaining the result clearly.\n\n- First item\n- Second item\n\n```js\nconst answer = 42;\n```\n\n| Item | Result |\n| --- | --- |\n| One | Ready |", "thinking": "Consider the request.", "tools": [ { "id": "one", "name": "Read", "input": { "file_path": "notes.txt" }, "ok": true }, { "id": "two", "name": "Read", "input": { "file_path": "diagram.pdf" }, "ok": true } ], "at": 0, "status": "done" }
+    ]);
+    let body = json!({ "id": id, "title": title, "area": "chat", "sessions": {}, "createdAt": 1, "updatedAt": 1, "messages": messages });
+    std::fs::write(folder.join(format!("{id}.json")), body.to_string()).map_err(|e| e.to_string())?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
+    app.page.eval(&format!("localStorage.setItem('faber.place', JSON.stringify({{area:'chat',id:{}}})); true", json!(id)))?;
+    let mut problems = Vec::new();
+    for look in ["sala", "manha"] {
+        for (width, height) in [(1920, 1080), (1600, 900), (1280, 800), (720, 800), (720, 520), (720, 480)] {
+            let config = Config { width, height, look, language: "en", size: 15, motion: "none" };
+            apply(&mut app.page, &config)?;
+            app.page.wait_visible(&css(".col > article.ai"))?;
+            app.page.fill(&css(".composer textarea"), "A draft ready to send")?;
+            app.page.eval("document.querySelector('.thread').scrollTop = 0; true")?;
+            ctx.shot(&mut app, &format!("conversation-redesign-reading-{look}-{width}x{height}"))?;
+            let result = app.page.eval(&format!(r#"(() => {{
+              const col = document.querySelector('.thread .col'), composer = document.querySelector('.dock .composer');
+              const thread = document.querySelector('.thread'), mine = document.querySelector('.mine'), text = mine?.querySelector('.you');
+              const a = col?.getBoundingClientRect(), b = composer?.getBoundingClientRect();
+              const send = composer?.querySelector('button.send[type=submit]'), s = send?.getBoundingClientRect();
+              const expected = {width} === 1280 ? 760 : ({width} >= 1600 ? 960 : null);
+              return {{ aligned: !!a && !!b && Math.abs(a.width-b.width)<2 && Math.abs((a.left+a.right)-(b.left+b.right))<2,
+                width: !expected || Math.abs(a.width-expected)<2, overflow: thread.scrollWidth <= thread.clientWidth + 1 && col.scrollWidth <= col.clientWidth + 1,
+                attachment: text?.firstElementChild?.matches('.thumbs') && text.firstElementChild.textContent.includes('notes.txt') && text.textContent.trimEnd().endsWith('Please review these files.'),
+                send: !!s && s.width > 0 && s.height > 0 && s.top >= 0 && s.bottom <= innerHeight && s.left >= 0 && s.right <= innerWidth }};
+            }})()"#))?;
+            for key in ["aligned", "width", "overflow", "attachment", "send"] {
+                if result[key] != json!(true) {
+                    problems.push(format!("{} {width}x{height}: {key}", look));
+                }
+            }
+            if height <= 520 {
+                let before = app.page.eval("document.querySelector('.thread').scrollTop")?;
+                app.page.press("Control+f")?;
+                app.page.wait_visible(&css(".find"))?;
+                ctx.shot(&mut app, &format!("conversation-redesign-search-{look}-{width}x{height}"))?;
+                let search = app.page.eval(
+                    r#"(() => {
+                    const thread = document.querySelector('.thread'), find = document.querySelector('.find');
+                    const messageTop = document.querySelector('.mine .you').getBoundingClientRect().top;
+                    const bar = find.getBoundingClientRect();
+                    return { messageTop, barBottom: bar.bottom, barTop: bar.top, threadTop: thread.getBoundingClientRect().top,
+                        padding: getComputedStyle(thread).paddingTop, scroll: thread.scrollTop, clear: messageTop >= bar.bottom };
+                })()"#,
+                )?;
+                if search["clear"] != json!(true) {
+                    problems
+                        .push(format!("{look} {width}x{height}: search covers the first message (scroll before {before}, after {search})"));
+                }
+                app.page.press("Escape")?;
+                app.page.eval("document.querySelector('.composer textarea').focus(); true")?;
+                let mut reached = false;
+                for _ in 0..12 {
+                    app.page.press("Tab")?;
+                    if app.page.eval("document.activeElement === document.querySelector('.composer button.send[type=submit]')")?
+                        == json!(true)
+                    {
+                        reached = true;
+                        break;
+                    }
+                }
+                if !reached {
+                    problems.push(format!("{look} {width}x{height}: tab to send"));
+                }
+            }
+        }
+    }
+    ensure(problems.is_empty(), || format!("reading checks failed: {}", problems.join(", ")))?;
+    ctx.close(app.id)
 }
 
 /// One cell of the smoke matrix. The full all-pairs set of the spec (section 4.2) is nine rows of width, look and
@@ -64,7 +144,9 @@ fn viewport(page: &mut Page, width: u32, height: u32) -> Result {
 /// the window is resized and the screen is loaded again.
 fn apply(page: &mut Page, c: &Config) -> Result {
     let patch = json!({ "language": c.language, "appearance": { "base": c.look, "textSize": c.size, "motion": c.motion } });
-    page.eval(&format!("window.__TAURI_INTERNALS__.invoke('save_settings', {{ patch: {patch} }}).then(() => true)"))?;
+    page.eval(&format!(
+        "(window.faberShell ?? window.__TAURI_INTERNALS__).invoke('save_settings', {{ patch: {patch} }}).then(() => true)"
+    ))?;
     viewport(page, c.width, c.height)?;
     page.reload()?;
     page.wait_for(

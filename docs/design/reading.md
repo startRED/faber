@@ -2,9 +2,14 @@
 
 How conversation text reads and keeps its place, in Chat and Projects.
 
-- The conversation reads in a column of 760 px (`--col-w`, shared by the thread and the message box) with a line height
-  of 1.68 (`--read-lh`) and 14 px between paragraphs, so a 720 px window still has about 640 px of text. A code block has
-  a bar with its language and a copy button for that block. Selecting words in an answer floats "Ask about this" over
+- The conversation and message box share a centered 760 px column, expanding to 960 px at window widths of 1600 px and up.
+  Stage gutters are 24 px, or 16 px at window widths up to 760 px. Prose uses `--fs-read` with 1.6 leading and a 680 px
+  cap, or `--fs-lead` and a 640 px cap at wide widths. Paragraph gaps are 12 px and list items are 8 px apart.
+  The first title uses `--fs-h3` with 8 px below it. Section headings use `--fs-lead` with 20 px above and 10 px below.
+  A table has horizontal rules and scrolls within a 680 px cap. Code has 12 px inset and a separate language and copy bar.
+  The transcript starts at 18 px and ends at 40 px. The 6 px leading and 22 px trailing fades are off while focus is in
+  the transcript, in forced colors and at heights of 820 px or less. At 540 px or less the header is 40 px, the transcript
+  starts at 8 px and the opening paragraph uses 1.5 leading. Selecting words in an answer floats "Ask about this" over
   them (menu motion), and it puts them in the message box as a quote. Scrolled up, a "Jump to latest" button floats at
   the foot of the thread and scrolls down smoothly.
 - A conversation initially loads its newest 40 messages and opens at the tail. Near the first drawn message, it

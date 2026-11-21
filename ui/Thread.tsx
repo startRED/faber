@@ -1022,9 +1022,11 @@ function Mine(props: {
           tabindex="0"
           onContextMenu={(e) => openMenu(e, [copyItem(props.m().text), { id: 'edit', label: t('mine.edit'), run: () => setEditing(props.m().text) }, ...(props.onRedo ? [{ id: 'rewind-redo', label: t(props.recovery ? 'rewind.recover' : 'rewind.redo'), run: props.onRedo }] : []), { id: 'rewind', label: t('rewind.title'), danger: true, run: props.onRewind }], e.currentTarget)}
         >
-          <Strip images={props.m().images} files={props.m().attachments} />
-          <Show when={props.m().text}>
-            <div class="you">{props.m().text}</div>
+          <Show when={props.m().text || props.m().images?.length || props.m().attachments?.length}>
+            <div class="you">
+              <Strip images={props.m().images} files={props.m().attachments} />
+              <Show when={props.m().text}><div class="sent-text">{props.m().text}</div></Show>
+            </div>
           </Show>
           <div class="bar mine-bar">
             <When at={props.m().at} />
@@ -1132,8 +1134,8 @@ function Queued(props: { conversationId: string; temporary?: boolean; q: QueuedT
   };
   return (
     <div class="mine queued">
-      <Strip images={props.q.images} files={props.q.attachments} />
       <div class="you queued" classList={{ editing: editing() !== undefined }}>
+        <Strip images={props.q.images} files={props.q.attachments} />
         <span class="queue-badge">{props.q.sending ? t('queue.handed') : t('queue.label')}</span>
         <Show
           when={editing() !== undefined}

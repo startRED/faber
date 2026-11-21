@@ -28,6 +28,8 @@ check('run: turns Faber sent by itself are one run, and a message of the person 
 
 check('run: one header with the time, the turns and the plan, the earlier turns folded, the answers in one card', async () => {
   const root = document.createElement('div');
+  root.className = 'col';
+  root.style.setProperty('--reading-type', 'var(--fs-lead)');
   document.body.append(root);
   const sent: string[] = [];
   const dispose = render(
@@ -47,6 +49,10 @@ check('run: one header with the time, the turns and the plan, the earlier turns 
     await settle();
     // Opened: the three earlier turns with something in them; the empty one is not drawn.
     equal(root.querySelectorAll('.run-earlier .ai').length, 3);
+    const earlier = getComputedStyle(root.querySelector('.run-earlier .ai')!);
+    const current = getComputedStyle(root.querySelector('.ai')!);
+    equal(earlier.fontSize, current.fontSize, 'expanded history has the same reading type as the current turn');
+    equal(earlier.rowGap, current.rowGap, 'expanded history has the same work-log spacing as the current turn');
     equal(root.querySelector('.run-earlier .answers'), null, 'an earlier turn leaves its answers to the run card');
     // Both questions Faber answered are rows of the newest reply's card, with the answer it chose.
     const card = root.querySelectorAll('.answers');
