@@ -1,14 +1,103 @@
 import { createComponent, createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { delegateEvents, render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { PERMISSION_MODES, type Choice, type Summary, type PermissionMode } from '../../ui/api.ts';
-import { Composer, type Draft, PermissionChip } from '../../ui/Composer.tsx';
+import { Composer, type Draft, PermissionChip, StopAsk } from '../../ui/Composer.tsx';
 import { readAs } from '../../ui/attachments.ts';
 import { Sidebar } from '../../ui/Sidebar.tsx';
 import titleWords from '../../ui/locales/conversation-titles.json';
 import { modelOptions } from '../../ui/models.ts';
 import { t, useLanguage } from '../../ui/i18n.ts';
 import { check, deepEqual, equal, frames, ok } from './check.ts';
+
+check('composer: the short attachment panel keeps the draft clear and returns keyboard focus', async () => {
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;top:0;left:0;width:720px;height:520px;border:0;z-index:100';
+  document.body.append(iframe);
+  let dispose = () => {};
+  try {
+    const page = iframe.contentDocument!;
+    ok(page?.body, 'the local frame has a document');
+    page.body.innerHTML = '<div class="work" style="position:fixed;inset:0"><div class="thread"><div class="col">Conversation</div></div><div class="dock"></div></div>';
+    delegateEvents(['click'], page);
+    const style = page.createElement('style');
+    style.textContent = [...document.styleSheets].flatMap(sheet => [...sheet.cssRules].map(rule => rule.cssText)).join('\n');
+    page.head.append(style);
+    page.documentElement.dataset.motion = 'none';
+    for (const [key, value] of Object.entries(themes.css.base)) page.documentElement.style.setProperty(`--${key}`, value);
+    let restore!: (draft: Draft) => boolean;
+    const [busy, setBusy] = createSignal(false);
+    dispose = render(() => createComponent(Composer, {
+      vendors: ['codex'], options: [], choice: { vendor: 'auto' }, get busy() { return busy(); },
+      get helpers() { return busy() ? 1 : undefined; }, temporary: true, placeholder: '',
+      onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => {},
+      onRestore: (receive) => { restore = receive; },
+    }), page.querySelector('.dock')!);
+    ok(restore({ text: 'Keep this draft.', images: [], files: [{ name: 'notes.pdf', base64: 'eA==' }] }));
+    const field = page.querySelector('textarea')!;
+    const thread = page.querySelector('.thread')!;
+    const chip = page.querySelector<HTMLButtonElement>('.attachment-count')!;
+    ok(chip, 'the count control exists for an attached file');
+    const panel = page.getElementById(chip.getAttribute('aria-controls')!)!;
+    const remove = panel.querySelector<HTMLButtonElement>('.thumb-x')!;
+    for (const height of [520, 480]) {
+      iframe.style.height = `${height}px`;
+      await frames();
+      equal(iframe.contentWindow!.innerHeight, height);
+      ok(chip.getBoundingClientRect().height >= 28, 'the count control fits the compact bar');
+      equal(panel.getBoundingClientRect().height, 0, 'the panel starts closed');
+      chip.focus(); chip.click();
+      equal(chip.getAttribute('aria-expanded'), 'true', 'activating the count opens the panel');
+      await frames();
+      equal(page.activeElement, remove, 'opening moves focus to a removal target');
+      const box = panel.getBoundingClientRect();
+      ok(box.top >= thread.getBoundingClientRect().bottom && box.bottom <= field.getBoundingClientRect().top,
+        'the panel reserves its own row between the transcript and draft');
+      const notice = page.querySelector('[data-temporary-chat]')!.getBoundingClientRect();
+      ok(notice.top >= box.bottom && notice.bottom <= field.getBoundingClientRect().top,
+        'composer notices stay with the draft below the attachment panel');
+      const target = remove.getBoundingClientRect();
+      ok(target.width >= 28 && target.height >= 28 && target.bottom <= height, 'the full removal target fits');
+      chip.click();
+      equal(chip.getAttribute('aria-expanded'), 'false', 'activating the open count closes the attachment panel');
+      equal(page.activeElement, chip, 'closing returns focus to the count control');
+      equal(field.value, 'Keep this draft.');
+    }
+    chip.click();
+    await frames();
+    setBusy(true);
+    page.querySelector<HTMLButtonElement>('.cbar > .send.stop')!.click();
+    await frames();
+    page.querySelector<HTMLButtonElement>('.stop-ask .send:last-child')!.click();
+    await frames();
+    equal(page.querySelector('.stop-ask'), null, 'Keep working closes the stop confirmation');
+    equal(chip.getAttribute('aria-expanded'), 'true', 'dismissing the confirmation keeps attachments open');
+    equal(page.activeElement, page.querySelector('.cbar > .send.stop'), 'focus returns to Stop');
+    setBusy(false);
+    remove.click();
+    equal(page.querySelector('.attachment-count'), null, 'the last removal clears the count');
+    equal(page.activeElement, field, 'the draft gets focus once there is no count control');
+    equal(field.value, 'Keep this draft.');
+  } finally {
+    dispose(); iframe.remove();
+  }
+});
+
+check('composer: Escape is handled by Stop confirmation before the containing surface', () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  let kept = 0;
+  let bubbled = 0;
+  host.addEventListener('keydown', () => bubbled++);
+  const dispose = render(() => createComponent(StopAsk, { helpers: 1, onKeep: () => kept++, onStop: () => {} }), host);
+  try {
+    host.querySelector('button:last-child')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    equal(kept, 1, 'Escape chooses Keep working');
+    equal(bubbled, 0, 'the containing attachment panel does not receive the same key');
+  } finally {
+    dispose(); host.remove();
+  }
+});
 
 check('composer: attachment read errors include the file on error abort and synchronous failure', async () => {
   const read = FileReader.prototype.readAsDataURL;

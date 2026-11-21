@@ -460,7 +460,7 @@ check('thread: the last answer and its actions leave 40px above either composer 
         ok(thread.scrollTop > 0, 'the thread must actually overflow');
         const last = root.querySelector('.col')!.lastElementChild!;
         ok(last.querySelector('.actions'), 'the measured answer includes its action row');
-        const gap = root.querySelector('.composer')!.getBoundingClientRect().top - last.getBoundingClientRect().bottom;
+        const gap = root.querySelector('.dock')!.getBoundingClientRect().top - last.getBoundingClientRect().bottom;
         ok(Math.abs(gap - 40) <= 1, `${width}x${height}: gap ${gap}px with ${text ? 'expanded' : 'empty'} composer`);
       }
     } finally {

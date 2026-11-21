@@ -817,6 +817,7 @@ export const es: Messages = {
   'composer.commandAgent': 'Usar con {name}',
   'composer.mentionsWaiting': 'Buscando…',
   'composer.attach': 'Adjuntar',
+  'composer.attachmentsCount': 'Adjuntos ({n})',
   'drop.attach': 'Suelta para adjuntar',
   'composer.attachedFile': 'Archivo adjunto {name}:',
   'composer.removeAttachments': 'Quitar adjuntos',

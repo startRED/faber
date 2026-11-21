@@ -3,6 +3,17 @@
 The same message box serves Chat and Projects, at home and below a conversation. Its controls and model picker are
 listed in the Composer row of [product-map.md](../product-map.md); placement follows [layout.md](layout.md).
 
+Below an open conversation, the box shares the reading column and its gutters. The conversation surface uses an 8 px
+inset, a one-line draft at least 32 px high, and a wrapping row with Attach, the model and access choices where offered,
+and Send or Stop at the right. While a reply streams, a new draft can still be queued or sent alongside Stop.
+The empty field has its usual placeholder. Attachments above the draft use 56 × 40 px previews and 28 px removal targets.
+
+From 660 px wide through heights of 540 px, the conversation box uses a 26 px minimum field and replaces the attachment
+strip with a localized count beside Send or Stop. Opening the count reserves a row for the attachment panel above the
+draft and below the transcript. The first removal target takes focus. Escape or clicking the count closes the panel and
+returns focus to the count. Removing the last attachment returns it to the draft. The panel and the draft can scroll
+internally when long. The home composition, file picker, paste and drop, and draft recovery use the existing behavior.
+
 After the first answer, an ordinary new conversation may receive a title of at most six words in the first message's
 language. A link-only or code-only message uses the Settings language. A bare web link immediately shows a localized
 host-only fallback, with no URL credentials, path or query. The existing sidebar row receives the title through the

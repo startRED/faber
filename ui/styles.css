@@ -1076,6 +1076,72 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .g-caret { position: absolute; left: 0; top: calc(var(--fs-read) * 0.2); width: 2px; height: calc(var(--fs-read) * 1.1); border-radius: 1px; background: var(--accent); animation: blink var(--dur-blink) steps(1) infinite; }
 .cbar { display: flex; gap: 6px; align-items: center; padding: 8px 10px 10px 12px; }
 .cbar { flex-wrap: wrap; }
+:is(.composer-body, .composer-notices) { display: contents; }
+.cbar > .attachment-count { display: none; }
+.dock > .composer {
+  --composer-pad-y: 8px;
+  --composer-edge: inset 0 0 0 1px var(--line-3);
+  grid-template-columns: minmax(0, 1fr);
+  margin-block: 8px 14px;
+  padding: var(--composer-pad-y) 8px;
+  background: var(--s2);
+  box-shadow: var(--composer-edge);
+}
+.dock > .composer:focus-within { box-shadow: inset 0 0 0 1px var(--accent-line), var(--composer-edge); }
+.dock > .composer textarea { height: 32px; min-height: 32px; padding: 5px 7px; }
+.dock > .composer textarea::placeholder { color: var(--ink-2); }
+.dock > .composer .cbar { padding: 0; }
+.dock > .composer .cbar > .iconbtn { width: var(--h-md); height: var(--h-md); }
+.dock > .composer .cbar :is(.send, .iconbtn) { border-radius: var(--r-sm); }
+.dock > .composer .cbar .send:disabled { background: var(--s3); color: var(--ink-3); opacity: 1; }
+.dock > .composer .cbar > .send.stop + .send { margin-inline-start: 0; }
+.dock > .composer .cbar .chip.choose {
+  min-height: var(--h-sm); height: auto; max-width: 100%; padding-block: 3px;
+  white-space: normal; overflow-wrap: anywhere; border-radius: var(--r-pill);
+}
+.dock > .composer .cbar .model-label { overflow: visible; text-overflow: clip; }
+.dock > .composer .attach-row { gap: 8px 12px; padding: 3px 0 6px; }
+.dock > .composer .attach-row .thumb { height: 40px; }
+.dock > .composer .attach-row .thumb.file { height: var(--h-sm); }
+.dock > .composer .attach-row .thumb.file .thumb-x { top: 0; right: 0; }
+.dock > .composer .attach-row .thumb-card .fi { width: 20px; height: 20px; }
+.dock > .composer .attach-row .thumb-text { display: flex; align-items: baseline; gap: 6px; }
+@media (min-width: 1600px) {
+  .dock > .composer .cbar :is(.chip, .send) { font-size: var(--fs-read); }
+}
+@media (max-height: 540px) {
+  .dock > .composer { --composer-pad-y: 2px; margin-block: 3px 6px; }
+  .dock > .composer textarea { height: 26px; min-height: 26px; padding-block: 2px; line-height: 1.35; }
+}
+@media (min-width: 660px) and (max-height: 540px) {
+  .dock > .composer:not(.attachments-open) > .attachments { display: none; }
+  .dock > .composer .cbar > .attachment-count {
+    display: inline-flex; min-height: var(--h-sm); margin-inline-start: auto; padding-inline: 9px;
+    border: 1px solid var(--line-2); border-radius: var(--r-pill); color: var(--ink-2); white-space: nowrap;
+  }
+  .dock > .composer .cbar:has(> .attachment-count) > .send { margin-inline-start: 0; }
+  .dock > .composer.attachments-open { padding: 0; background: none; box-shadow: none; }
+  .dock > .composer.attachments-open::before {
+    content: ''; grid-area: 2 / 1 / 4 / 2; pointer-events: none;
+    border-radius: var(--r-lg); background: var(--s2); box-shadow: var(--composer-edge);
+  }
+  .dock > .composer.attachments-open:focus-within::before {
+    box-shadow: inset 0 0 0 1px var(--accent-line), var(--composer-edge);
+  }
+  .dock > .composer.attachments-open > .composer-notices { display: grid; position: relative; grid-area: 2 / 1; }
+  .dock > .composer.attachments-open > .composer-body {
+    display: grid; grid-area: 3 / 1; grid-template-columns: minmax(0, 1fr); position: relative;
+    padding: var(--composer-pad-y) 8px;
+  }
+  .dock > .composer.attachments-open > .attachments {
+    grid-area: 1 / 1;
+    justify-self: end; max-width: 100%; margin-block-end: 8px; border: 1px solid var(--line-2);
+    border-radius: var(--r-md); background: var(--s2); transition: none;
+  }
+  .dock > .composer.attachments-open .attach-row { max-height: min(120px, 24vh); overflow: auto; padding: 8px; }
+  .dock > .composer.attachments-open .attach-row .thumb:not(.file) { --thumb: 48px; height: 36px; }
+  .dock > .composer .attachment-count[aria-expanded='true'] svg { transform: rotate(180deg); }
+}
 /* The model chip: its icon and chevron are drawings, the select on top of them is the control. */
 .chip.choose { position: relative; height: var(--h-sm); gap: 6px; padding: 0 8px 0 10px; cursor: default; white-space: nowrap; }
 .chip.choose:hover { background: var(--s3); color: var(--ink); }
@@ -1220,8 +1286,8 @@ textarea.field { height: auto; max-width: none; padding: 8px 10px; resize: verti
 .hint { margin: 0; font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.45; }
 .hint button { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
 .hint button:hover { color: var(--ink); }
-.composer > .hint { padding: 12px 18px 0; }
-.composer > .hint button { margin-inline-start: .35em; }
+.composer-notices > .hint { padding: 12px 18px 0; }
+.composer-notices > .hint button { margin-inline-start: .35em; }
 .dots { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .dot { position: relative; flex: none; width: var(--h-sm); height: var(--h-sm); border-radius: var(--r-pill); background: var(--c); box-shadow: inset 0 0 0 1px var(--line-3); }
 .dot[aria-pressed='true']::after { content: ''; position: absolute; inset: -4px; border-radius: var(--r-pill); box-shadow: 0 0 0 1.5px var(--ink); }

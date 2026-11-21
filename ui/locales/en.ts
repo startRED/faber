@@ -817,6 +817,7 @@ export const en = {
   'composer.commandAgent': 'Run with {name}',
   'composer.mentionsWaiting': 'Looking…',
   'composer.attach': 'Attach',
+  'composer.attachmentsCount': 'Attachments ({n})',
   'drop.attach': 'Drop to attach',
   'composer.attachedFile': 'Attached file {name}:',
   'composer.removeAttachments': 'Remove attachments',

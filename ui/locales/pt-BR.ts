@@ -816,6 +816,7 @@ export const ptBR: Messages = {
   'composer.commandAgent': 'Usar com {name}',
   'composer.mentionsWaiting': 'Procurando…',
   'composer.attach': 'Anexar',
+  'composer.attachmentsCount': 'Anexos ({n})',
   'drop.attach': 'Solte para anexar',
   'composer.attachedFile': 'Arquivo anexado {name}:',
   'composer.removeAttachments': 'Remover anexos',

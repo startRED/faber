@@ -135,13 +135,19 @@ async function attach(list: Iterable<File>, draft: Draft): Promise<{ draft: Draf
 export function StopAsk(props: { helpers: number; onStop: () => void; onKeep: () => void; back?: () => HTMLElement | undefined }) {
   let root: HTMLDivElement | undefined;
   onCleanup(() => {
-    const had = !!root?.contains(document.activeElement);
+    const owner = root?.ownerDocument ?? document;
+    const had = !!root?.contains(owner.activeElement);
     queueMicrotask(() => {
-      if (had || !document.activeElement || document.activeElement === document.body) props.back?.()?.focus();
+      if (had || !owner.activeElement || owner.activeElement === owner.body) props.back?.()?.focus();
     });
   });
   return (
-    <div ref={(el) => (root = el)} class="stop-ask" role="group" aria-label={t('composer.stop')} onKeyDown={(e) => e.key === 'Escape' && props.onKeep()}>
+    <div ref={(el) => (root = el)} class="stop-ask" role="group" aria-label={t('composer.stop')} on:keydown={(e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      props.onKeep();
+    }}>
       <span role="status">{t('composer.stopHelpers', { n: props.helpers })}</span>
       <button type="button" class="send stop" onClick={() => props.onStop()}>{t('composer.stopAll')}</button>
       <button type="button" class="send" ref={(el) => queueMicrotask(() => el.focus())} onClick={() => props.onKeep()}>{t('composer.keepWorking')}</button>
@@ -261,6 +267,10 @@ export function Composer(props: Props) {
   onCleanup(() => clearTimeout(pause));
   let fileInput: HTMLInputElement | undefined;
   let field: HTMLTextAreaElement | undefined;
+  let attachmentCount: HTMLButtonElement | undefined;
+  let attachmentPanel: HTMLDivElement | undefined;
+  const attachmentPanelId = createUniqueId();
+  const [attachmentsOpen, setAttachmentsOpen] = createSignal(false);
   // The field is measured at most once per frame (16 ms): a change that finds the last measure older than that measures at
   // once (no frame is drawn at the old height), and the ones that follow within it (a paste, a key held down) share one
   // measure when the frame ends. A timer, not requestAnimationFrame: a window that is not shown draws no frames.
@@ -291,10 +301,14 @@ export function Composer(props: Props) {
       if (!first) resize();
     });
     observer.observe(field!);
-    window.addEventListener('resize', resize);
+    const resized = () => {
+      resize();
+      if (attachmentsOpen() && attachmentCount && getComputedStyle(attachmentCount).display === 'none') setAttachmentsOpen(false);
+    };
+    window.addEventListener('resize', resized);
     onCleanup(() => {
       observer.disconnect();
-      window.removeEventListener('resize', resize);
+      window.removeEventListener('resize', resized);
     });
   });
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
@@ -605,7 +619,33 @@ export function Composer(props: Props) {
   const images = createMemo(() => draft().images);
   const files = createMemo(() => draft().files);
   const count = () => images().length + files().length + inlined().length;
+  const countLabel = () => t('composer.attachmentsCount', { n: count() });
   const shown = keepForExit(() => count() > 0);
+  const closeAttachments = () => {
+    setAttachmentsOpen(false);
+    (count() ? attachmentCount : field)?.focus({ preventScroll: true });
+  };
+  const toggleAttachments = () => {
+    if (attachmentsOpen()) {
+      closeAttachments();
+      return;
+    }
+    setAttachmentsOpen(true);
+    queueMicrotask(() => {
+      if (attachmentsOpen()) attachmentPanel?.querySelector<HTMLButtonElement>('.thumb-x')?.focus({ preventScroll: true });
+    });
+  };
+  const removeFromPanel = (remove: () => void) => {
+    const wasOpen = attachmentsOpen();
+    remove();
+    if (!wasOpen) return;
+    if (!count()) closeAttachments();
+    else if (!attachmentPanel?.contains(document.activeElement)) {
+      attachmentPanel?.querySelector<HTMLButtonElement>('.thumb-x')?.focus({ preventScroll: true });
+    }
+  };
+  createEffect(on(() => props.draftKey, () => setAttachmentsOpen(false), { defer: true }));
+  createEffect(() => { if (!count()) setAttachmentsOpen(false); });
   const dropImage = (image: Draft['images'][number]) => batch(() => {
     editDraft((d) => ({ ...d, images: d.images.filter((i) => i !== image) }));
     setAttachmentReadError(undefined);
@@ -637,7 +677,15 @@ export function Composer(props: Props) {
     <form
       class="composer"
       data-tour="composer"
+      classList={{ 'attachments-open': attachmentsOpen() }}
       aria-busy={!attachmentsReady() && !attachmentLoadFailed()}
+      on:keydown={(e) => {
+        if (e.key !== 'Escape' || !attachmentsOpen() || e.defaultPrevented) return;
+        if (e.target !== attachmentCount && !attachmentPanel?.contains(e.target as Node | null)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeAttachments();
+      }}
       onSubmit={(e) => {
         e.preventDefault();
         send();
@@ -648,6 +696,7 @@ export function Composer(props: Props) {
         if (e.dataTransfer) void add(e.dataTransfer.files);
       }}
     >
+      <div class="composer-notices">
       <Show when={props.temporary}>
         <p class="hint" data-temporary-chat role="status">{t('chat.temporaryLine')}</p>
       </Show>
@@ -669,16 +718,18 @@ export function Composer(props: Props) {
           </Show>
         </p>
       </Show>
+      </div>
       {/* The row opens and closes with its height, so the box never jumps when the first file lands or the last one goes. */}
       <Show when={shown()}>
-        <div class="fold attachments" classList={{ open: count() > 0 }} inert={count() === 0}>
+        <div class="fold attachments" classList={{ open: count() > 0 }} inert={count() === 0}
+          id={attachmentPanelId} ref={(el) => (attachmentPanel = el)} role="group" aria-label={countLabel()}>
           <div class="fold-inner">
             <div class="attach-row" ref={animateList} onMouseDown={keepEditingFocus}>
-              <For each={images()}>{(image) => <Thumb name={called.get(image) ?? t('composer.image')} src={`data:${image.mediaType};base64,${image.base64}`} onRemove={() => dropImage(image)} />}</For>
-              <For each={files()}>{(file) => <Thumb name={file.name} onRemove={() => dropFile(file)} />}</For>
-              <For each={inlined()}>{(item) => <Thumb name={item.name} onRemove={() => dropText(item)} />}</For>
+              <For each={images()}>{(image) => <Thumb name={called.get(image) ?? t('composer.image')} src={`data:${image.mediaType};base64,${image.base64}`} onRemove={() => removeFromPanel(() => dropImage(image))} />}</For>
+              <For each={files()}>{(file) => <Thumb name={file.name} onRemove={() => removeFromPanel(() => dropFile(file))} />}</For>
+              <For each={inlined()}>{(item) => <Thumb name={item.name} onRemove={() => removeFromPanel(() => dropText(item))} />}</For>
               <Show when={count() > 1}>
-                <button type="button" class="more attach-all" onClick={dropAll}>
+                <button type="button" class="more attach-all" onClick={() => removeFromPanel(dropAll)}>
                   {t('composer.removeAttachments')}
                 </button>
               </Show>
@@ -686,6 +737,7 @@ export function Composer(props: Props) {
           </div>
         </div>
       </Show>
+      <div class="composer-body">
       <Show when={props.about}>
         {(name) => (
           <p class="composer-about" id="composer-about">
@@ -865,6 +917,12 @@ export function Composer(props: Props) {
             <span>{t('composer.keepGoing')}</span>
           </button>
         </Show>
+        <Show when={count()}>
+          <button type="button" class="chip attachment-count" ref={(el) => (attachmentCount = el)}
+            aria-expanded={attachmentsOpen()} aria-controls={attachmentPanelId} onClick={toggleAttachments}>
+            {countLabel()} <Icon name="up" small />
+          </button>
+        </Show>
         <Show when={props.busy && stopping()}>
           <StopAsk helpers={props.helpers ?? 0} onStop={() => {
             setStopping(false);
@@ -886,6 +944,7 @@ export function Composer(props: Props) {
             <Icon name="up" small />
           </button>
         </Show>
+      </div>
       </div>
     </form>
   );

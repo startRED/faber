@@ -656,6 +656,7 @@ export const fr: Messages = {
   'composer.commandAgent': 'Utiliser avec {name}',
   'composer.mentionsWaiting': 'Recherche…',
   'composer.attach': 'Joindre',
+  'composer.attachmentsCount': 'Pièces jointes ({n})',
   'drop.attach': 'Déposez pour joindre',
   'composer.attachedFile': 'Fichier joint {name} :',
   'composer.removeAttachments': 'Retirer les pièces jointes',

@@ -656,6 +656,7 @@ export const de: Messages = {
   'composer.commandAgent': 'Mit {name} ausführen',
   'composer.mentionsWaiting': 'Suche…',
   'composer.attach': 'Anhängen',
+  'composer.attachmentsCount': 'Anhänge ({n})',
   'drop.attach': 'Zum Anhängen hier ablegen',
   'composer.attachedFile': 'Angehängte Datei {name}:',
   'composer.removeAttachments': 'Anhänge entfernen',
