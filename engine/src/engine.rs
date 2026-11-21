@@ -50,6 +50,7 @@ mod creative_judges;
 mod dry_run;
 mod ended;
 mod evict;
+pub mod media;
 pub use aside::Aside;
 
 pub use crate::facts;
@@ -528,6 +529,7 @@ fn settle(m: &mut Message) {
 }
 
 struct Core {
+    media: media::Media,
     catalog_store: Option<crate::tools::Store>,
     kit_checks: HashMap<String, mcp_servers::LaunchCheck>,
     kit_check_gate: Arc<tokio::sync::Semaphore>,
@@ -820,6 +822,7 @@ impl Engine {
         let unclean_exit = crate::crash::take_unclean(&opts.data_dir);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
+                media: Default::default(),
                 catalog_store: Some(catalog_store),
                 kit_checks: HashMap::new(),
                 worker_memory: Default::default(),

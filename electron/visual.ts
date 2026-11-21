@@ -5,6 +5,7 @@
 import { type BrowserWindow, protocol, session, type WebContents, type WebFrameMain } from 'electron';
 import { lookup } from 'node:dns/promises';
 import { navigationAllowed, publicAddress, publicHttps } from './visualrules.ts';
+import { MEDIA_SCHEME } from './media.ts';
 import type { Sidecar } from './sidecar.ts';
 import { reportBlockedVisualNavigation } from './testmode.ts';
 
@@ -93,6 +94,10 @@ export function installVisual(host: () => Sidecar | null, screen: () => BrowserW
     }
     const main = screen()?.webContents.mainFrame;
     const frame = details.frame;
+    if (details.url.startsWith(`${MEDIA_SCHEME}:`)) {
+      callback({ cancel: !sameFrame(frame, main) || !['image', 'media'].includes(details.resourceType) || details.method !== 'GET' });
+      return;
+    }
     if (leases.has(details.id) || (frame && main && !sameFrame(frame, main))) {
       const directChild = leases.has(details.id) || Boolean(frame && sameFrame(frame.parent, main));
       if (details.resourceType === 'subFrame') {

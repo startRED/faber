@@ -16,6 +16,7 @@ pub mod first_run;
 pub mod helper_both;
 pub mod homes;
 pub mod killed;
+mod local_media;
 pub mod long_session;
 pub mod mcp_servers;
 pub mod menus;
@@ -83,7 +84,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(thread_scroll::scenarios())
         .chain(ux_audit::scenarios())
         .chain(sentinel::scenarios());
-    let all = all.chain(visual_network::scenarios());
+    let all = all.chain(visual_network::scenarios()).chain([local_media::scenario()]);
     #[cfg(windows)]
     let all = all.chain(browser_pane::scenarios());
     #[cfg(windows)]

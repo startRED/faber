@@ -19,6 +19,7 @@ import { migrateDrafts } from './migrate.ts';
 import { apply, type Picked, quitNow, release } from './orders.ts';
 import * as startup from './startup.ts';
 import * as testmode from './testmode.ts';
+import { installMedia, MEDIA_ORIGIN, mediaScheme } from './media.ts';
 import { guardVisualFrames, installVisual, VISUAL_ORIGIN, visualScheme } from './visual.ts';
 
 // The test runner sets its own debugging switch later, in testmode.prepare().
@@ -53,6 +54,7 @@ app.enableSandbox();
 protocol.registerSchemesAsPrivileged([
   { scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
   visualScheme,
+  mediaScheme,
 ]);
 
 // Features Faber does not use stay off; each one costs memory in every renderer.
@@ -113,9 +115,9 @@ const CSP = [
   "default-src 'self'",
   `script-src 'self' ${loaderHashes().join(' ')} 'strict-dynamic'`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  `img-src 'self' data: blob: ${MEDIA_ORIGIN}`,
   "font-src 'self' data:",
-  'media-src data: blob:',
+  `media-src data: blob: ${MEDIA_ORIGIN}`,
   `frame-src ${VISUAL_ORIGIN}`,
   "object-src 'none'",
   "base-uri 'none'",
@@ -229,7 +231,13 @@ function createWindow(): BrowserWindow {
   window.webContents.on('will-prevent-unload', () => { closingForQuit = false; window.hide(); });
   window.on('close', () => window.webContents.session.flushStorageData());
   // Closing frees the screen (its renderer and its memory); the host keeps running answers in the background.
+  const clearMedia = () => { if (win === window) void host?.call('media_clear', {}).catch(() => {}); };
+  window.webContents.on('render-process-gone', clearMedia);
+  window.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) clearMedia();
+  });
   window.on('closed', () => {
+    clearMedia();
     if (win === window) win = null;
     host?.note({ kind: 'focus', focused: false });
     host?.note({ kind: 'window', visible: false });
@@ -318,6 +326,7 @@ function relay(): void {
     if (!agent && !fromScreen(event)) return { err: 'error.host.notScreen' };
     if (typeof command !== 'string') return { err: 'error.host.badRequest' };
     if (args !== undefined && (args === null || typeof args !== 'object' || Array.isArray(args))) return { err: 'error.host.badArgs' };
+    if (command === 'media_chunk' || command === 'media_clear') return { err: 'error.host.notScreen' };
     const given = (args ?? {}) as Record<string, unknown>;
     // The answer travels as `{ok}` or `{err}`: a failure is an ordinary answer the screen reads (as Tauri's), not an
     // error Electron would log with a stack for every refused call.
@@ -332,7 +341,7 @@ function relay(): void {
       if (!host) throw new Error('error.host.notReady');
       const ok = await host.call(command, given);
       startup.hostAnswered();
-      return { ok };
+      return { ok: command === 'media_grant' ? `${MEDIA_ORIGIN}/${String(ok)}` : ok };
     } catch (failure) {
       return { err: failure instanceof Error ? failure.message : failure };
     }
@@ -399,6 +408,7 @@ void app.whenReady().then(async () => {
     console.error('faber: draft import failed; the original profile is intact and the next start will retry.');
   }
   installVisual(() => host, () => win);
+  installMedia(() => host);
   relay();
   const window = {
     focused: () => win?.isFocused() ?? false,

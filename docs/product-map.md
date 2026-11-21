@@ -414,6 +414,7 @@ The screen and `faber` [command line](product/cli.md) use the command list in ho
 | Quota | `set_clock`, `quota_attention`, `answer_plan`, `approve_credits`, `move_turn` and `wait_turn` manage quota and waiting turns. |
 | Files and links | `save_file`, `show_file`, `read_image`, `read_file_at`, `open_link`, `mentions`, `changes`, `change_patch` and `commands` handle files and links. |
 | Visual answers | `visual_document` supplies the visual-answer pane's document and security policy. |
+| Local media | `media_enter`, `media_grant`, `media_release`, and `media_leave` scope local picture, video and audio URLs to the visible conversation. The shell reads bounded ranges from the pinned working folder. |
 | Technical details | `start_card` reads the start card a conversation's session received. |
 | Rewind | `rewind_points`, `rewind_preview`, `rewind_restore`, `rewind_redos`, `rewind_redo_preview`, `rewind_redo` and `rewind_recover` review, restore and recover saved work. |
 | Faber's browser | `site_place`, `site_park`, `site_size`, `site_open`, `site_tabs`, `site_tab`, `site_go`, `site_history`, `site_clear`, `site_step`, `cookie_profiles`, `cookie_sites`, `cookie_import`, `cookie_held`, `cookie_forget`, `site_picture` and `site_round` manage the screen's browser, tabs and sign-ins. |
