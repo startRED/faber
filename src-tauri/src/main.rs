@@ -7,6 +7,7 @@
 #[cfg(all(feature = "test-hooks", not(debug_assertions)))]
 compile_error!("the `test-hooks` feature is for debug test builds only; it must not be enabled in a release build");
 
+mod media;
 #[cfg(windows)]
 mod pane;
 mod tray;
@@ -933,6 +934,30 @@ fn main() {
         .register_uri_scheme_protocol("faber-visual", |context, request| {
             context.app_handle().state::<visual_page::Pages>().respond(context.webview_label(), request)
         })
+        .register_asynchronous_uri_scheme_protocol(media::SCHEME, |context, request, responder| {
+            let Some(faber) = context.app_handle().try_state::<Faber>().filter(|_| context.webview_label() == "main") else {
+                responder.respond(media::denied());
+                return;
+            };
+            let engine = faber.engine.clone();
+            tauri::async_runtime::spawn_blocking(move || responder.respond(media::respond(&engine, request)));
+        })
+        .on_window_event(|window, event| {
+            if window.label() == "main"
+                && matches!(event, tauri::WindowEvent::Destroyed)
+                && let Some(faber) = window.try_state::<Faber>()
+            {
+                faber.engine.media_clear();
+            }
+        })
+        .on_page_load(|webview, page| {
+            if webview.label() == "main"
+                && matches!(page.event(), tauri::webview::PageLoadEvent::Started)
+                && let Some(faber) = webview.try_state::<Faber>()
+            {
+                faber.engine.media_clear();
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
@@ -1024,6 +1049,10 @@ fn main() {
                     invoke.resolver.reject("error.host.firstUserBlocked");
                     return true;
                 }
+                if matches!(invoke.message.command(), "media_chunk" | "media_clear") {
+                    invoke.resolver.reject("error.host.notScreen");
+                    return true;
+                }
                 // A command of the shared table runs there (R459); the rest need the window and are this shell's own, listed above.
                 if Host::kind(invoke.message.command()).is_some_and(|kind| kind != Kind::Window) {
                     let host = invoke.message.webview().state::<Faber>().host.clone();
@@ -1032,9 +1061,14 @@ fn main() {
                         tauri::ipc::InvokeBody::Json(args) => args.clone(),
                         tauri::ipc::InvokeBody::Raw(_) => Value::Null,
                     };
-                    invoke
-                        .resolver
-                        .respond_async(async move { host.dispatch(&command, args).await.map_err(tauri::ipc::InvokeError::from) });
+                    invoke.resolver.respond_async(async move {
+                        let result = host.dispatch(&command, args).await.map_err(tauri::ipc::InvokeError::from)?;
+                        if command == "media_grant" {
+                            let token = result.as_str().ok_or_else(|| tauri::ipc::InvokeError::from("error.media.gone"))?;
+                            return Ok::<_, tauri::ipc::InvokeError>(Value::String(format!("{}/{token}", media::ORIGIN)));
+                        }
+                        Ok(result)
+                    });
                     return true;
                 }
                 handler(invoke)
@@ -1142,7 +1176,13 @@ fn main() {
             }
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build({
+            let mut context = tauri::generate_context!();
+            if let Some(tauri::utils::config::Csp::Policy(policy)) = &mut context.config_mut().app.security.csp {
+                *policy = policy.replace(media::CUSTOM_ORIGIN, media::ORIGIN);
+            }
+            context
+        })
         .expect("Faber failed to start")
         .run(move |app, event| {
             // Closing the window frees the screen (about 90 MB) but keeps Faber in the tray, so running answers

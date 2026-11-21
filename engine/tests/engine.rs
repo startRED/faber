@@ -1070,8 +1070,16 @@ fn visual_answers_keep_the_screen_resource_policy_closed_and_authorize_only_the_
     use base64::Engine as _;
     use sha2::{Digest, Sha256};
     let config: serde_json::Value = serde_json::from_str(include_str!("../../src-tauri/tauri.conf.json")).unwrap();
-    let base = "default-src 'self' ipc: http://ipc.localhost; script-src 'self' 'sha256-OqD9rZ9UZGQqUOZZMHLYDUSUW8UkTyWyKLMPuNd+Ecs=' 'strict-dynamic'; frame-src faber-visual://localhost http://faber-visual.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src data: blob:";
-    assert_eq!(config["app"]["security"]["csp"], base, "visual access must never widen the screen's resource policy");
+    let base = concat!(
+        "default-src 'self' ipc: http://ipc.localhost; ",
+        "script-src 'self' 'sha256-OqD9rZ9UZGQqUOZZMHLYDUSUW8UkTyWyKLMPuNd+Ecs=' 'strict-dynamic'; ",
+        "frame-src faber-visual://localhost http://faber-visual.localhost; ",
+        "style-src 'self' 'unsafe-inline'; ",
+        "img-src 'self' data: blob: faber-media://localhost; ",
+        "font-src 'self' data:; ",
+        "media-src data: blob: faber-media://localhost"
+    );
+    assert_eq!(config["app"]["security"]["csp"], base, "the screen permits the local media origin only for images and media");
     let runtime = include_str!("../../ui/visual-page-runtime.js").replace("\r\n", "\n").replace('\r', "\n");
     let digest = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(runtime.as_bytes()));
     let protocol = include_str!("../../src-tauri/src/visual_page.rs");
