@@ -109,7 +109,16 @@ event type and IDs; the controlled driver checks cover reply ownership and the S
   commands. The scripted caller aborted the merge and checked the clean copy and unchanged source file.
   The earlier run failed because the fatal report dropped the writer confirmation and unknown cause. The test
   `stopped_helper_wakes_its_lead_with_a_real_merge_conflict` uses a real local worker with a scripted CLI protocol,
-  with no model calls. Recovery by an actual cheap-model lead and helper remains unverified.
+  with no model calls.
+- An isolated Windows live run stopped one owned Codex
+  read helper while its lead waited. The original lead process stayed live, received the confirmed writer exit
+  and unknown CLI cause, and resumed once. Its workspace call observed one real merge conflict, zero registered
+  helpers and no running command before the model returned the expected result. The harness then aborted its
+  merge. The source had only the expected generated rules, identical to a no-inference comparison.
+  The saved result arrived 18.17 seconds after the first send. The lead's two Terra low turns reported a
+  combined USD 0.024088 API equivalent; usage for the interrupted helper was unavailable. The run used
+  ephemeral threads in a disposable repository and the existing subscription. Earlier attempts failed in the
+  harness. An offline cleanup check accounted for the generated rules. This is one live case.
 
 ## Installed app and outstanding work
 
@@ -127,15 +136,6 @@ an external wake or a person sending a message. The original two messages and th
 The conversation command reported the same blocker, and the screen's status formatter rendered it with the saved note
 and the Brazilian Portuguese instruction to connect a subscription. No model request ran.
 
-- [410](../tasks/410-a-stopped-helper-wakes-its-lead.md): an isolated Windows live run stopped one owned Codex
-  read helper while its lead waited. The original lead process stayed live, received the confirmed writer exit
-  and unknown CLI cause, and resumed once. Its workspace call observed one real merge conflict, zero registered
-  helpers and no running command before the model returned the expected result. The harness then aborted its
-  merge. The source had only the expected generated rules, identical to a no-inference comparison.
-  The saved result arrived 18.17 seconds after the first send. The lead's two Terra low turns reported a
-  combined USD 0.024088 API equivalent; usage for the interrupted helper was unavailable. The run used
-  ephemeral threads in a disposable repository and the existing subscription. Earlier attempts failed in the
-  harness. An offline cleanup check accounted for the generated rules. This is one live case.
 - [420](../tasks/420-the-screen-tells-waiting-from-stuck.md): hidden Electron checks distinguished a healthy
   wait, a blocked return after a followed conversation disappeared, and a finished report waiting to reconnect.
   A blocked return now shows its reason and any saved note, without counting the old references as active waits.
