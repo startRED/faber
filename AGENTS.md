@@ -9,7 +9,7 @@ before changing what a person sees, sets or calls follow [docs/product-rules.md]
 ## Rules
 
 - Code, comments, docs and commit messages in English. Original code only: never copy TL-ADE, TL-Control or TL-Orchestrator.
-- Never read, copy, store or forward CLI credentials or session tokens (`~/.claude`, `~/.codex`, Gemini OAuth). Users sign
+- Never read, copy, store or forward CLI credentials or session tokens (`~/.claude`, `~/.codex`, Antigravity's sign-in). Users sign
   in through each CLI's own flow, and the CLI binaries run unmodified.
 - Never bundle third-party tools, skills, models or MCP servers: the curated catalog downloads them from their source.
 - No vendor names (Claude, Anthropic, Codex, OpenAI, ChatGPT, Gemini, Google) in product, feature or package names.

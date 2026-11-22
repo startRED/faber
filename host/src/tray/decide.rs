@@ -329,7 +329,7 @@ pub fn stopped_text(texts: &ShellTexts, title: &str, why: &str, ai: Option<Vendo
     let ai = match ai {
         Some(Vendor::Claude) => "Claude",
         Some(Vendor::Codex) => "Codex",
-        Some(Vendor::Gemini) => "Gemini",
+        Some(Vendor::Gemini) => "Antigravity",
         None => "AI",
     };
     fill(&fill(&template, "title", if title.is_empty() { "Faber" } else { title }), "ai", ai)
@@ -664,6 +664,11 @@ mod tests {
             "Login: parou até Claude ter cota de novo"
         );
         assert_eq!(stopped_text(&sent, "Login", "reason.keepGoing.cap", None), "Login: stopped keeping going after a long run on its own");
+        // The third AI is called by its app's name, never Gemini (R581).
+        assert_eq!(
+            stopped_text(&english, "", "reason.keepGoing.pace", Some(Vendor::Gemini)),
+            "Faber: stopped keeping going so Antigravity stays on pace"
+        );
         // A standing goal that needs the person is told the same way, with the goal's words as the title.
         assert_eq!(
             stopped_text(&english, "every check passes", "reason.goal.needsYou", None),

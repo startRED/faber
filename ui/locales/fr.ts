@@ -2743,7 +2743,7 @@ export const fr: Messages = {
   'notes.278.better': 'Mise à jour prête, redémarrer marche maintenant d’un seul clic même quand quelque chose tourne : Faber se ferme, se rouvre et le travail reprend là où il s’était arrêté.',
   'notes.279.fixed': "Faber ne garde plus en mémoire chaque conversation que vous ouvrez : ouvrir douze grandes conversations d'affilée monte désormais au plus à 337 Mo, alors qu'avant cela dépassait 400 Mo dès la neuvième.",
   'notes.280.fixed': 'Un assistant qui semble bloqué dit maintenant qu’il continue de travailler et ce que vous pouvez faire, et sa ligne sous « A besoin de vous » ouvre sa conversation.',
-  'notes.281.fixed': 'La mémoire du projet exclut les fichiers privés de Gemini de la lecture et de la modification.',
+  'notes.281.fixed': 'La mémoire du projet exclut les fichiers privés d’Antigravity de la lecture et de la modification.',
   'notes.282.fixed': 'Quand une autre IA reprend un travail interrompu, elle reçoit la consigne enregistrée des assistants encore au travail.',
   'notes.283.fixed': "Le rapport d'un assistant qui n'a pas pu être remis faute d'IA disponible part maintenant tout seul dès qu'une revient.",
   'notes.284.better': 'Sur Mac et Linux, les assistants et le travail qui continue seul attendent maintenant quand la mémoire de l’ordinateur manque, comme sur Windows, au lieu de démarrer quand même.',

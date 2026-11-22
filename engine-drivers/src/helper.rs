@@ -246,7 +246,7 @@ pub fn other(vendor: Vendor) -> Vendor {
     match vendor {
         Vendor::Claude => Vendor::Codex,
         Vendor::Codex => Vendor::Claude,
-        // Not yet: nothing runs on Gemini, so its helper would be Claude's.
+        // Not yet: nothing runs on Antigravity, so its helper would be Claude's.
         Vendor::Gemini => Vendor::Claude,
     }
 }

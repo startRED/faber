@@ -32,7 +32,7 @@ export interface Card {
   error?: { message: string; detail?: string };
 }
 
-// Gemini has none until its CLI is discovered (task 055).
+// Antigravity has none until its CLI is discovered (task 055).
 export const OFFICIAL_PAGES: Partial<Record<Vendor, string>> = {
   claude: 'https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview',
   codex: 'https://github.com/openai/codex',

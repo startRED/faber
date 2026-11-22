@@ -1,4 +1,4 @@
-import { modelOptions } from '../../ui/models.ts';
+import { modelOptions, vendorName } from '../../ui/models.ts';
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { ModelMenu } from '../../ui/ModelMenu.tsx';
@@ -8,6 +8,11 @@ import { check, deepEqual, equal, ok } from './check.ts';
 
 const gpt = (models: Parameters<typeof modelOptions>[1]) =>
   modelOptions(['codex'], models).filter((o) => o.choice.vendor === 'codex').map((o) => o.label);
+
+// The owner, 2026-11-22: the third AI is called by its app's name; Gemini is only the name of some of its models (R581).
+check('models: the third AI is named Antigravity, never Gemini', () => {
+  equal(vendorName('gemini'), 'Antigravity');
+});
 
 check('models: every GPT model is listed by its own name, with no generic ChatGPT entry', () => {
   const models = [

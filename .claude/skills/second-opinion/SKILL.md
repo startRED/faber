@@ -14,7 +14,7 @@ second one. It reviews. It does not edit, commit or push.
 1. `command -v codex`. If missing or not signed in, say so and stop; never pretend a review ran.
 2. `git status --short` and `git diff --stat`. Decide exactly what is under review (a diff, a file list or a plan file) and
    write it in the prompt as paths, not pasted secrets or unrelated private text.
-3. Never read or pass CLI credentials or session tokens (`~/.codex`, `~/.claude`, Gemini OAuth). The prompt carries the
+3. Never read or pass CLI credentials or session tokens (`~/.codex`, `~/.claude`, Antigravity's sign-in). The prompt carries the
    task and paths only.
 
 ## Run

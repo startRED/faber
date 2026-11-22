@@ -5,7 +5,7 @@ Files: engine/src/agy.rs, engine/src/lib.rs, engine/tests/agy_parse.rs
 Depends: agy-recorded-runs, gemini-vendor-variant
 Size: about 380 changed lines
 
-Why: a Gemini conversation needs its stream turned into what Faber shows: text as it arrives, steps (commands, file changes,
+Why: an Antigravity conversation needs its stream turned into what Faber shows: text as it arrives, steps (commands, file changes,
 reads, searches), usage, the end and errors. Both existing drivers do this as a pure step before any process work:
 `engine-drivers/src/claude.rs` reads Claude Code's stream lines and `engine-drivers/src/codex.rs` the app-server's messages into the events
 that `engine-core/src/events.rs` (`Session`) delivers to the engine, and each is tested by replaying recorded files
@@ -24,5 +24,5 @@ Leave out: starting a process, permission cards, Faber's tools, quota, routing (
 
 Done: `engine/tests/agy_parse.rs` replays every file of `tests/fixtures/agy/` through the parser and compares the event lists with
 checked-in expectations; fails today (no module). A property check: any prefix of any fixture parses without a panic. Extends: the
-"Gemini (Antigravity)" row of `docs/product-map.md` (built: the reader). No what's-new entry. Review: the other vendor. Cost: none
+"Antigravity" row of `docs/product-map.md` (built: the reader). No what's-new entry. Review: the other vendor. Cost: none
 at rest; the parser holds one reply's state.

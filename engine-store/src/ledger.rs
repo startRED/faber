@@ -142,7 +142,7 @@ pub struct VendorLedger {
 pub struct Ledger {
     pub claude: VendorLedger,
     pub codex: VendorLedger,
-    /// Empty until Gemini runs; a file written before it existed reads as empty (task 055).
+    /// Empty until Antigravity runs; a file written before it existed reads as empty (task 055).
     pub gemini: VendorLedger,
     /// Fields written by a newer Faber, kept as they were.
     #[serde(flatten)]

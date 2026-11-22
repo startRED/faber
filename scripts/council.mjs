@@ -38,7 +38,7 @@ export const NOISE = 1;
 /** The judges, by name: one per vendor, each on the model that reads a screen best for its quota. */
 export const JUDGES = {
   codex: { vendor: 'Codex', model: 'gpt-6.1-sol', effort: 'medium' },
-  agy: { vendor: 'Gemini', model: 'gemini-4-argon-high' },
+  agy: { vendor: 'Antigravity', model: 'gemini-4-argon-high' },
   claude: { vendor: 'Claude', model: 'sonnet', effort: 'medium' },
 };
 

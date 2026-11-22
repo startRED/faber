@@ -2743,7 +2743,7 @@ export const de: Messages = {
   'notes.278.better': 'Update bereit, neu starten geht jetzt mit einem Klick, auch wenn etwas läuft: Faber schließt sich, öffnet sich wieder und die Arbeit geht dort weiter, wo sie stand.',
   'notes.279.fixed': 'Faber behält nicht mehr jede geöffnete Unterhaltung im Speicher: Zwölf große Unterhaltungen nacheinander zu öffnen braucht jetzt höchstens 337 MB, vorher waren es schon bei der neunten über 400 MB.',
   'notes.280.fixed': 'Ein Helfer, der festzuhängen scheint, sagt jetzt, dass er weiterarbeitet und was du tun kannst, und seine Zeile unter „Braucht dich“ öffnet sein Gespräch.',
-  'notes.281.fixed': 'Der Projektspeicher lässt Geminis private Dateien beim Lesen und Bearbeiten aus.',
+  'notes.281.fixed': 'Der Projektspeicher lässt die privaten Dateien von Antigravity beim Lesen und Bearbeiten aus.',
   'notes.282.fixed': 'Wenn eine andere KI unterbrochene Arbeit übernimmt, erhält sie den gespeicherten Auftrag der noch nicht fertigen Helfer.',
   'notes.283.fixed': 'Der Bericht eines Helfers, der nicht zugestellt werden konnte, solange keine KI verfügbar war, geht jetzt von selbst raus, sobald eine zurück ist.',
   'notes.284.better': 'Auf Mac und Linux warten Helfer und Arbeit, die von selbst weiterläuft, jetzt, wenn der Arbeitsspeicher knapp ist, wie unter Windows, statt trotzdem zu starten.',

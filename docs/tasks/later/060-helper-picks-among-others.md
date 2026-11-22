@@ -5,7 +5,7 @@ Files: engine-drivers/src/helper.rs, engine/src/engine/helpers.rs, engine/src/en
 Depends: gemini-vendor-variant
 Size: about 220 changed lines
 
-Why: the owner wants reviews by "the other vendor" and quota balanced over Claude, Codex and Gemini. The helper tool is built on
+Why: the owner wants reviews by "the other vendor" and quota balanced over Claude, Codex and Antigravity. The helper tool is built on
 exactly two AIs: `helper::other(vendor)` (`engine-drivers/src/helper.rs`) returns the single other one, `offers_helper`
 (`engine/src/engine/helpers.rs`) offers the tool when that one is connected, `recovery.rs` finds "the other" with
 `Vendor::ALL.into_iter().find(|v| *v != t.pick.vendor)`, and the creative judges iterate `Vendor::ALL` for spare capacity. With
@@ -13,7 +13,7 @@ a third AI, "the other" is a choice: it must be a connected AI that did not writ
 `Core::allows` with `Purpose::UserTurn { by_hand: false }`, never billed per use, never the one the pace says is nearly spent).
 
 Build: `helper::others(vendor, connected)` returns every connected AI except the writer; the helper runs on the one with the most
-room by the same pace reading Auto uses (`budget.rs` `profile_m` / `vendor_m`; ties broken by the order Claude, Codex, Gemini);
+room by the same pace reading Auto uses (`budget.rs` `profile_m` / `vendor_m`; ties broken by the order Claude, Codex, Antigravity);
 `offers_helper` is true when any other is connected and allowed; recovery's "move to another AI" and the judges use the same
 function, so there is one rule. The tool description and the helper row keep saying "the other AI" in the plural-neutral way
 ("an AI that did not write this"). With exactly two connected AIs every behaviour is unchanged.

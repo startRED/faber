@@ -1,4 +1,4 @@
-# The Antigravity CLI (Gemini), as recorded
+# The Antigravity CLI, as recorded
 
 What `agy` 1.4.10 did on Windows 11 on 2026-10-30, recorded with the real CLI on the owner's subscription so a driver can be
 built from facts. The recordings are in `tests/fixtures/agy/`, one scenario per file, in the format of the other recordings: one

@@ -2623,7 +2623,7 @@ export const en = {
   'notes.278.better': 'Update ready, restart now works with one press even while something runs: Faber closes, opens again and the work picks up where it stopped.',
   'notes.279.fixed': 'Faber no longer keeps every conversation you open in memory: opening twelve big conversations in a row now peaks at 337 MB, where before it passed 400 MB by the ninth.',
   'notes.280.fixed': 'A helper that seems stuck now says it is still working and what you can do, and its row under Needs you opens its conversation.',
-  'notes.281.fixed': "Project memory keeps Gemini's private files out of reads and edits.",
+  'notes.281.fixed': "Project memory keeps Antigravity's private files out of reads and edits.",
   'notes.282.fixed': 'When another AI takes over interrupted work, it keeps the recorded request given to unfinished helpers.',
   'notes.283.fixed': "A helper's report that could not be delivered while no AI was available now goes out by itself once one is back.",
   'notes.284.better': "On Mac and Linux, helpers and work that goes on by itself now wait when your computer's memory is short, as on Windows, instead of starting anyway.",
