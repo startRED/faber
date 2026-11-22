@@ -209,7 +209,8 @@ check('calm: the composer measures its height at most once per frame, however ma
 const usageOf = (state: VendorUsage['state'], counting = false): VendorUsage[] => [{
   vendor: 'codex', plan: 'pro', state, learning: false, relearning: false, outsideShare: null, foreignUse: false, overageOn: false, billedPerUse: false,
   billingUnknown: false, askForPlan: false, paidPossible: false, ownSpendUsd: 0, unmetered: 0, counting,
-  windows: [{ name: 'seven_day', used: 0.44, elapsed: 0.5, expected: 0.5, resetsAt: 1_800_086_400, readAt: 1_800_000_000 - 240, uncounted: null }],
+  // A counting reading is past the recent limit, so its line says "at least" (R580).
+  windows: [{ name: 'seven_day', used: 0.44, elapsed: 0.5, expected: 0.5, resetsAt: 1_800_086_400, readAt: 1_800_000_000 - (counting ? 660 : 240), uncounted: null }],
 }];
 
 function sidebar(area: 'chat' | 'project', over: Partial<Parameters<typeof Sidebar>[0]> = {}, width = 224) {
