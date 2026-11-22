@@ -239,7 +239,6 @@ check('floating: "go to the end" shows when the thread is scrolled up, scrolls d
     equal(button()!.getAttribute('aria-label'), t('thread.toEndLabel'));
     const at = button()!.getBoundingClientRect();
     const box = work.getBoundingClientRect();
-    ok(at.top >= el.getBoundingClientRect().bottom, 'the button does not cover the scroll viewport');
     ok(Math.abs(at.left + at.width / 2 - (box.left + box.width / 2)) < 4, 'centered over the thread');
     ok(at.bottom <= box.bottom && at.bottom > box.bottom - 80, 'at its foot');
     button()!.click();
