@@ -183,6 +183,73 @@ check('catalog runtimes: GPU memory warning blocks installation and refreshes wh
   } finally { view.close(); }
 });
 
+let closePipelinePreview: (() => void) | undefined;
+Object.assign(window, { __faberCatalogPipelinePreview: async (detail: boolean) => {
+  closePipelinePreview?.();
+  const view = await panel();
+  closePipelinePreview = view.close;
+  useLanguage('pt-BR');
+  view.root.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg);z-index:10000';
+  await tap(view.root.querySelector<HTMLButtonElement>('[data-pipeline-filter]')!);
+  if (detail) await tap(view.root.querySelector<HTMLButtonElement>('[data-catalog-pipeline="production"]')!);
+  const screen = view.root.querySelector('.catalog')!;
+  equal(screen.scrollWidth, screen.clientWidth, 'the catalog fits this viewport');
+  return true;
+} });
+
+check('catalog pipeline: searches, copies to Projects and returns focus without installing', async () => {
+  const view = await panel();
+  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  let copied = '';
+  let rejectCopy = true;
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => {
+    if (rejectCopy) throw new Error('Clipboard unavailable');
+    copied = text;
+  } } });
+  try {
+    equal(view.root.querySelectorAll('[data-catalog-pipeline]').length, 0, 'default browsing stays focused on tools');
+    search(view.root, 'rObLoX');
+    equal(view.root.querySelectorAll('[data-catalog-pipeline]').length, 5);
+    equal(view.root.querySelector('.catalog-empty'), null, 'pipeline-only results suppress the no-match state');
+    const seen = new Set<string>();
+    for (const id of ['concept', 'production', 'art3d', 'playtest', 'launch']) {
+      const card = view.root.querySelector<HTMLButtonElement>(`[data-catalog-pipeline="${id}"]`);
+      ok(card, `search shows ${id}`);
+      await tap(card!);
+      equal(document.activeElement, view.root.querySelector('.catalog-detail h1'));
+      const prompt = view.root.querySelector<HTMLTextAreaElement>('[data-pipeline-prompt]');
+      ok(prompt?.readOnly && prompt.value.includes('Roblox'), 'the starter prompt is visible and selectable');
+      seen.add(prompt!.value);
+      if (id === 'concept') {
+        await tap(view.root.querySelector<HTMLButtonElement>('[data-pipeline-copy]')!);
+        ok(view.root.querySelector('[data-pipeline-copy-state]')?.textContent, 'a failure keeps the prompt available');
+        equal(copied, '');
+        rejectCopy = false;
+      }
+      await tap(view.root.querySelector<HTMLButtonElement>('[data-pipeline-copy]')!);
+      equal(copied, prompt!.value);
+      keyboard('Escape'); await tick();
+      equal(document.activeElement?.getAttribute('data-catalog-pipeline'), id);
+    }
+    equal(seen.size, 5, 'each card copies a different request');
+    search(view.root, 'trailer');
+    equal(view.root.querySelectorAll('[data-catalog-pipeline]').length, 1);
+    ok(view.root.querySelector('[data-catalog-pipeline="launch"]'), 'search finds a topic mentioned inside a pipeline');
+    search(view.root, '');
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-pipeline-filter]')!);
+    equal(view.root.querySelectorAll('[data-catalog-pipeline]').length, 5);
+    equal(cards(view.root).length, 0, 'pipelines are distinct from installable tools');
+    await tap(button(view.root, 'catalog.installed'));
+    equal(view.root.querySelectorAll('[data-catalog-pipeline]').length, 0);
+    deepEqual(view.calls.install, []);
+    equal(view.calls.list, 1, 'switching between workflows does not reread tools');
+  } finally {
+    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+    view.close();
+  }
+});
+
 check('catalog: search comes before the select shown action', async () => {
   const view = await panel();
   try {

@@ -1648,8 +1648,7 @@ mod tests {
                             let text = claude_input(&messages).await;
                             let note = note.unwrap();
                             assert!(text.starts_with(&note) && text.ends_with(task), "{which}: {text}");
-                            // Raised from 1,000 with the media sentence (about 160 characters, once per session); the temporary
-                            // folder's three long paths make up most of it.
+                            // Keep the note short even with a long temporary folder. Adjacent skills share one path reference.
                             assert!(note.contains("German") && note.contains("SKILL.md") && note.len() < 1200, "{which}: {note}");
                             assert!(!note.contains("# Frontend"), "{which}: skill bodies remain lazy");
                             assert!(!text.contains("Selbst weitermachen"), "{which}: the table stays in the file");
@@ -1678,7 +1677,8 @@ mod tests {
                                     "Skill(faber-guide:frontend-proof)",
                                     "Skill(faber-guide:media-craft)",
                                     "Skill(faber-guide:media-proof)",
-                                    "Skill(faber-guide:workflow-proof)"
+                                    "Skill(faber-guide:workflow-proof)",
+                                    "Skill(faber-guide:roblox-game-dev)",
                                 ],
                                 "{which}"
                             );

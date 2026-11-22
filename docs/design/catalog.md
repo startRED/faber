@@ -1,16 +1,13 @@
 # Catalog
 
-Stageshow adds optional demos in More; [delivery and the Faber scene](../product/frontend.md#evidence-and-limits)
-use existing controls and keep the kit outside the app.
+Stageshow's [optional demos](../product/frontend.md#evidence-and-limits) use More controls. The kit stays external.
 
-Faber's own frontend, media and workflow proof skills ride its guide. They have no Catalog cards or switches
-([frontend](../product/frontend.md), [media](../product/media.md)).
+Faber's [frontend](../product/frontend.md), [media](../product/media.md) and workflow proof skills ride its guide without cards or switches.
+[Roblox pipeline](../product/roblox.md) cards appear in searches and their own filter, and copy requests for Projects.
 
-An installed browser tool can match a browser performance request without its name being mentioned. This adds no
-screen control and preserves the existing project, permission and on/off boundaries.
+Installed browser tools match performance requests by intent within existing permission, project and on/off boundaries.
 
-A browsing and management tab beside Chat and Projects (R344). It extends the pinned skill/server store, moving its
-controls out of Settings > Projects. It is not a work area: no conversation, composer, project instructions or AI picker.
+Catalog is beside Chat and Projects (R344), replacing tool controls in Settings. It has no composer, project instructions or AI picker.
 
 ## Audio runtimes
 
@@ -158,8 +155,8 @@ Catalog is not a C005 work home; no composer is added to satisfy that card. Visu
 
 ## Cost statement for the pull request
 
-No new process, background timer or persistent catalog DOM. While open, render at most 48 catalog cards and 48 inventory
-rows per AI page; keep one bounded metadata snapshot and at most one inventory worker. A timed-out filesystem call may
+No new process, background timer or persistent catalog DOM. While open, render at most 48 tool cards, five matching
+pipeline cards and 48 inventory rows per AI page; keep one bounded metadata snapshot and at most one inventory worker. A timed-out filesystem call may
 retain that one worker until the OS returns, without polling or queuing retries. Closed, the tab releases its nodes and
 listeners. Disabled tools are hashed on activation. Snapshot preparation and cleanup use one store worker; ready sessions
 rehash the whole folders they may use before launch, outside the engine lock, including supporting files and server code.

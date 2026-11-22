@@ -2071,6 +2071,7 @@ html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
 .catalog .catalog-how h3 { margin: 5px 0 4px; }
 .catalog-detail .catalog-how p { margin: 0 0 6px; color: var(--ink-2); line-height: 1.55; }
 .catalog-detail p { margin: 14px 0; }
+.catalog-prompt { display: block; width: 100%; min-height: 10rem; resize: vertical; font: inherit; line-height: 1.55; }
 .catalog-detail dl { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr); gap: 12px 20px; margin: 28px 0; }
 .catalog-detail dt { color: var(--ink-3); }
 .catalog-detail dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
