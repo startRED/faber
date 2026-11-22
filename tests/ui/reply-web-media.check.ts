@@ -6,6 +6,7 @@ import { appliedLook, applyLook } from '../../ui/appearance.ts';
 import { closeMenu, menu } from '../../ui/contextmenu.ts';
 import { inlineMediaPaths } from '../../ui/markdown.tsx';
 import { mediaSession, ReplyGallery } from '../../ui/Media.tsx';
+import { ReplyWebPictures, webReply } from '../../ui/ReplyWebMedia.tsx';
 import { showSite } from '../../ui/Site.tsx';
 import { store } from '../../ui/running.ts';
 import { Thread } from '../../ui/Thread.tsx';
@@ -83,6 +84,50 @@ check('reply web media: adjacent pictures share galleries and inline images foll
   }
 });
 
+check('reply web media: sentence pictures stay inside their list item or quote', () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const photo = 'https://example.test/extensionless';
+  const text = [
+    `- Tight **![Web](${photo})** after [link](${link}).\n  - [x] Nested ![Local](./nested.png) after.`,
+    '3. Loose ![Loose](./loose.png) after.\n\n   Next paragraph.',
+    `> Quote [![Quoted](${photo})](${link}) after.\n>\n> Next quote paragraph.`,
+    `<div data-reply-media="fake"><img src="${photo}" alt="Raw" onerror="alert(1)"></div>`,
+  ].join('\n\n');
+  const dispose = render(() => createComponent(Thread, {
+    conversationId: 'web-picture-containers', options: [], from: 0, onBranch: () => {},
+    replyWeb: { mode: 'live', blocked: [], canOpen: false, open: async () => false },
+    messages: [{ id: 'reply', role: 'assistant', at: 0, text }],
+  }), host);
+  try {
+    const tight = host.querySelector('.md ul > li')!;
+    const nested = tight.querySelector('ul > li')!;
+    equal(tight.firstChild?.textContent, 'Tight ');
+    equal(tight.querySelector('strong')?.textContent, 'Web');
+    equal(tight.querySelector(':scope > ul')?.previousElementSibling?.querySelector('figure')?.getAttribute('aria-label'), 'Web',
+      'the tight item keeps its picture after the words and before the nested list');
+    equal(tight.querySelector('a')?.getAttribute('href'), link);
+    equal(nested.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked, true);
+    equal(nested.lastElementChild?.querySelector('figure')?.getAttribute('aria-label'), 'Local');
+    const loose = host.querySelector('.md ol[start="3"] > li')!;
+    const quote = host.querySelector('.md blockquote')!;
+    for (const [container, name] of [[loose, 'Loose'], [quote, 'Quoted']] as const) {
+      equal(container.firstElementChild?.tagName, 'P');
+      const picture = container.firstElementChild?.nextElementSibling;
+      equal(picture?.querySelector('figure')?.getAttribute('aria-label'), name);
+      equal(picture?.nextElementSibling?.tagName, 'P');
+    }
+    equal(quote.querySelector('p > a')?.getAttribute('href'), link);
+    equal(quote.querySelector('p > a')?.textContent, 'Quoted');
+    deepEqual([...inlineMediaPaths(text, 'C:/workspace')], ['nested.png', 'loose.png']);
+    equal(host.querySelectorAll('.md figure').length, 4);
+    equal(host.querySelector('.md img[src], .md [onerror]'), null);
+  } finally {
+    dispose();
+    host.remove();
+  }
+});
+
 function waitFor(host: HTMLElement, selector: string) {
   return new Promise<HTMLElement>((resolve, reject) => {
     const stop = () => { clearTimeout(deadline); observer.disconnect(); };
@@ -134,6 +179,39 @@ check('reply web media: the shared viewer releases each full web picture when na
     viewer.querySelector<HTMLButtonElement>('.viewer-btn.prev')!.click();
     await waitFor(viewer, 'img[alt="First"]');
     deepEqual(requests.slice(2), [media[0]!.path, media[1]!.path, media[1]!.path, media[0]!.path]);
+  } finally {
+    dispose();
+    host.remove();
+    if (hidden) Object.defineProperty(document, 'hidden', hidden);
+    else Reflect.deleteProperty(document, 'hidden');
+  }
+});
+
+check('reply web media: equivalent policy updates keep the open gallery viewer', async () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const hidden = Object.getOwnPropertyDescriptor(document, 'hidden');
+  Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  const [blocked, setBlocked] = createSignal<string[]>([]);
+  const session = mediaSession('gallery-policy', '');
+  session.observe = (_element, visible) => { visible(true); return () => {}; };
+  session.grantWeb = async () => { throw 'error.media.webUnreachable'; };
+  const pictures = Array.from({ length: 5 }, (_, i) => webReply(`https://example.test/${i}.jpg`, `Picture ${i + 1}`, true)!);
+  const dispose = render(() => createComponent(ReplyWebPictures, {
+    pictures, session, mode: 'live', canOpen: false, open: async () => false,
+    get blocked() { return blocked(); },
+  }), host);
+  try {
+    await waitFor(host, '.reply-gallery-more').then(button => button.click());
+    const gallery = host.querySelector('.reply-media-gallery');
+    const viewer = await waitFor(document.body, '.viewer');
+    await waitFor(viewer, 'a[href="https://example.test/4.jpg"]');
+    setBlocked(['unrelated.test']);
+    equal(host.querySelector('.reply-media-gallery'), gallery);
+    equal(document.querySelector('.viewer'), viewer);
+    setBlocked(['example.test']);
+    equal(host.querySelector('.reply-media-gallery'), null);
+    equal(document.querySelector('.viewer'), null);
   } finally {
     dispose();
     host.remove();
@@ -275,7 +353,7 @@ check('reply web media: the thread grants visible HTTPS media only in Live and r
     get conversationId() { return thread(); }, options: [], from: 0, onBranch: () => {},
     get replyWeb() { return { mode: mode(), blocked: blocked(), canOpen: false, open: async () => false }; },
     messages: [{ id: 'reply', role: 'assistant', at: 0, text: [
-      ...addresses.map((url, index) => `${index === 0 ? '!' : ''}[Media ${index}](${url})`),
+      ...addresses.map((url, index) => index === 0 ? `- Before ![Media 0](${url}) after.` : `[Media ${index}](${url})`),
       '[Ordinary link](https://example.test/image)',
       '![Insecure](http://example.test/picture.png)',
     ].join('\n\n') }],

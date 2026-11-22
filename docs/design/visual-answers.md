@@ -69,28 +69,27 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
 
 ## Local media in a conversation
 
-- Markdown hard breaks can separate standalone file links. Picture frames retain an outline in forced colors.
-- The screen calls `media_enter({ id })` when it starts displaying a conversation. It keeps the returned lease and
-  calls `media_leave({ lease })` when leaving, including when it returns to a home or settings screen. Entering a new
-  view invalidates the previous lease immediately. An old cleanup cannot close a newer lease. The shell also
-  revokes capabilities when its screen closes. A restart starts with an empty capability store.
-- `media_grant({ id, path })` returns an opaque, revocable URL for a relative filename. The host resolves the actual
-  Chat working folder or Project copy and records its identity on the first grant. Each read pins that same folder
-  for the duration of the read. It checks the opened file's type by bytes
-  before issuing a URL and on every request. File names are literal, with no URL or line-number parsing. The visual
-  reader refuses protected paths, links (including hard links), reparse points, devices and traversal. A replacement
-  regular media file can be read in a new request. A missing, unsafe or non-media replacement refuses the request.
-- A player gets a fresh URL for each load, including after it was unloaded off screen. It clears its element's
-  source and calls `media_release({ lease, url })` to drop that grant independently. Chromium can keep already
-  delivered bytes in its in-memory media cache, so a player never reattaches a previously issued URL.
+- Markdown hard breaks can separate standalone file links. A Markdown image in a sentence previews below the words
+  in the same paragraph, list item or quote. Picture frames retain an outline in forced colors.
+- A gallery mounts up to four previews. When there are more pictures, a separate button opens the viewer at the
+  next picture, even if every preview failed. The viewer can move through the entire gallery. Equivalent policy
+  updates keep it open while changes to the available pictures close it.
+- The screen enters with `media_enter({ id })` and leaves with `media_leave({ lease })`, including for home and
+  Settings. A new view revokes the previous lease immediately. Stale cleanup cannot close a newer lease.
+  Closing the screen also revokes access. A restart begins with no capabilities.
+- `media_grant({ id, path })` returns an opaque, revocable URL for a literal relative filename, without URL or
+  line-number parsing. The first grant identifies the Chat folder or Project copy. Every read pins that folder.
+  The host checks file bytes at grant and on each request. It rejects protected paths, links (including hard
+  links), reparse points, devices and traversal. Only a safe media replacement can be read again.
+- Players clear their source and call `media_release({ lease, url })` on unload. Every load gets a new URL,
+  including after scrolling off screen. An old URL could still have bytes in Chromium's in-memory cache.
 - Only the screen's media subresources use this transport. Electron uses `faber-media://app`, Tauri uses
   `faber-media://localhost` or its Windows alias `http://faber-media.localhost`. Each screen CSP has only its own
   origin for images and audio/video. SVG uses an image content type and an offline sandbox response policy.
   Responses have a fixed media type, no sniffing, no CORS grant and no caching. The visual pane keeps its own CSP.
-- GET byte requests support one bounded range, including open-ended and suffix ranges. A chunk carries at most
-  1 MiB with a 206 and Content-Range. Unranged images keep the existing approximate size limit (8 MiB). Grants
-  retain only a path and an opaque token, up to 512 paths in the one active view. No process, watcher or idle loop
-  is added. Leaving the view drops the grants. The screen releases its element's source.
+- GET supports one bounded range, including open-ended and suffix ranges. A 206 includes Content-Range and
+  up to 1 MiB. Unranged images have an approximate 8 MiB limit. Grants keep only the path and opaque token,
+  up to 512 paths in the active view. Leaving drops the grants. No new process, watcher or idle loop runs.
 - A refused grant returns `error.media.path` (outside or protected), `error.media.closed` (inactive view),
   `error.media.gone` (missing, unsafe or wrong bytes), or `error.media.limit` (capacity reached). Protocol
   refusals include the key in X-Faber-Media-Error. An element error can re-request the grant to detect a missing
@@ -99,7 +98,8 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
 ## Web media in a conversation
 
 - Adjacent web pictures share the reply gallery, including hard breaks and picture-only lists. URLs can be extensionless.
-  A Markdown image in a sentence previews below its paragraph. Ordinary links stay links.
+  A Markdown image in a sentence previews below the words, inside the same list item or quote when nested.
+  Ordinary links stay links. A failed picture keeps its titled link in the preview or viewer.
   A bare media URL after a caption can preview.
 - `media_grant_web({ id, url })` uses the visible conversation's lease. Live loads direct media automatically.
   Off and Cached refuse before DNS. Cached uses saved search results. Release or leave revokes the grant.

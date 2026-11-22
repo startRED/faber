@@ -1,9 +1,43 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { api, type Message } from '../../ui/api.ts';
+import { mediaSession, ReplyGallery } from '../../ui/Media.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import claudeRecording from '../fixtures/claude/reply-media.jsonl?raw';
 import { check, equal, frames, ok } from './check.ts';
+
+check('reply media: more pictures remain reachable when every gallery preview fails', async () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const hidden = Object.getOwnPropertyDescriptor(document, 'hidden');
+  Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  const session = mediaSession('failed-gallery', '');
+  const media = Array.from({ length: 6 }, (_, i) => ({
+    path: `https://example.test/picture-${i + 1}.png`, name: `Picture ${i + 1}`, kind: 'picture' as const,
+  }));
+  session.observe = (_element, visible) => { visible(true); return () => {}; };
+  session.grantWeb = async () => { throw 'error.media.webUnreachable'; };
+  const dispose = render(() => createComponent(ReplyGallery, { media, session, webAllowed: () => true }), host);
+  try {
+    await waitForMedia(host, 'figure[aria-label="Picture 4"] a');
+    equal(host.querySelectorAll('figure a').length, 4);
+    const more = host.querySelector<HTMLButtonElement>('.reply-gallery-more');
+    ok(more, 'the gallery has an independent entry point');
+    more.focus();
+    more.click();
+    const viewer = await waitForMedia(document.body, '.viewer');
+    await waitForMedia(viewer, 'a[href="https://example.test/picture-5.png"]');
+    viewer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    await waitForMedia(viewer, 'a[href="https://example.test/picture-6.png"]');
+    viewer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    await waitForMedia(viewer, 'a[href="https://example.test/picture-5.png"]');
+  } finally {
+    dispose();
+    host.remove();
+    if (hidden) Object.defineProperty(document, 'hidden', hidden);
+    else Reflect.deleteProperty(document, 'hidden');
+  }
+});
 
 check('reply media: a gallery and two players are built only from standalone Markdown references', () => {
   const host = document.createElement('div');
@@ -131,9 +165,9 @@ check('reply media: the gallery opens on the chosen picture and requests later p
     messages: [{ id: 'reply', role: 'assistant', at: 0, text: Array.from({ length: 6 }, (_, i) => `![Picture ${i + 1}](picture-${i + 1}.png)`).join('\n\n') }],
   }), host);
   try {
-    const more = await waitForMedia(host, 'button[aria-label="View 2 more"]:not([hidden])');
+    const fourth = await waitForMedia(host, 'button[aria-label="Open Picture 4"]:not([hidden])');
     equal(requests.length, 4);
-    more.click();
+    fourth.click();
     const viewer = await waitForMedia(document.body, '.viewer');
     await waitForMedia(viewer, 'img[alt="Picture 4"]');
     equal(requests.slice(4).join(','), 'picture-4.png');

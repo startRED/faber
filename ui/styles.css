@@ -2355,25 +2355,12 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .reply-media-picture-button { padding: 0; border: 0; background: transparent; color: var(--ink); }
 .reply-media-picture-button img, .md .reply-media-picture-button img { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
 .reply-media-picture-button:focus-visible { outline-offset: -3px; }
-.reply-media-picture-button > span {
-  position: absolute;
-  inset: 50% auto auto 50%;
-  transform: translate(-50%, -50%);
-  min-width: 40px;
-  min-height: 32px;
-  display: grid;
-  place-items: center;
-  padding-inline: 8px;
-  border-radius: var(--r-pill);
-  background: var(--s1);
-  font-size: var(--fs-ui);
-  font-weight: 600;
-}
 .reply-media-status { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; padding: 4px 8px; color: var(--ink-2); font-size: var(--fs-ui); text-align: center; }
 .reply-media-mark { display: grid; place-items: center; width: 48px; height: 36px; }
 .reply-media-mark[data-status="loading"]::before { content: ""; width: 20px; aspect-ratio: 1; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; }
 .reply-media-mark[data-status="error"] { color: var(--danger); }
 .reply-media-gallery { display: grid; grid-template-columns: repeat(var(--gallery-columns), minmax(0, 1fr)); gap: 8px; }
+.reply-gallery-more { grid-column: 1 / -1; justify-self: start; font-weight: 600; }
 .reply-media-tile .reply-media-slot { border-radius: var(--r-sm); }
 .reply-media-tile .reply-media-picture-button img { object-fit: cover; }
 .reply-media-thumb:not([hidden]) { display: block; width: 28px; height: 20px; flex: none; }

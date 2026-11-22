@@ -64,7 +64,9 @@ function webReason(media: WebReply, options: ReplyWebOptions, kind: MediaRef['ki
 export function ReplyWebPictures(props: {
   pictures: WebReply[]; list?: { ordered: boolean; start: number }; session: MediaSession;
 } & ReplyWebOptions) {
-  const available = createMemo(() => props.pictures.filter(picture => !webReason(picture, props, 'picture')));
+  const available = createMemo(() => props.pictures.filter(picture => !webReason(picture, props, 'picture')), undefined, {
+    equals: (previous, next) => previous.length === next.length && previous.every((picture, i) => picture === next[i]),
+  });
   const gallery = createMemo<MediaRef[]>(() => available().map(picture => ({
     path: picture.url, name: picture.title, kind: 'picture',
   })));

@@ -184,7 +184,7 @@ export type MediaSession = ReturnType<typeof mediaSession>;
 type Session = MediaSession;
 export const ReplyMediaContext = createContext<Accessor<Session>>();
 
-export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: boolean; tile?: boolean; onView?: (img: HTMLImageElement) => void; more?: number; webAllowed?: () => boolean }) {
+export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: boolean; tile?: boolean; onView?: (img: HTMLImageElement) => void; webAllowed?: () => boolean }) {
   const context = useContext(ReplyMediaContext);
   const scope = () => props.session ?? context?.();
   const [visible, setVisible] = createSignal(false);
@@ -262,7 +262,7 @@ export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: 
         <Show when={source()} keyed>{(url) =>
           props.media.kind === 'picture' ?
             <button type="button" class="reply-media-picture-button" hidden={status() !== 'ready'}
-              aria-label={props.more ? t('media.more', { n: props.more }) : t('viewer.open', { name: props.media.name })}
+              aria-label={t('viewer.open', { name: props.media.name })}
               onClick={(e) => {
                 e.stopPropagation();
                 const image = e.currentTarget.querySelector('img')!;
@@ -270,7 +270,6 @@ export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: 
                 else openViewer(image);
               }}>
               <img ref={(el) => { image = el; }} src={url} decoding="async" alt={props.media.name} data-view="" onLoad={ready} onError={failed} />
-              <Show when={props.more}><span>{t('media.more', { n: props.more! })}</span></Show>
             </button> : props.media.kind === 'video' ?
               <video ref={(el) => { player = el; }} hidden={status() !== 'ready'} src={url} {...playback()} /> :
               <audio ref={(el) => { player = el; }} hidden={status() !== 'ready'} src={url} {...playback()} />
@@ -305,7 +304,7 @@ export function ReplyGallery(props: { media: MediaRef[]; session?: Session; webA
   const previews = props.media.slice(0, 4);
   let close: (() => void) | undefined;
   onCleanup(() => close?.());
-  const view = (origin: HTMLImageElement, index: number) => {
+  const view = (origin: HTMLElement, index: number) => {
     const session = props.session ?? context?.();
     if (!session) return;
     let active = true;
@@ -324,8 +323,13 @@ export function ReplyGallery(props: { media: MediaRef[]; session?: Session; webA
   };
   return <div class="reply-media-gallery" style={{ '--gallery-columns': previews.length }}>
     <For each={previews}>{(media, i) =>
-      <ReplyMedia media={media} session={props.session} tile more={i() === 3 ? props.media.length - 4 : undefined}
+      <ReplyMedia media={media} session={props.session} tile
         webAllowed={props.webAllowed && (() => !!props.webAllowed?.(media))} onView={(img) => view(img, i())} />
     }</For>
+    <Show when={props.media.length > previews.length}>
+      <button type="button" class="btn ghost reply-gallery-more" onClick={(event) => view(event.currentTarget, previews.length)}>
+        {t('media.more', { n: props.media.length - previews.length })}
+      </button>
+    </Show>
   </div>;
 }

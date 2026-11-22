@@ -144,6 +144,7 @@ type Block = {
   web?: WebReply;
   webPictures?: WebReply[];
   parts?: Block[];
+  pictureSlots?: { marker: Tokens.HTML; picture: Block }[];
   pictureList?: { ordered: boolean; start: number };
 };
 
@@ -230,10 +231,10 @@ function imageList(token: Token): Block | undefined {
   };
 }
 
-function sentencePictures(token: Token, folder: string): Block[] | undefined {
-  if (token.type !== 'paragraph') return;
-  const paragraph = token as Tokens.Paragraph;
+function sentencePictures(token: Token, folder: string, nested = false): Block[] | undefined {
+  if ((token.type !== 'paragraph' && token.type !== 'text') || !token.tokens) return;
   const pictures: Block[] = [];
+  let hasWords = false;
   const withoutPictures = (tokens: Token[]): Token[] => tokens.flatMap<Token>((part) => {
     if (part.type === 'image') {
       const media = localMedia(part.href, part.text, folder);
@@ -243,13 +244,33 @@ function sentencePictures(token: Token, folder: string): Block[] | undefined {
         return part.text ? [{ type: 'text', raw: part.text, text: part.text }] : [];
       }
     }
-    if (part.type !== 'link' && 'tokens' in part && Array.isArray(part.tokens)) {
+    if ((part.type !== 'link' || nested) && part.type !== 'image' && 'tokens' in part && Array.isArray(part.tokens)) {
       return [{ ...part, tokens: withoutPictures(part.tokens) }];
     }
+    if (part.type !== 'image' && part.type !== 'html' && part.type !== 'br' && part.type !== 'checkbox' && part.raw.trim()) hasWords = true;
     return [part];
   });
-  const tokens = withoutPictures(paragraph.tokens);
-  if (pictures.length) return [{ raw: '', tokens: [{ ...paragraph, tokens }] }, ...pictures];
+  const tokens = withoutPictures(token.tokens);
+  if (pictures.length && (!nested || hasWords)) return [{ raw: '', tokens: [{ ...token, tokens }] }, ...pictures];
+}
+
+function nestedPictureSlots(token: Tokens.List | Tokens.Blockquote, folder: string) {
+  const slots: NonNullable<Block['pictureSlots']> = [];
+  marked.walkTokens([token], (child) => {
+    if (child.type !== 'list_item' && child.type !== 'blockquote') return;
+    const container = child as Tokens.ListItem | Tokens.Blockquote;
+    container.tokens = container.tokens.flatMap((line) => {
+      const parts = sentencePictures(line, folder, true);
+      if (!parts) return [line];
+      const [words, ...pictures] = parts;
+      return [...words!.tokens!, ...pictures.map((picture) => {
+        const marker: Tokens.HTML = { type: 'html', raw: '', text: '', block: true, pre: false };
+        slots.push({ marker, picture });
+        return marker;
+      })];
+    });
+  });
+  return slots.length ? slots : undefined;
 }
 
 function blocksOf(text: string, references?: Links, folder?: string): { blocks: Block[]; links: Links } {
@@ -267,14 +288,16 @@ function blocksOf(text: string, references?: Links, folder?: string): { blocks: 
       const web = folder === undefined ? undefined : paragraphWeb(token);
       const list = folder === undefined ? undefined : imageList(token);
       const parts = folder === undefined || media || web ? undefined : lineMedia(token, folder) ?? sentencePictures(token, folder);
+      const pictureSlots = folder !== undefined && !list && (token.type === 'list' || token.type === 'blockquote')
+        ? nestedPictureSlots(token as Tokens.List | Tokens.Blockquote, folder) : undefined;
       appendWebBlock(blocks, list ?? (parts?.length === 1 && parts[0]?.webPictures
         ? { ...parts[0], raw: token.raw }
-        : { raw: token.raw, tokens: [token], media, web, parts }));
+        : { raw: token.raw, tokens: [token], media, web, parts, pictureSlots }));
     }
   }
   if (lexed.some((token) => token.type === 'html')) {
     return {
-      blocks: [{ raw: text, parts: blocks.some((block) => block.media || block.web || block.parts || block.webPictures) ? blocks : undefined }],
+      blocks: [{ raw: text, parts: blocks.some((block) => block.media || block.web || block.parts || block.webPictures || block.pictureSlots) ? blocks : undefined }],
       links: lexed.links,
     };
   }
@@ -323,7 +346,8 @@ export const referenceLinks = (text: string): Links => marked.lexer(text, OPTION
 
 /** Preserve the file's Save and Show actions without drawing a second copy of an inline player. */
 export function inlineMediaPaths(text: string, folder: string): Set<string> {
-  const paths = (block: Block): string[] => block.parts?.flatMap(paths) ?? block.media?.map((ref) => ref.path) ?? [];
+  const paths = (block: Block): string[] => block.parts?.flatMap(paths) ?? block.pictureSlots?.flatMap(({ picture }) => paths(picture))
+    ?? block.media?.map((ref) => ref.path) ?? [];
   return new Set(blocksOf(text, undefined, folder).blocks.flatMap(paths));
 }
 
@@ -359,15 +383,18 @@ export function renderMarkdown(root: HTMLElement, text: string, references?: Lin
     const template = document.createElement('template');
     const markup = (part: Block) => marked.parser(Object.assign(part.tokens ?? lex(part.raw, references), { links }), OPTIONS);
     const marks = new Map<string, Block>();
-    const mediaMarkup = (part: Block): string => {
-      if (part.parts) return part.parts.map(mediaMarkup).join('');
-      if (!part.media && !part.web && !part.webPictures) return markup(part);
+    const mediaMarker = (part: Block): string => {
       // Keep raw HTML in one sanitising pass. Only renderer-created markers can mount players.
       const key = crypto.getRandomValues(new Uint32Array(4)).join('-');
       marks.set(key, part);
       return `<div data-reply-media="${key}"></div>`;
     };
-    const source = block.parts ? mediaMarkup(block) : markup(block);
+    const mediaMarkup = (part: Block): string => {
+      if (part.parts) return part.parts.map(mediaMarkup).join('');
+      for (const { marker, picture } of part.pictureSlots ?? []) marker.text = mediaMarker(picture);
+      return part.media || part.web || part.webPictures ? mediaMarker(part) : markup(part);
+    };
+    const source = block.parts || block.pictureSlots ? mediaMarkup(block) : markup(block);
     template.innerHTML = tidy(source);
     raws.push(block.raw);
     if (session && (block.media || block.web || block.webPictures)) {
