@@ -374,7 +374,7 @@ fn tabs(ctx: &mut Ctx) -> Result {
     app.page.wait_gone(&css(".site-address"))?;
     app.page.wait_for(
         "the last tab to release the native page",
-        "window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(p=>p.shown===false)",
+        "window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false,quick:true}).then(p=>p.shown===false && p.width == null)",
     )?;
     ensure(ctx.records()?.is_empty(), || "the browser-tab control walk started a CLI".into())?;
     ctx.close(app.id)
