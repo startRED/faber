@@ -32,6 +32,7 @@ uuid = { version = "1", features = ["v4"] }
 zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
+http = "1"
 faber-engine-core = { path = "../engine-core", features = ["test-support"] }
 faber-engine-store = { path = "../engine-store", features = ["test-support"] }
 faber-engine-drivers = { path = "../engine-drivers", features = ["test-support"] }

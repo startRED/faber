@@ -88,6 +88,18 @@ fn response_kind_ignores_the_url_and_http_content_type() {
     assert_eq!(sniff(b"<!DOCTYPE html><html><svg>"), None);
 }
 
+#[tokio::test]
+async fn svg_with_comment_longer_than_probe_is_returned_whole() {
+    let svg_bytes = format!("<!--{}--><svg xmlns=\"http://www.w3.org/2000/svg\"></svg>", "a".repeat(PROBE as usize)).into_bytes();
+    let response = reqwest::Response::from(http::Response::new(svg_bytes.clone()));
+    let pin = Target { url: Url::parse("https://example.com/image").unwrap(), addresses: Arc::from([]) };
+    let check = |_: &Url| Ok(());
+    let send = |_: Target, _: String| async { unreachable!() };
+    let chunk = media(response, None, false, PROBE, &pin, &check, &send).await.unwrap();
+    assert_eq!(chunk.kind, "image/svg+xml");
+    assert_eq!(chunk.bytes, svg_bytes);
+}
+
 async fn server(replies: Vec<(&'static str, String, Vec<u8>)>) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();

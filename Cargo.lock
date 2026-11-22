@@ -1160,6 +1160,7 @@ dependencies = [
  "faber-engine-store",
  "faber-winproc",
  "flate2",
+ "http",
  "junction",
  "pulldown-cmark",
  "reqwest",
