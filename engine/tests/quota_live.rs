@@ -53,6 +53,32 @@ fn the_first_look_reads_everyone_and_then_every_quarter_of_an_hour_visible_or_hi
 }
 
 #[test]
+fn a_vendor_still_counting_is_read_after_its_gap_and_back_to_the_quarter_hour_once_settled() {
+    let mut c = Cadence::default();
+    c.tick(T0, &BOTH);
+    // Only Claude is still counting: it is read every five minutes, Codex keeps the quarter of an hour.
+    let mut read = vec![];
+    let mut t = T0 + TICK;
+    while t <= T0 + 900.0 {
+        read.extend(c.tick_counting(t, &BOTH, &[Vendor::Claude]).into_iter().map(|(v, r)| (t, v, r)));
+        t += TICK;
+    }
+    let timer = |at: f64, v| (T0 + at, v, Reason::Timer);
+    assert_eq!(
+        read,
+        vec![timer(300.0, Vendor::Claude), timer(600.0, Vendor::Claude), timer(900.0, Vendor::Claude), timer(900.0, Vendor::Codex)]
+    );
+    // Codex counting is read every minute; Claude, settled, waits its quarter of an hour again.
+    let mut read = vec![];
+    while t <= T0 + 900.0 + 180.0 {
+        read.extend(c.tick_counting(t, &BOTH, &[Vendor::Codex]).into_iter().map(|(v, r)| (t, v, r)));
+        t += TICK;
+    }
+    assert_eq!(read, vec![timer(960.0, Vendor::Codex), timer(1020.0, Vendor::Codex), timer(1080.0, Vendor::Codex)]);
+    assert!(ticks(&mut c, T0 + 1080.0, T0 + 1080.0 + 720.0 - 1.0).is_empty(), "nobody counting: a quiet stretch again");
+}
+
+#[test]
 fn focus_the_end_of_a_request_and_a_wake_share_one_debounce_per_vendor() {
     let mut c = Cadence::default();
     c.tick(T0, &BOTH);

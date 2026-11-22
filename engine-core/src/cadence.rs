@@ -2,7 +2,8 @@
 //! themselves cost no model tokens (a status command, a rate-limit call; for a Claude Code that prints no percentages, one
 //! request of about 500 cached tokens); this only decides how often to ask.
 //!
-//! Faber reads when it starts and then every 15 minutes, whether its window is visible or not. Things that happen in between
+//! Faber reads when it starts and then every 15 minutes, whether its window is visible or not; a vendor with a turn running,
+//! or still counting Faber’s own use for `FAST_FOR` after one, is read once its reading is older than its gap instead. Things that happen in between
 //! (a request ended, the window gained focus, the PC woke up) may ask for an earlier reading, but all of them share ONE
 //! debounce per vendor: no reading sooner than a gap after the last one, whatever the last one was. The gap is longer for
 //! Claude Code, whose reading starts a heavy Node process, than for Codex, whose server answers in a second.
@@ -18,6 +19,10 @@ pub const EVERY: f64 = 15.0 * 60.0;
 /// The shared debounce of event readings (end of a request, focus, wake): at least this long since the last reading.
 pub const CLAUDE_GAP: f64 = 5.0 * 60.0;
 pub const CODEX_GAP: f64 = 60.0;
+/// With no turn running, a vendor still counting is read at its gap for at most this long after its last request ended, then
+/// every `EVERY` again: an account whose readings keep failing never settles, and must not start a heavy reading every few
+/// minutes for ever. A running turn is read at its gap for as long as it runs.
+pub const FAST_FOR: f64 = 30.0 * 60.0;
 /// A loop that was not heard from for this long slept with the PC.
 const SLEPT: f64 = 3.0 * TICK;
 
@@ -56,6 +61,13 @@ impl Cadence {
     /// The loop’s look at the clock: who is due, and why. A clock that jumped far ahead (or back) means the PC slept, which
     /// is an event like any other and goes through the same debounce.
     pub fn tick(&mut self, now: f64, vendors: &[Vendor]) -> Vec<(Vendor, Reason)> {
+        self.tick_counting(now, vendors, &[])
+    }
+
+    /// The same look, told which vendors to follow closely (the engine’s `reads_fast`: a turn running or use still being counted,
+    /// on a reading older than the gap): their timed reading comes after the vendor’s
+    /// gap instead of `EVERY`, so the number on screen is never long behind the work that moved it.
+    pub fn tick_counting(&mut self, now: f64, vendors: &[Vendor], counting: &[Vendor]) -> Vec<(Vendor, Reason)> {
         let woke = self.last_tick.is_some_and(|t| !(0.0..SLEPT).contains(&(now - t)));
         self.last_tick = Some(now);
         vendors
@@ -64,6 +76,7 @@ impl Cadence {
                 let (reason, gap) = match self.last_read.get(v) {
                     None => (Reason::Start, 0.0),
                     Some(_) if woke => (Reason::Wake, gap(*v)),
+                    Some(_) if counting.contains(v) => (Reason::Timer, gap(*v)),
                     Some(_) => (Reason::Timer, EVERY),
                 };
                 self.take(*v, now, gap).then_some((*v, reason))

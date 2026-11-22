@@ -72,9 +72,9 @@ remain usable from the keyboard in both areas.
   width: the line "This conversation is archived…" in the second ink and a small Unarchive button at its right.
 - The footer is one row, the person's name when they gave one and Settings, then one thin line per connected vendor: its
   shape and name, a 3 px bar and the used share of its weekly quota window in words, "24% used" (R177; a vendor that never reported one shows its tightest), in the
-  small size. Nothing on the line wraps: the bar gives way. The window, the reset, the other windows with their shares (the five-hour one), how old the reading is and the not-yet-counted estimate are its tooltip. While
-  use is still being counted the share reads "≥ 44% used" (the real share can only be higher), with the words in the tooltip
-  (C010). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Accounts and limits.
+  small size. Nothing on the line wraps: the bar gives way. The window, the reset, the other windows with their shares (the five-hour one), how old the reading is and the not-yet-counted estimate are its tooltip. The share is
+  shown as read ("44% used") while its reading is recent (9 minutes on the screen’s clock, which moves once a minute, so never past 10 minutes old); while use is still being counted the tooltip says so,
+  and only a reading still counting that is older than that (or has no time, or is more than a minute ahead of the screen’s clock) reads "at least 44% used" (the real share can only be higher; C010, R580). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Accounts and limits.
   A vendor with no current reading shows no bar: under its name, on a second line (the one place the line wraps), "Usage shows once the subscription reports it", and its tooltip says to check the limits with the provider. The version is not on the sidebar: it is the
   tooltip of the Settings button.
 - Search filters titles and project names, then message text, and opens the message ([search.md](search.md#sidebar-search)). The percentage and "stopped" tails

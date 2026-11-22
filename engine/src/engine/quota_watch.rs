@@ -8,6 +8,15 @@ use super::*;
 use crate::account::{UsageRead, claude_probe, claude_usage};
 use crate::ledger::VendorLedger;
 
+/// Whether a vendor's quota is read at its short gap instead of every quarter of an hour (R580): one of its turns runs, or
+/// its own work that ended within `FAST_FOR` is still uncounted; and a live reading is older than the gap, so the turn's own
+/// stream has not just refreshed it. Without the bound an account whose readings keep failing would be read fast for ever.
+fn reads_fast(ledger: &VendorLedger, running: bool, gap: f64, now: f64) -> bool {
+    let newest = ledger.work.iter().map(|w| w.finished).chain(ledger.folded.iter().map(|f| f.finished)).fold(f64::MIN, f64::max);
+    let recent = ledger.counting(now) && (0.0..=crate::cadence::FAST_FOR).contains(&(now - newest));
+    (running || recent) && ledger.readings.values().any(|r| r.resets_at > now && now - r.read_at >= gap)
+}
+
 const CLAUDE_TIMEOUT: Duration = Duration::from_secs(45);
 const CODEX_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -163,7 +172,9 @@ impl Core {
     /// The watcher's look at the clock.
     pub(super) fn quota_tick(&mut self) {
         let (now, vendors) = (self.secs(), self.vendors());
-        let due = self.cadence.tick(now, &vendors);
+        let fast = |v: &Vendor| reads_fast(self.ledger.of(*v), self.turn_running(*v), crate::cadence::gap(*v), now);
+        let counting: Vec<Vendor> = vendors.iter().copied().filter(fast).collect();
+        let due = self.cadence.tick_counting(now, &vendors, &counting);
         for (vendor, reason) in &due {
             if *reason == crate::cadence::Reason::Wake {
                 let ledger = self.ledger.of_mut(*vendor);
@@ -277,5 +288,31 @@ mod tests {
         assert!(!probe_is_free(&billed, NOW, f64::MIN), "every request is paid");
         assert!(!probe_is_free(&said_off(NOW - 600.0), NOW, NOW - 300.0), "a probe gave no clean reading since: what it saw is lost");
         assert!(probe_is_free(&said_off(NOW - 600.0), NOW, NOW - 600.0), "word from that same probe counts");
+    }
+
+    #[test]
+    fn a_vendor_is_read_fast_only_while_recent_work_is_uncounted_on_a_reading_older_than_the_gap() {
+        let read = |at: f64| {
+            let mut v = VendorLedger { lag: 600.0, ..Default::default() };
+            v.record("five_hour", 0.10, NOW + 10_000.0, at, 0);
+            v
+        };
+        let worked = |mut v: VendorLedger, finished: f64| {
+            v.worked(crate::ledger::Work { start: finished - 60.0, finished, model: "m".into(), cost: None, incomplete: false }, finished);
+            v
+        };
+        assert!(!reads_fast(&read(NOW - 600.0), false, 300.0, NOW), "nothing uncounted, no turn: the quarter of an hour");
+        assert!(reads_fast(&worked(read(NOW - 300.0), NOW - 100.0), false, 300.0, NOW), "work just ended on a reading five minutes old");
+        assert!(!reads_fast(&worked(read(NOW - 299.0), NOW - 100.0), false, 300.0, NOW), "the reading is newer than the gap");
+        assert!(reads_fast(&read(NOW - 300.0), true, 300.0, NOW), "a turn runs and its stream has not refreshed the reading");
+        assert!(!reads_fast(&read(NOW - 10.0), true, 300.0, NOW), "a turn runs and its stream keeps the reading fresh");
+        // Readings that keep failing never settle the work: the fast readings stop half an hour after it ended.
+        let stuck = worked(read(NOW - 4000.0), NOW - 1800.0);
+        assert!(stuck.counting(NOW + 1.0) && reads_fast(&stuck, false, 300.0, NOW));
+        assert!(!reads_fast(&stuck, false, 300.0, NOW + 1.0));
+        assert!(
+            !reads_fast(&worked(VendorLedger { lag: 600.0, ..Default::default() }, NOW - 100.0), true, 300.0, NOW),
+            "never read: the timer's turn"
+        );
     }
 }

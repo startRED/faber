@@ -80,7 +80,12 @@ Both vendors' counters are read by commands that answer locally, so a reading co
   rate-limit updates); those go through the same recording.
 
 When it is read (`engine-core/src/cadence.rs`, tested with a fake clock): on start, then every 15 minutes whether the window is
-visible or hidden (the owner’s ceiling is a reading never more than 30 minutes old). Three things may ask for an earlier
+visible or hidden (the owner’s ceiling is a reading never more than 30 minutes old). A vendor still counting Faber's own use
+(a turn of it running, or work that ended in the last 30 minutes and is not counted yet) is read after its debounce gap
+instead of the 15 minutes, and only when a live reading is older than that gap, so a turn whose own stream keeps the readings
+fresh starts none (R580). The 30 minutes bound an account whose readings keep failing and never settle.
+A turn that runs for hours is read at the gap for as long as it runs. With no turn running, a Faber whose last request
+ended more than 30 minutes ago reads no more often than before. Three things may ask for an earlier
 reading: a request that ended, the window gaining focus, and the PC waking up (a loop that was not heard from for 90 seconds
 slept). All three share ONE debounce per vendor: no reading sooner than 5 minutes after the last one for Claude Code (whose
 reading starts a heavy Node process, about 12 CPU-seconds and 330 MB for a few seconds) and 1 minute for Codex (about 1
@@ -101,6 +106,9 @@ the lag: reading another window settles nothing, and time alone releases nothing
 Pending requests are never dropped; past 100 the oldest are folded into one record that keeps their convertible points and the
 latest end. While anything is pending, or a turn of the vendor is
 running (for decisions as well as for the screen), the reading is marked "still counting" and no discount is believed on it.
+On screen the marker is in the tooltip and for screen readers; the share itself is shown as read while its reading is
+recent (9 minutes on the screen’s clock, which moves once a minute, so never past 10 minutes old) and reads "at least" only on a
+reading still counting that is no longer recent, or that has no time or is over a minute ahead of that clock (the system clock went back) (R580).
 Where the window is the one the conversion was measured on and the request’s model has a measured points-per-dollar (the
 learned weights), the unreported share is added as a separate estimate (cost x points per dollar, minus what the reading has
 already risen since the work began, taken off only when all the pending work is convertible). Work that cannot be converted adds

@@ -17,7 +17,7 @@ import { vendorName } from './models.ts';
 import { forgetProject } from './projects.ts';
 import { type Place, stateWords, waitNeedsAttention, waitWords } from './running.ts';
 import { planWords } from './Plan.tsx';
-import { ageOf, freshness, groupChats, lineReading, matches, nest, otherReadings, pinned, type Quotas, showsChats, tailOf } from './sidebar.ts';
+import { ageOf, floorOnly, freshness, groupChats, lineReading, matches, nest, otherReadings, pinned, type Quotas, showsChats, tailOf } from './sidebar.ts';
 
 /** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed. */
 function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
@@ -693,8 +693,8 @@ export function Sidebar(props: Props) {
             {(v) => {
               const q = () => lineReading(props.quotas, v, props.now);
               const fresh = () => freshness(props.usage, v, q()?.window);
-              // While use is still being counted the real share can only be higher, so it reads "≥ 44%" (C010).
-              const share = () => (!q() ? '' : fresh().counting ? t('quota.atLeast', { share: percent(q()!.used) }) : percent(q()!.used));
+              // The share as read; "at least 44%" only when use is still being counted on a reading that is no longer recent (C010).
+              const share = () => (!q() ? '' : floorOnly(fresh(), props.now) ? t('quota.atLeast', { share: percent(q()!.used) }) : percent(q()!.used));
               const low = () => props.usage?.find((u) => u.vendor === v)?.state === 'low';
               const details = () =>
                 q()

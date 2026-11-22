@@ -142,6 +142,19 @@ export function freshness(usage: VendorUsage[] | undefined, vendor: Vendor, wind
   return { readAt, counting: u.counting, uncountedPoints: extra == null ? undefined : Math.round(extra * 100) };
 }
 
+/** The screen’s clock moves this often (`useClock`), so a reading can be this far ahead of it. */
+const CLOCK_STEP_MS = 60_000;
+/** A reading this recent is shown as read: with the clock’s step, no share shows as read past 10 minutes. */
+export const RECENT_READING_MS = 10 * 60_000 - CLOCK_STEP_MS;
+
+/** Whether the share reads "at least": use that may still be missing from a reading that is no longer recent (C010). */
+export function floorOnly(fresh: Freshness, nowMs: number): boolean {
+  // A reading further ahead than the clock’s step means the system clock went back: its age is unknown, so it is not recent.
+  const age = fresh.readAt === undefined ? Infinity : nowMs - fresh.readAt * 1000;
+  const recent = age >= -CLOCK_STEP_MS && age <= RECENT_READING_MS;
+  return (fresh.counting || !!fresh.uncountedPoints) && !recent;
+}
+
 /** What Settings says about one account. An installed CLI is not a connected account: only the CLI saying it is signed in
  * is. `undefined` is a check still on its way, `'failed'` one that could not run. */
 export type AccountLine = 'checking' | 'connected' | 'notConnected' | 'unsure';

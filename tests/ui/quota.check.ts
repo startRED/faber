@@ -4,7 +4,7 @@ import { api, type Message, type VendorUsage } from '../../ui/api.ts';
 import { percent, t, useLanguage, type Lang } from '../../ui/i18n.ts';
 import { Settings } from '../../ui/Settings.tsx';
 import { Sidebar } from '../../ui/Sidebar.tsx';
-import { ageOf, freshness } from '../../ui/sidebar.ts';
+import { ageOf, floorOnly, freshness } from '../../ui/sidebar.ts';
 import { Thread } from '../../ui/Thread.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -91,7 +91,7 @@ check('quota: each sidebar line says whose quota and how much is used in words, 
     try {
       const line = s.host.querySelector<HTMLElement>('.usage .vendor')!;
       equal(line.querySelector('.name')?.textContent, 'Codex', `${lang}: the AI is named on the line`);
-      equal(`${line.querySelector('.share')?.textContent} ${line.querySelector('.used')?.textContent}`, `${t('quota.atLeast', { share: percent(0.44) })} ${t('quota.used')}`, `${lang}: the share says it is used`);
+      equal(`${line.querySelector('.share')?.textContent} ${line.querySelector('.used')?.textContent}`, `${percent(0.44)} ${t('quota.used')}`, `${lang}: the share says it is used`);
       ok(line.title.startsWith('Codex · '), `${lang}: the tooltip is as before: ${line.title}`);
       const name = line.querySelector<HTMLElement>('.name')!.getBoundingClientRect();
       const share = line.querySelector<HTMLElement>('.used')!.getBoundingClientRect();
@@ -102,6 +102,33 @@ check('quota: each sidebar line says whose quota and how much is used in words, 
 });
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+// The owner's 2026-11-22 report: with work always running, every line said "at least" and never the share as read.
+check('quota: a recent reading shows the share as read while still counting; only an old one says "at least"', async () => {
+  useLanguage('pt-BR');
+  ok(!floorOnly(freshness(usage({ counting: true, readAt: at(540) }), 'codex'), NOW), 'nine minutes on a clock that may be a minute behind');
+  ok(floorOnly(freshness(usage({ counting: true, readAt: at(541) }), 'codex'), NOW));
+  ok(!floorOnly(freshness(usage({ readAt: at(3600) }), 'codex'), NOW), 'a settled reading is never a floor, however old');
+  ok(floorOnly({ counting: true }, NOW), 'no read time: a floor');
+  ok(!floorOnly(freshness(usage({ counting: true, readAt: at(-60) }), 'codex'), NOW), 'read since the clock last moved');
+  ok(floorOnly(freshness(usage({ counting: true, readAt: at(-61) }), 'codex'), NOW), 'the system clock went back: age unknown');
+  for (const [readAt, share] of [[at(240), '44%'], [at(660), 'pelo menos 44%']] as const) {
+    const u = usage({ counting: true, readAt });
+    const s = sidebar(u);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const props = { start: 'accounts', look: { appearance: { base: 'sala' }, vars: {}, scheme: 'dark', motion: 'none', effects: {}, checks: [], notices: [] }, saved: {}, vendors: ['codex'],
+      quotas, now: NOW, usage: u, onClose: () => {}, onSave: async () => true, onOpenSetup: () => {} } as unknown as Parameters<typeof Settings>[0];
+    const dispose = render(() => createComponent(Settings, props), host);
+    try {
+      await tick();
+      const line = s.host.querySelector<HTMLElement>('.usage .vendor')!;
+      equal(line.querySelector('.share')?.textContent, share, 'the sidebar line');
+      ok(line.title.includes('ainda contando') && line.querySelector('.sr')?.textContent === 'ainda contando', `the marker stays beside the number: ${line.title}`);
+      equal(host.querySelector('.acct[data-vendor="codex"] .urow .share')?.textContent, `${share} ainda contando`, 'Settings says the same');
+    } finally { s.dispose(); dispose(); host.remove(); }
+  }
+});
 
 /** Runs a check with both CLIs saying someone is signed in, as the accounts section asks them when it opens. */
 async function signedIn<T>(run: () => Promise<T> | T): Promise<T> {

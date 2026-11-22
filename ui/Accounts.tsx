@@ -5,7 +5,7 @@ import { VendorMark } from './Glyphs.tsx';
 import { fromEngine, lang, money, percent, t } from './i18n.ts';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
-import { accountLine, freshness, type Quotas, usageRows } from './sidebar.ts';
+import { accountLine, floorOnly, freshness, type Quotas, usageRows } from './sidebar.ts';
 import { ageWords, untilReset, windowName } from './Sidebar.tsx';
 
 // Settings, Accounts and limits: one card per AI with its state, its plan, one bar per quota window and Faber's own spend.
@@ -143,9 +143,9 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
               <For each={rows().filter((r) => r.window)}>
                 {(row) => {
                   const w = () => x().windows.find((win) => win.name === row.window);
-                  // A share that may still rise reads "at least" (C010); the long explanation stays in Details.
+                  // A share that may still rise on a reading no longer recent reads "at least" (C010); the long explanation stays in Details.
                   const fresh = () => freshness(props.usage, v(), row.window);
-                  const open = () => fresh().counting || !!fresh().uncountedPoints;
+                  const open = () => floorOnly(fresh(), props.now);
                   return (
                     <div class="urow">
                       <span class="uname">{t('quota.window', { window: windowName(row.window!) })}</span>
