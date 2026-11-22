@@ -3223,7 +3223,7 @@
     },
     "kind": "write",
     "reach": "ask",
-    "about": "Links in answers open in the user's browser, never inside Faber."
+    "about": "Links in answers open in the user's browser. Video cards and the reply link's pane action use a separate command."
   },
   {
     "name": "project_copies",

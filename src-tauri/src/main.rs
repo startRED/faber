@@ -940,7 +940,7 @@ fn main() {
                 return;
             };
             let engine = faber.engine.clone();
-            tauri::async_runtime::spawn_blocking(move || responder.respond(media::respond(&engine, request)));
+            tauri::async_runtime::spawn(async move { responder.respond(media::respond(&engine, request).await) });
         })
         .on_window_event(|window, event| {
             if window.label() == "main"
@@ -1063,7 +1063,7 @@ fn main() {
                     };
                     invoke.resolver.respond_async(async move {
                         let result = host.dispatch(&command, args).await.map_err(tauri::ipc::InvokeError::from)?;
-                        if command == "media_grant" {
+                        if matches!(command.as_str(), "media_grant" | "media_grant_web") {
                             let token = result.as_str().ok_or_else(|| tauri::ipc::InvokeError::from("error.media.gone"))?;
                             return Ok::<_, tauri::ipc::InvokeError>(Value::String(format!("{}/{token}", media::ORIGIN)));
                         }

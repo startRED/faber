@@ -341,7 +341,7 @@ function relay(): void {
       if (!host) throw new Error('error.host.notReady');
       const ok = await host.call(command, given);
       startup.hostAnswered();
-      return { ok: command === 'media_grant' ? `${MEDIA_ORIGIN}/${String(ok)}` : ok };
+      return { ok: ['media_grant', 'media_grant_web'].includes(command) ? `${MEDIA_ORIGIN}/${String(ok)}` : ok };
     } catch (failure) {
       return { err: failure instanceof Error ? failure.message : failure };
     }

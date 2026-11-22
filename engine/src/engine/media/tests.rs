@@ -2,6 +2,33 @@ use super::*;
 
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\nimage bytes";
 
+#[tokio::test]
+async fn protocol_reads_apply_live_settings_and_refuse_released_or_old_web_tokens() {
+    use crate::model::{Settings, WebSearch};
+    let dir = crate::workspace::TestRoot::new();
+    let (engine, _) = crate::engine::answer::tests::engine(&dir);
+    let lease = engine.media_enter("visible");
+    let insert = || {
+        engine.with(|core| {
+            let url = Arc::new(reqwest::Url::parse("https://127.0.0.1/picture").unwrap());
+            core.media.insert("visible", Grant::Web(url)).unwrap().simple().to_string()
+        })
+    };
+    let first = insert();
+    let second = insert();
+    assert_ne!(first, second);
+    for (web, expected) in
+        [(WebSearch::Off, "error.media.webOff"), (WebSearch::Cached, "error.media.webCached"), (WebSearch::Live, "error.media.webPrivate")]
+    {
+        engine.save_settings(Settings { web_search: Some(web), ..Settings::default() }).unwrap();
+        assert_eq!(engine.media_read_route(&second, None).await.unwrap_err().key, expected);
+    }
+    engine.media_release(&lease, &first);
+    assert_eq!(engine.media_read_route(&first, None).await.unwrap_err().key, CLOSED);
+    engine.media_leave(&lease);
+    assert_eq!(engine.media_read_route(&second, None).await.unwrap_err().key, CLOSED);
+}
+
 fn pin(path: &Path) -> Root {
     crate::visual::pin(&path.canonicalize().unwrap()).unwrap()
 }

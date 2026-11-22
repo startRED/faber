@@ -90,7 +90,19 @@ fn the_command_line_lists_every_command_anything_but_the_screen_may_send() {
     }
     let kept = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
     assert!(kept == now, "cli/commands.json is not the table's exported commands: run this test with FABER_WRITE_COMMANDS=1");
-    for screen_only in ["state", "open", "screen_ready", "site_open"] {
+    for screen_only in [
+        "state",
+        "open",
+        "screen_ready",
+        "site_open",
+        "media_enter",
+        "media_grant",
+        "media_grant_web",
+        "media_release",
+        "media_leave",
+        "media_clear",
+        "media_chunk",
+    ] {
         assert!(Host::exported().all(|c| c.name != screen_only), "`{screen_only}` is the screen's own");
     }
 }
