@@ -105,8 +105,8 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
   Off and Cached refuse before DNS. Cached uses saved search results. Release or leave revokes the grant.
 - After HTTP 429 on a gallery preview grant, the visible preview can retry once using the same grant path and the
   site's Retry-After from 1–15 seconds. Missing, malformed or longer waits do not schedule a retry.
-- Source links stay visible. Off shows one notice pointing to Settings › General › Web search › Live.
-  Grouped pictures become titled links on separate lines; picture-only lists keep normal spacing.
+- Source links stay. In Off, grouped pictures become one titled link per line. One muted notice per reply points
+  to the Live option in Settings › General › Web search. Picture-only lists keep normal spacing.
 - HTTPS hosts and subdomains must pass Privacy checks before DNS and connection. All resolved addresses must be
   public. There is no DNS fallback. TLS uses system roots without fetching certificate URLs. Redirects repeat
   the checks. Requests send the client version, project URL and range, without proxy, cookies, credentials or

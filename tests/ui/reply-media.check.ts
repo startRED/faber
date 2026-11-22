@@ -84,10 +84,13 @@ check('reply media: soft line breaks separate bare local media without changing 
   const dispose = render(() => createComponent(Thread, {
     conversationId: 'soft-lines', options: [], from: 0, onBranch: () => {},
     messages: [{ id: 'reply', role: 'assistant', at: 0,
-      text: 'claude-imagem.png\nclaude-audio.wav\nclaude-video.mp4\n\nSee the picture.png\nand the video.mp4' }],
+      text: 'claude-imagem.png\nclaude-audio.wav\nclaude-video.mp4\n\none.png\ntwo.png\nthree.png\n\nSee the picture.png\nand the video.mp4' }],
   }), host);
   try {
-    equal(host.querySelectorAll('figure.reply-media-picture').length, 1);
+    equal(host.querySelectorAll('figure.reply-media-picture').length, 4);
+    equal(host.querySelectorAll('.reply-media-gallery').length, 1);
+    const pictures = [...host.querySelectorAll('.reply-media-gallery figure')];
+    equal(pictures.map(figure => figure.getAttribute('aria-label')).join(','), 'one.png,two.png,three.png');
     equal(host.querySelectorAll('figure.reply-media-audio').length, 1);
     equal(host.querySelectorAll('figure.reply-media-video').length, 1);
     ok(host.textContent?.includes('See the picture.png'), 'ordinary prose remains text');
