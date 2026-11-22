@@ -55,12 +55,13 @@ pub fn sidecar_args(target_dir: &Path, jobs: usize) -> Vec<String> {
 
 /// What the Vite build of the test screen reads: the screen, its checks, the one shell file they import, and the build's
 /// own configuration and packages. `a_screen_build_reads_nothing_outside_its_inputs` fails when an import reaches past them.
-const VITE_INPUTS: [&str; 16] = [
+const VITE_INPUTS: [&str; 17] = [
     "ui",
     "tests/ui",
     "tests/ux",
     "tests/fixtures/conversation-changes.json",
     "tests/fixtures/background-live.json",
+    "tests/fixtures/claude/reply-media.jsonl",
     "src-tauri/src/themes.json",
     "engine-projects/src/tools.json",
     "src-tauri/src/pane/act.js",
