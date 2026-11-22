@@ -392,7 +392,8 @@ check('reading: the thread column reads at about 760 px and the answers keep roo
       ok(col >= least && col <= most, `${width}px window: the column is ${col}px`);
       const answer = root.querySelector<HTMLElement>('.ai')!;
       const style = getComputedStyle(answer);
-      ok(parseFloat(style.lineHeight) / parseFloat(style.fontSize) >= 1.6, `line height ${style.lineHeight} on ${style.fontSize}`);
+      // Allow down to 1.599: Windows measured 24.8px at 15.5px at both widths, while WebKit reported 24.799999px.
+      ok(parseFloat(style.lineHeight) / parseFloat(style.fontSize) >= 1.599, `line height ${style.lineHeight} on ${style.fontSize}`);
       const bubble = root.querySelector<HTMLElement>('.you')!.getBoundingClientRect().width;
       ok(bubble <= 620, `the bubble is ${bubble}px`);
     } finally {
