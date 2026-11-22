@@ -2428,6 +2428,18 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .col .ai .md [data-reply-picture-list] > li + li { margin-block-start: 8px; }
 .md [data-reply-picture-list] > li > :is(.reply-media-shell, .reply-web-notice) { margin-block: 0; }
 .md [data-reply-picture-list] > li > .reply-web-notice { min-height: 0; padding: 0; border: 0; }
+.md li[data-reply-picture-only] > div > .reply-media-shell { margin-block-start: 0; }
+.md ul > li[data-reply-picture-only] { list-style: none; position: relative; }
+.md ul > li[data-reply-picture-only]:not(:has(input[type='checkbox']))::before {
+  content: ''; position: absolute; inset-block-start: 7px; inset-inline-start: -18px;
+  inline-size: 5px; block-size: 5px; border-radius: 50%; background: currentColor; forced-color-adjust: none;
+}
+.md :is(li[data-reply-picture-only], li[data-reply-picture-only] > p) > input[type='checkbox'] {
+  position: absolute; inset-block-start: 3px; inset-inline-start: -20px; margin: 0;
+}
+.md li[data-reply-picture-only] > p:has(> input[type='checkbox']:only-child) { margin: 0; }
+.md ol > li[data-reply-picture-only]:has(input[type='checkbox']) { padding-inline-start: 48px; }
+.md :is(ol > li[data-reply-picture-only], ol > li[data-reply-picture-only] > p) > input[type='checkbox'] { inset-inline-start: 28px; }
 @container reply-stage (max-width: 760px) {
   .reply-media-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .reply-media-tile .reply-media-slot { aspect-ratio: 2/1; max-height: 132px; }

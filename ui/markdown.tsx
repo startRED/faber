@@ -20,7 +20,7 @@ const quiet = (h3: string, text: string) => {
   return words.length < 3 ? h3 : `<h3>${words.slice(0, -2).join(' ')} <em>${words.slice(-2).join(' ')}</em></h3>`;
 };
 const tidy = (markup: string) => DOMPurify.sanitize(markup, {
-  FORBID_ATTR: ['data-reply-web-off', 'data-reply-picture-list'],
+  FORBID_ATTR: ['data-reply-web-off', 'data-reply-picture-list', 'data-reply-picture-only'],
 }).replace(/<h3>([^<]*)<\/h3>/g, quiet);
 
 // Short texts that are drawn again and again (a narration, a report) are parsed once. Small and bounded: this is not a cache
@@ -448,6 +448,14 @@ export function renderMarkdown(root: HTMLElement, text: string, references?: Lin
           const refs = marks.get(key);
           if (!refs) continue;
           marks.delete(key);
+          const item = slot.parentElement;
+          const picture = refs.media?.[0]?.kind === 'picture' || refs.webPictures || (refs.web && isWebPicture(refs.web));
+          if (picture && item?.tagName === 'LI' && [...item.childNodes].every(node =>
+            node === slot || (!node.textContent?.trim() && (!(node instanceof Element)
+              || node.matches('input[type="checkbox"], p:has(> input[type="checkbox"]:only-child)')))
+          )) {
+            item.dataset.replyPictureOnly = '';
+          }
           slot.removeAttribute('data-reply-media');
           registerMedia(slot, refs, session);
         }

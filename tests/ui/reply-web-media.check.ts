@@ -153,6 +153,8 @@ check('reply web media: isolated pictures stay in lists and quotes', () => {
       const items = lists[index]!.querySelectorAll(':scope > li');
       names.forEach((name, i) => {
         equal(items[i]!.querySelectorAll(`figure[aria-label="${name}"]`).length, 1);
+        ok(items[i]!.hasAttribute('data-reply-picture-only'));
+        equal(getComputedStyle(items[i]!, '::before').position, 'absolute');
         equal(items[i]!.querySelector('figcaption')?.textContent, name);
         equal(items[i]!.textContent?.split(name).length, 2);
         equal(items[i]!.querySelector('p'), null);
@@ -160,7 +162,9 @@ check('reply web media: isolated pictures stay in lists and quotes', () => {
     }
     const items = lists[2]!.querySelectorAll(':scope > li');
     equal(items[0]!.querySelector('a')?.getAttribute('href'), 'https://example.test/page');
+    equal(items[0]!.hasAttribute('data-reply-picture-only'), false);
     equal(items[1]!.querySelector<HTMLInputElement>('input')?.checked, true);
+    equal(getComputedStyle(items[1]!.querySelector('input')!).position, 'absolute');
     equal(items[1]!.querySelectorAll('figure[aria-label="Checked"]').length, 1);
     equal(items[1]!.textContent?.split('Checked').length, 2);
     equal(host.querySelectorAll('blockquote figure[aria-label="Quoted alone"]').length, 1);

@@ -69,8 +69,8 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
 
 ## Local media in a conversation
 
-- Hard breaks separate file links. Images preview below their sentence or alone in their list item or quote.
-  An image alone has one caption. Picture frames keep an outline in forced colors.
+- Hard breaks separate file links. Images preview inside list items and quotes. An isolated picture has one caption,
+  and a list marker at the card top. Forced colors keep picture outlines.
 - A gallery mounts up to four previews. When there are more pictures, a separate button opens the viewer at the
   next picture, even if every preview failed. The viewer can move through the entire gallery. Equivalent policy
   updates keep it open while changes to the available pictures close it.
