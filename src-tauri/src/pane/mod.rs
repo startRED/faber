@@ -884,7 +884,17 @@ impl Pane {
     /// when the pane holds another (a blank one shows only the address field). A tab the agent's pane behind held comes to
     /// this one, which loads it, and the pane behind closes. Answers the tabs and the tab the step concerns.
     pub async fn tab(self: &Arc<Self>, conversation: &str, step: TabStep) -> Option<(Tabs, Option<String>)> {
+        let closing = match &step {
+            TabStep::Close(tab) => Some(tab.clone()),
+            _ => None,
+        };
         let answer = self.tab_step(conversation, step).await?;
+        if let Some(tab) = closing.filter(|_| answer.0.tabs.is_empty()) {
+            let _turn = self.opening.lock().await;
+            if self.holds(conversation, &tab) && self.tabs_of(conversation).await.is_some_and(|tabs| tabs.tabs.is_empty()) {
+                self.close();
+            }
+        }
         if let Some(behind) = self.behind.as_ref() {
             let held = crate::lock(&behind.state).tab.clone();
             if held.is_some_and(|held| behind.holds(conversation, &held) && answer.0.get(&held).is_none()) {

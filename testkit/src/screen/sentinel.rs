@@ -804,7 +804,6 @@ fn permission(ctx: &mut Ctx) -> Result {
 /// Where the last message ends, where the composer starts, and where the scroll area ends, with the thread at its end.
 const THREAD_END: &str = r#"(() => {
   const thread = document.querySelector('.thread');
-  thread.scrollTop = thread.scrollHeight;
   const col = thread.querySelector('.col');
   let last = col?.lastElementChild;
   while (last && !last.getBoundingClientRect().height) last = last.previousElementSibling;
@@ -828,9 +827,12 @@ const FIELD: &str = r#"(() => {
 /// L4 and L5 at the end of the thread. With `follow`, the thread is left where the app keeps it (I5: it must still be at
 /// its end after the composer grew); otherwise it is scrolled to its end first.
 fn thread_end(page: &mut Page, config: &str, follow: bool, found: &mut Vec<Finding>) -> Result<Value> {
-    let end = page.eval(
-        &THREAD_END.replace("thread.scrollTop = thread.scrollHeight;", if follow { "" } else { "thread.scrollTop = thread.scrollHeight;" }),
-    )?;
+    if !follow {
+        page.eval("(() => { const thread = document.querySelector('.thread'); thread.scrollTop = thread.scrollHeight; return true; })()")?;
+        // The scroll event removes Jump to latest and returns its row to the viewport.
+        page.wait_for("the thread end without Jump to latest", "!document.querySelector('.work > .toend')")?;
+    }
+    let end = page.eval(THREAD_END)?;
     ensure(!end.is_null(), || "the thread has no message".to_string())?;
     let n = |key: &str| end[key].as_f64().unwrap_or_default();
     if follow && let Some(metric) = sentinel::kept_problem(n("fromEnd")) {

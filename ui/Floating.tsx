@@ -95,8 +95,7 @@ export function Quote() {
 const AWAY = 240;
 
 /**
- * "Latest": a button over the end of the thread while the person has scrolled up, most of all while an answer is streaming below.
- * It sits in the thread's own box, so the motion list around it gives it its entrance and exit.
+ * "Latest": a row below the thread viewport while the person has scrolled up, including while an answer streams below.
  */
 export function ToEnd(props: { thread: () => HTMLElement | undefined; onGo?: () => void }) {
   const [away, setAway] = createSignal(false);

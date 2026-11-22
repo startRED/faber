@@ -11,8 +11,8 @@ How conversation text reads and keeps its place, in Chat and Projects.
   The transcript starts at 18 px and ends at 40 px. The 6 px leading and 22 px trailing fades are off while focus is in
   the transcript, in forced colors and at heights of 820 px or less. At 540 px or less the header is 40 px, the transcript
   starts at 8 px and the opening paragraph uses 1.5 leading. Selecting words in an answer floats "Ask about this" over
-  them (menu motion), and it puts them in the message box as a quote. Scrolled up, a "Jump to latest" button floats at
-  the foot of the thread and scrolls down smoothly.
+  them (menu motion), and it puts them in the message box as a quote. Scrolled up, "Jump to latest" sits between the
+  scroll viewport and the composer, keeping media controls clear. It scrolls down smoothly.
 - A conversation initially loads its newest 40 messages and opens at the tail. Near the first drawn message, it
   requests the preceding 40 and inserts them in four-message batches across animation frames, with an instant viewport
   correction after each batch and any focused search marker restored. The final frame and resize corrections reapply
