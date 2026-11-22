@@ -1380,6 +1380,7 @@ export const fr: Messages = {
   'viewer.label': 'Visionneuse d’images',
   'viewer.open': 'Ouvrir {name}',
   'media.more': 'Voir {n} de plus',
+  'error.media.webBusy': 'Le site limite les requêtes. Réessayez dans un instant.',
   'media.gone': 'Fichier indisponible',
   'media.error': 'Impossible de charger le média',
   'media.webUnavailable': 'Activez la recherche web en direct pour afficher ce média.',

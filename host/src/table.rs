@@ -891,8 +891,11 @@ table! {
         off("error.media.gone", move || engine.media_grant(&id, &path).map_err(str::to_string)).await?
     }
     /// A capability for public HTTPS media, using the visible conversation's existing lease.
-    Read Screen fn media_grant_web(h, id: String, url: String) -> String {
-        h.engine.media_grant_web(&id, &url).await.map_err(str::to_string)
+    Read Screen fn media_grant_web(h, id: String, url: String) -> String [Failure] {
+        h.engine.media_grant_web(&id, &url).await.map_err(|error| match error.retry_after {
+            Some(seconds) => Failure::with(error.key, seconds.to_string()),
+            None => Failure::key(error.key),
+        })
     }
     Read Screen fn media_clear(h) -> () {
         h.engine.media_clear();

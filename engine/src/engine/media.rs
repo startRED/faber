@@ -30,11 +30,12 @@ pub struct MediaChunk {
 pub struct MediaError {
     pub key: &'static str,
     pub length: Option<u64>,
+    pub retry_after: Option<u64>,
 }
 
 impl From<&'static str> for MediaError {
     fn from(key: &'static str) -> Self {
-        Self { key, length: None }
+        Self { key, length: None, retry_after: None }
     }
 }
 
@@ -189,7 +190,7 @@ impl Engine {
         })
     }
 
-    pub async fn media_grant_web(&self, id: &str, address: &str) -> Result<String, &'static str> {
+    pub async fn media_grant_web(&self, id: &str, address: &str) -> Result<String, MediaError> {
         let lease = self.with(|core| {
             web::mode(core.store.settings().tuning().web)?;
             let view = core.media.0.as_ref().filter(|view| view.id == id).ok_or(CLOSED)?;
@@ -197,13 +198,13 @@ impl Engine {
             Ok::<_, &'static str>(view.lease)
         })?;
         if address.len() > PATH_LIMIT {
-            return Err("error.media.webUnreachable");
+            return Err("error.media.webUnreachable".into());
         }
         let url = reqwest::Url::parse(address).map_err(|_| "error.media.webHttps")?;
-        web::fetch(url.clone(), None, true, |target| self.web_policy(lease, None, target)).await.map_err(|error| error.key)?;
+        web::fetch(url.clone(), None, true, |target| self.web_policy(lease, None, target)).await?;
         self.with(|core| {
             core.media.0.as_ref().filter(|view| view.lease == lease).ok_or(CLOSED)?;
-            core.media.insert(id, Grant::Web(Arc::new(url))).map(|token| token.simple().to_string())
+            core.media.insert(id, Grant::Web(Arc::new(url))).map(|token| token.simple().to_string()).map_err(MediaError::from)
         })
     }
 
@@ -284,7 +285,7 @@ fn read(root: &Root, path: &str, range: Option<&str>) -> Result<MediaChunk, Medi
     let path = relative(root, path).ok_or(PATH)?;
     let (mut file, len, kind) = open(root, &path)?;
     let (start, end) = match range {
-        Some(header) => bounds(header, len).ok_or(MediaError { key: "error.media.range", length: Some(len) })?,
+        Some(header) => bounds(header, len).ok_or(MediaError { key: "error.media.range", length: Some(len), retry_after: None })?,
         None if kind.starts_with("image/") && len > IMAGE_LIMIT => return Err("error.media.limit".into()),
         None if kind.starts_with("image/") => (0, len - 1),
         None => (0, len.min(CHUNK) - 1),

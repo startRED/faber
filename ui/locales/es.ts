@@ -1541,6 +1541,7 @@ export const es: Messages = {
   'viewer.label': 'Visor de imágenes',
   'viewer.open': 'Abrir {name}',
   'media.more': 'Ver {n} más',
+  'error.media.webBusy': 'El sitio está limitando las solicitudes. Vuelve a intentarlo en breve.',
   'media.gone': 'Archivo no disponible',
   'media.error': 'No se pudo cargar el contenido multimedia',
   'media.webUnavailable': 'Activa la búsqueda web en tiempo real para ver este contenido.',

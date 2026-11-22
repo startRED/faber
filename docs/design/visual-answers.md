@@ -69,8 +69,8 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
 
 ## Local media in a conversation
 
-- Markdown hard breaks can separate standalone file links. A Markdown image in a sentence previews below the words
-  in the same paragraph, list item or quote. Picture frames retain an outline in forced colors.
+- Hard breaks separate standalone file links. Images preview below their sentence in paragraphs, lists and quotes.
+  Picture frames keep an outline in forced colors.
 - A gallery mounts up to four previews. When there are more pictures, a separate button opens the viewer at the
   next picture, even if every preview failed. The viewer can move through the entire gallery. Equivalent policy
   updates keep it open while changes to the available pictures close it.
@@ -97,13 +97,14 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
 
 ## Web media in a conversation
 
-- Adjacent web pictures share the reply gallery, including hard breaks and picture-only lists. URLs can be extensionless.
-  A Markdown image in a sentence previews below the words, inside the same list item or quote when nested.
+- Adjacent web pictures share the gallery across hard breaks and picture-only lists. URLs can be extensionless.
+  Sentence pictures preview below the words inside their item or quote.
   Ordinary links stay links. A failed picture keeps its titled link in the preview or viewer.
   A bare media URL after a caption can preview.
-- `media_grant_web({ id, url })` uses the visible conversation's lease. Live loads direct media automatically.
+- `media_grant_web({ id, url })` uses the active conversation's lease and current setting. Live loads direct media.
   Off and Cached refuse before DNS. Cached uses saved search results. Release or leave revokes the grant.
-  Each request reads the current setting.
+- After HTTP 429 on a gallery preview grant, the visible preview can retry once using the same grant path and the
+  site's Retry-After from 1–15 seconds. Missing, malformed or longer waits do not schedule a retry.
 - Replies keep the source links. Off shows one muted notice per reply and points to Live under Settings ›
   General › Web search. Further Off items are plain titled links. Photo-only lists use normal list spacing.
 - HTTPS hosts and subdomains must pass Privacy checks before DNS and connection. All resolved addresses must be
@@ -111,13 +112,12 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
   the checks. Requests send the client version, project URL and range, without proxy, cookies, credentials or
   referrer. The owner accepted that hostile media addresses can encode conversation data.
 - The host allows three redirects, five seconds to connect and fifteen seconds overall. Two fetches run at once,
-  with up to 62 waiting. A known length and an initial probe establish size and type. An opening range can supply
-  the 4 KiB probe. Pictures are capped at 8 MiB, audio and video at 128 MiB with up to 1 MiB per range.
-  Larger audio and video require range support. Scoped responses have a fixed type, no sniffing and no caching.
-  SVG is served whole under the image sandbox. Only the address and token are kept for later requests.
+  with up to 62 waiting. A known length and 4 KiB probe establish size and type. The opening range can supply it.
+  Limits are 8 MiB for pictures, 128 MiB for audio and video and 1 MiB per range. Large players need range support.
+  Responses have a fixed type, no sniffing and no cache. SVG is served whole in the image sandbox. Grants keep only the address and token.
 - Refusals distinguish `error.media.webOff`, `error.media.webCached`, `error.media.webBlocked`,
   `error.media.webHttps`, `error.media.webPrivate`, `error.media.webSize`, `error.media.webKind` and
-  `error.media.webUnreachable`. Scope, capacity and malformed range still use the local media keys.
+  `error.media.webUnreachable`. A rate-limited grant uses `error.media.webBusy`. Scope, capacity and range use local keys.
 - A video on a web page uses the built-in browser beside the conversation. Only the video card and one reply-link
   menu action offer this exception on Windows in Chat and Projects. Untitled cards name the video site and keep
   the original link. Video cards send no request before Play. Duration stays in the player controls, with a dark

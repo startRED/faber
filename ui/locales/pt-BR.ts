@@ -1538,6 +1538,7 @@ export const ptBR: Messages = {
   'viewer.label': 'Visualizador de imagens',
   'viewer.open': 'Abrir {name}',
   'media.more': 'Ver mais {n}',
+  'error.media.webBusy': 'O site está limitando os pedidos. Tente de novo daqui a pouco.',
   'media.gone': 'Arquivo indisponível',
   'media.error': 'Não foi possível carregar a mídia',
   'media.webUnavailable': 'Ative a busca na web em tempo real para visualizar esta mídia.',

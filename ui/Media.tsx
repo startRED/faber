@@ -2,7 +2,7 @@ import { createContext, createEffect, createSignal, For, onCleanup, Show, useCon
 import { render } from 'solid-js/web';
 import { Icon } from './Glyphs.tsx';
 import { failureText, t } from './i18n.ts';
-import { api } from './api.ts';
+import { api, failureOf } from './api.ts';
 import type { ReplyWebOptions } from './ReplyWebMedia.tsx';
 import { openViewer } from './Viewer.tsx';
 
@@ -195,6 +195,7 @@ export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: 
   let figure!: HTMLElement;
   let image: HTMLImageElement | undefined;
   let player: HTMLMediaElement | undefined;
+  let retriedBusyPreview = false;
 
   createEffect(() => {
     const stop = scope()?.observe(props.thumb ? figure.closest('.step-line') ?? figure : figure, setVisible);
@@ -210,22 +211,38 @@ export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: 
     if (!visible() || !session) return;
     let current = true;
     let url: string | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setStatus('loading');
     setWebFailure(undefined);
     const eligible = () => current && visible() && !document.hidden && figure.isConnected && props.webAllowed?.();
-    const grant = props.webAllowed ? session.grantWeb(path, () => !!eligible()) : session.grant(path);
-    void grant.then((value) => {
+    const grantWeb = () => session.grantWeb(path, () => !!eligible());
+    const accepted = (value: string | undefined) => {
       if (!value) return;
       if (!current || (props.webAllowed && !eligible())) return session.release(value);
       url = value;
       setSource(value);
-    }, (error: unknown) => {
+    };
+    const rejected = (error: unknown) => {
       if (!current || (props.webAllowed && !eligible())) return;
+      if (props.tile && props.webAllowed && !retriedBusyPreview) {
+        const { key, detail } = failureOf(error);
+        const seconds = Number(detail);
+        if (key === 'error.media.webBusy' && Number.isInteger(seconds) && seconds >= 1 && seconds <= 15) {
+          retryTimer = setTimeout(() => {
+            if (!eligible()) return;
+            retriedBusyPreview = true;
+            void grantWeb().then(accepted, rejected);
+          }, seconds * 1000);
+          return;
+        }
+      }
       if (props.webAllowed) setWebFailure(error);
       setStatus(refusal(error) ? 'gone' : 'error');
-    });
+    };
+    void (props.webAllowed ? grantWeb() : session.grant(path)).then(accepted, rejected);
     onCleanup(() => {
       current = false;
+      clearTimeout(retryTimer);
       if (image) {
         image.removeAttribute('src');
         image = undefined;

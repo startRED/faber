@@ -1380,6 +1380,7 @@ export const de: Messages = {
   'viewer.label': 'Bildbetrachter',
   'viewer.open': '{name} öffnen',
   'media.more': '{n} weitere ansehen',
+  'error.media.webBusy': 'Die Website begrenzt die Anfragen. Versuche es in Kürze erneut.',
   'media.gone': 'Datei nicht verfügbar',
   'media.error': 'Medium konnte nicht geladen werden',
   'media.webUnavailable': 'Stelle die Websuche auf Live, um dieses Medium anzuzeigen.',

@@ -1539,6 +1539,7 @@ export const en = {
   'viewer.label': 'Image viewer',
   'viewer.open': 'Open {name}',
   'media.more': 'View {n} more',
+  'error.media.webBusy': 'The site is limiting requests. Try again shortly.',
   'media.gone': 'File unavailable',
   'media.error': 'Could not load the media',
   'media.webUnavailable': 'Set web search to Live to preview media from the web.',

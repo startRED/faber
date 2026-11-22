@@ -284,3 +284,23 @@ async fn initial_partial_response_refuses_bytes_past_its_declared_range() {
     assert_eq!(refusal.key, UNREACHABLE);
     server.await.unwrap();
 }
+
+#[test]
+fn retry_after_is_only_exposed_for_busy_grants() {
+    for (status, header, key, delay) in [
+        (429, Some("11"), "error.media.webBusy", Some(11)),
+        (429, Some("0"), "error.media.webBusy", None),
+        (429, Some("16"), "error.media.webBusy", None),
+        (429, Some("Wed, 21 Oct 2015 07:28:00 GMT"), "error.media.webBusy", None),
+        (429, None, "error.media.webBusy", None),
+        (503, Some("11"), UNREACHABLE, None),
+    ] {
+        let mut builder = http::Response::builder().status(status);
+        if let Some(value) = header {
+            builder = builder.header("retry-after", value);
+        }
+        let response = Response::from(builder.body(Vec::<u8>::new()).unwrap());
+        let error = grant_refusal(&response).unwrap();
+        assert_eq!((error.key, error.retry_after), (key, delay));
+    }
+}

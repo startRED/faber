@@ -203,6 +203,23 @@ where
     Err(UNREACHABLE.into())
 }
 
+fn grant_refusal(response: &Response) -> Option<MediaError> {
+    if response.status() == StatusCode::TOO_MANY_REQUESTS {
+        let retry_after = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| (1..=15).contains(value));
+        Some(MediaError { key: "error.media.webBusy", length: None, retry_after })
+    } else if response.status() != StatusCode::OK && response.status() != StatusCode::PARTIAL_CONTENT {
+        Some(UNREACHABLE.into())
+    } else {
+        None
+    }
+}
+
 fn layout(response: &Response) -> Result<(u64, u64, u64), &'static str> {
     if response.headers().contains_key(CONTENT_ENCODING) {
         return Err(UNREACHABLE);
@@ -253,6 +270,9 @@ async fn media<S: Future<Output = Result<Response, &'static str>>>(
     check: &impl Fn(&Url) -> Result<(), &'static str>,
     send: &impl Fn(Target, String) -> S,
 ) -> Result<MediaChunk, MediaError> {
+    if probe_only && let Some(error) = grant_refusal(&response) {
+        return Err(error);
+    }
     let partial = response.status() == StatusCode::PARTIAL_CONTENT;
     let (start, end, total) = layout(&response)?;
     let prefix = total.min(PROBE);
@@ -282,7 +302,7 @@ async fn media<S: Future<Output = Result<Response, &'static str>>>(
     let (first, last) = if image {
         (0, total - 1)
     } else if let Some(range) = range {
-        bounds(range, total).ok_or(MediaError { key: "error.media.range", length: Some(total) })?
+        bounds(range, total).ok_or(MediaError { key: "error.media.range", length: Some(total), retry_after: None })?
     } else {
         (0, total.min(CHUNK) - 1)
     };

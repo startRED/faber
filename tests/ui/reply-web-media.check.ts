@@ -220,6 +220,43 @@ check('reply web media: equivalent policy updates keep the open gallery viewer',
   }
 });
 
+check('reply web media: a busy preview retries once at the site delay while visible', async () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const hidden = Object.getOwnPropertyDescriptor(document, 'hidden');
+  Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  const session = mediaSession('busy-gallery', '');
+  const names = ['Busy', 'Blocked', 'Long', 'Scrolled away'];
+  const pictures = names.map((name, i) => ({ path: `https://example.test/${i}`, name, kind: 'picture' as const }));
+  const requests = new Map<string, number>();
+  let hideLast: (() => void) | undefined;
+  session.observe = (element, visible) => {
+    if (element.querySelector('figure')?.getAttribute('aria-label') === names[3]) hideLast = () => visible(false);
+    visible(true);
+    return () => {};
+  };
+  session.grantWeb = async (path, eligible) => {
+    ok(eligible(), 'every attempt rechecks the preview');
+    requests.set(path, (requests.get(path) ?? 0) + 1);
+    if (path === pictures[1]!.path) throw 'error.media.webBlocked';
+    throw { key: 'error.media.webBusy', detail: path === pictures[2]!.path ? '60' : '1' };
+  };
+  const dispose = render(() => createComponent(ReplyGallery, { media: pictures, session, webAllowed: () => true }), host);
+  try {
+    await waitFor(host, 'figure[aria-label="Blocked"] a');
+    ok(hideLast, 'registered the last preview');
+    hideLast();
+    equal(requests.get(pictures[0]!.path), 1);
+    await waitFor(host, 'figure[aria-label="Busy"] a');
+    deepEqual(pictures.map(({ path }) => requests.get(path)), [2, 1, 1, 1]);
+  } finally {
+    dispose();
+    host.remove();
+    if (hidden) Object.defineProperty(document, 'hidden', hidden);
+    else Reflect.deleteProperty(document, 'hidden');
+  }
+});
+
 check('reply web media: notices preserve links and opening the reply assigns no remote source', () => {
   const host = document.createElement('div');
   document.body.append(host);
