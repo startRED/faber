@@ -5,6 +5,7 @@ import { api, type AppState, type Conversation, type WebSearch } from '../../ui/
 import { appliedLook, applyLook } from '../../ui/appearance.ts';
 import { closeMenu, menu } from '../../ui/contextmenu.ts';
 import { inlineMediaPaths } from '../../ui/markdown.tsx';
+import { mediaSession, ReplyGallery } from '../../ui/Media.tsx';
 import { showSite } from '../../ui/Site.tsx';
 import { store } from '../../ui/running.ts';
 import { Thread } from '../../ui/Thread.tsx';
@@ -31,11 +32,51 @@ check('reply web media: real response line breaks, photo lists and extensionless
     equal(host.querySelector('.reply-web-notice span')?.textContent, notices);
     ok(host.querySelector('.reply-web-reason svg[aria-hidden="true"]'), 'the app notice has a decorative icon');
     equal(host.querySelectorAll('ol[start="0"] > li .reply-web-notice').length, 2);
+    const items = [...host.querySelectorAll('ol[start="0"] > li')];
+    const standalone = host.querySelector<HTMLElement>('.reply-web-notice')!;
+    for (const item of items) {
+      const notice = item.querySelector<HTMLElement>('.reply-web-notice')!;
+      equal(getComputedStyle(notice).borderBlockStartWidth, '0px');
+      ok(item.getBoundingClientRect().height <= standalone.getBoundingClientRect().height, 'a media item adds no height to the standalone notice');
+    }
     equal(host.querySelectorAll('.reply-web-notice').length, 4);
     equal(host.querySelector(`.reply-web-notice a[href="${clip}"]`)?.getAttribute('href'), clip);
     ok(host.querySelector('.md')?.textContent?.includes('Timelapse:'));
     ok([...host.querySelectorAll(`a[href="${photo}"]`)].some((a) => a.textContent === 'Ordinary link' && !a.closest('.reply-web-notice')));
     deepEqual([...inlineMediaPaths(files, 'C:/workspace')], ['image.png', 'audio.wav', 'video.mp4']);
+  } finally {
+    dispose();
+    host.remove();
+  }
+});
+
+check('reply web media: adjacent pictures share galleries and inline images follow their paragraph', () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const photo = (name: string) => `![${name}](https://example.test/${name}.jpg)`;
+  const dispose = render(() => createComponent(Thread, {
+    conversationId: 'web-picture-groups', options: [], from: 0, onBranch: () => {},
+    replyWeb: { mode: 'live', blocked: [], canOpen: false, open: async () => false },
+    messages: [{ id: 'reply', role: 'assistant', at: 0, text: [
+      photo('First'), photo('Second'), 'Hard breaks:', `${photo('Third')}  \n${photo('Fourth')}`,
+      'List:', `1. ${photo('Fifth')}\n2. ${photo('Sixth')}`, 'Ordinary list:', '1. Ordinary\n2. List',
+      `Here is **${photo('In-sentence')}** the photo. A [link](https://example.test/regular.jpg) stays here.`,
+      'Here is the local ![Local](./aurora.png) image.',
+    ].join('\n\n') }],
+  }), host);
+  try {
+    deepEqual([...host.querySelectorAll('.reply-media-gallery')].map(gallery =>
+      [...gallery.querySelectorAll('figure')].map(figure => figure.getAttribute('aria-label'))),
+    [['First', 'Second'], ['Third', 'Fourth'], ['Fifth', 'Sixth']]);
+    const paragraph = [...host.querySelectorAll('.md p')].find(p => p.textContent?.startsWith('Here is '))!;
+    equal(paragraph.querySelector('a')?.getAttribute('href'), 'https://example.test/regular.jpg');
+    equal(paragraph.querySelector('img'), null);
+    ok(paragraph.textContent?.includes('In-sentence'));
+    equal(paragraph.nextElementSibling?.querySelector('figure')?.getAttribute('aria-label'), 'In-sentence');
+    const local = [...host.querySelectorAll('.md p')].find(p => p.textContent?.startsWith('Here is the local'))!;
+    equal(local.nextElementSibling?.querySelector('figure')?.getAttribute('aria-label'), 'Local');
+    equal(host.querySelector('ol > li')?.textContent, 'Ordinary');
+    equal(host.querySelector('ol[data-reply-picture-list]'), null);
   } finally {
     dispose();
     host.remove();
@@ -56,6 +97,51 @@ function waitFor(host: HTMLElement, selector: string) {
   });
 }
 
+check('reply web media: the shared viewer releases each full web picture when navigating', async () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const hidden = Object.getOwnPropertyDescriptor(document, 'hidden');
+  Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
+  const session = mediaSession('web-gallery', '');
+  const requests: string[] = [];
+  const released: string[] = [];
+  session.observe = (_element, visible) => { visible(true); return () => {}; };
+  session.grantWeb = async (path, eligible) => {
+    ok(eligible(), 'web media rechecks eligibility');
+    if (path.endsWith('/Missing')) throw 'error.media.webUnreachable';
+    requests.push(path);
+    return `${pixel}#${requests.length}`;
+  };
+  session.release = url => { released.push(url); };
+  const media = ['First', 'Second', 'Missing'].map(name => ({ path: 'https://example.test/' + name, name, kind: 'picture' as const }));
+  const dispose = render(() => createComponent(ReplyGallery, { media, session, webAllowed: () => true }), host);
+  try {
+    await waitFor(host, 'a[href="https://example.test/Missing"]');
+    const button = await waitFor(host, 'figure[aria-label="First"] button:not([hidden])');
+    button.click();
+    const viewer = await waitFor(document.body, '.viewer');
+    const first = await waitFor(viewer, 'img[alt="First"]');
+    const firstSource = first.getAttribute('src')!;
+    viewer.querySelector<HTMLButtonElement>('.viewer-btn.next')!.click();
+    await waitFor(viewer, 'img[alt="Second"]');
+    ok(released.includes(firstSource), 'leaving a picture releases its full grant');
+    viewer.querySelector<HTMLButtonElement>('.viewer-btn.next')!.click();
+    const missing = await waitFor(viewer, 'a[href="https://example.test/Missing"]');
+    equal(missing.textContent, 'Missing');
+    viewer.querySelector<HTMLButtonElement>('.viewer-btn.prev')!.click();
+    await waitFor(viewer, 'img[alt="Second"]');
+    viewer.querySelector<HTMLButtonElement>('.viewer-btn.prev')!.click();
+    await waitFor(viewer, 'img[alt="First"]');
+    deepEqual(requests.slice(2), [media[0]!.path, media[1]!.path, media[1]!.path, media[0]!.path]);
+  } finally {
+    dispose();
+    host.remove();
+    if (hidden) Object.defineProperty(document, 'hidden', hidden);
+    else Reflect.deleteProperty(document, 'hidden');
+  }
+});
+
 check('reply web media: notices preserve links and opening the reply assigns no remote source', () => {
   const host = document.createElement('div');
   document.body.append(host);
@@ -64,17 +150,26 @@ check('reply web media: notices preserve links and opening the reply assigns no 
   const [blocked, setBlocked] = createSignal(['example.test']);
   const addresses = ['cover.png', 'clip.mp4', 'track.wav'].map((name) => 'https://art.example.test/' + name);
   const names = ['Picture', 'Clip', 'Track'];
+  const direct = addresses.map((address, i) => `${i === 0 ? '!' : ''}[${names[i]}](${address})`);
   const untitled = 'https://www.youtube.com/watch?v=untitled';
   const otherUntitled = 'https://www.youtube.com/watch?v=another';
   let paneOpens = 0;
+  let settingsOpens = 0;
   const dispose = render(() => createComponent(Thread, {
     conversationId: 'web-reply-notice', options: [], from: 0, onBranch: () => {},
-    get replyWeb() { return { mode: mode(), blocked: blocked(), canOpen: canOpen(), open: async () => { paneOpens++; return false; } }; },
-    messages: [{ id: 'reply', role: 'assistant', at: 0, text: [
-      ...addresses.map((address, i) => `${i === 0 ? '!' : ''}[${names[i]}](${address})`), reply, untitled, otherUntitled,
-      '<img alt="Do not load" src="//example.test/raw.png" srcset="https://example.test/big.png 2x">',
-      '<img alt="Do not load" srcset="https://example.test/only-srcset.png 2x">',
-    ].join('\n\n') }],
+    get replyWeb() { return { mode: mode(), blocked: blocked(), canOpen: canOpen(), onSettings: () => { settingsOpens++; }, open: async () => { paneOpens++; return false; } }; },
+    messages: [{
+      id: 'reply', role: 'assistant', at: 0, thinking: 'Checking sources.',
+      thinkingMarks: [{ from: 0, at: direct[0]!.length, steps: 0 }],
+      text: [
+        ...direct, reply, untitled, otherUntitled,
+        '<img alt="Do not load" src="//example.test/raw.png" srcset="https://example.test/big.png 2x">',
+        '<img alt="Do not load" srcset="https://example.test/only-srcset.png 2x">',
+      ].join('\n\n'),
+    }, {
+      id: 'ordinary', role: 'assistant', at: 1,
+      text: '<p><a data-reply-web-off="" href="https://example.test/ordinary">Plain link</a></p>',
+    }],
   }), host);
   try {
     for (const [current, hosts, words] of [
@@ -88,9 +183,24 @@ check('reply web media: notices preserve links and opening the reply assigns no 
       setMode(current);
       setBlocked([...hosts]);
       const notices = [...host.querySelectorAll('.reply-web-notice')];
-      deepEqual(notices.map((notice) => notice.querySelector('span')?.textContent), addresses.map(() => words));
-      deepEqual(notices.map((notice) => notice.querySelector('a')?.getAttribute('href')), addresses);
-      deepEqual(notices.map((notice) => notice.querySelector('a')?.textContent), names);
+      if (current === 'off') {
+        equal(notices.length, 0);
+        const hints = [...host.querySelectorAll('.reply-web-off-summary')].filter(hint => getComputedStyle(hint).display !== 'none');
+        equal(hints.length, 1);
+        ok(hints[0]?.textContent?.includes(words));
+        ok(hints[0]?.textContent?.includes('Live') && hints[0].textContent.includes('Web search'));
+        const links = [...host.querySelectorAll<HTMLAnchorElement>('a[data-reply-web-off]')];
+        deepEqual(links.map(link => link.getAttribute('href')), addresses);
+        deepEqual(links.map(link => link.textContent), names);
+        hints[0]?.querySelector('button')?.click();
+        equal(settingsOpens, hosts.length ? 2 : 1);
+        equal(mode(), 'off');
+      } else {
+        equal(host.querySelector('.reply-web-off-summary'), null);
+        deepEqual(notices.map((notice) => notice.querySelector('span')?.textContent), addresses.map(() => words));
+        deepEqual(notices.map((notice) => notice.querySelector('a')?.getAttribute('href')), addresses);
+        deepEqual(notices.map((notice) => notice.querySelector('a')?.textContent), names);
+      }
       equal(host.querySelector('.md :is([src], [srcset], [poster], [data], [background], [action], [formaction], [xlink\\:href], :not(a)[href], video, audio, source, iframe)'), null);
       equal(host.querySelectorAll('.reply-web-video').length, 3);
       for (const address of [untitled, otherUntitled]) {

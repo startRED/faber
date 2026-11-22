@@ -789,6 +789,18 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         || (props.messageIndex ?? 0) < 2
         || m().reason?.startsWith('reason.autoEffort')
         || m().nudge?.reason === 'nudge.modelBar')} onChange={props.onActChange} />
+      <Show when={props.replyWeb?.mode === 'off'}>
+        <div class="reply-web-reason reply-web-off-summary">
+          <Icon name="sliders" small />
+          <span>{t('error.media.webOff')} {t('media.webOffHint', {
+            mode: t('set.webSearch.live'),
+            path: [t('settings.open'), t('set.general'), t('set.webSearch')].join(' › '),
+          })}</span>
+          <Show when={props.replyWeb?.onSettings}>
+            <button type="button" onClick={() => props.replyWeb?.onSettings?.()}>{t('settings.open')}</button>
+          </Show>
+        </div>
+      </Show>
       <Index each={parts()}>
         {(part, i) => {
           const words = () => { const p = part(); return p.kind === 'text' ? p : undefined; };

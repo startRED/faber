@@ -8,7 +8,7 @@ import { iconMarkup } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import { openViewer } from './Viewer.tsx';
 import { localMedia, ReplyGallery, ReplyMedia, ReplyMediaContext, type MediaRef, type MediaSession } from './Media.tsx';
-import { ReplyWebMedia, replyAddress, webReply, type WebReply } from './ReplyWebMedia.tsx';
+import { isWebPicture, ReplyWebMedia, ReplyWebPictures, replyAddress, webReply, type WebReply } from './ReplyWebMedia.tsx';
 
 // Model output is untrusted: rendered as Markdown, then stripped of anything that could run. Every piece of HTML that reaches
 // the page passes through DOMPurify here, and nowhere else.
@@ -19,7 +19,9 @@ const quiet = (h3: string, text: string) => {
   const words = text.split(' ');
   return words.length < 3 ? h3 : `<h3>${words.slice(0, -2).join(' ')} <em>${words.slice(-2).join(' ')}</em></h3>`;
 };
-const tidy = (markup: string) => DOMPurify.sanitize(markup).replace(/<h3>([^<]*)<\/h3>/g, quiet);
+const tidy = (markup: string) => DOMPurify.sanitize(markup, {
+  FORBID_ATTR: ['data-reply-web-off', 'data-reply-picture-list'],
+}).replace(/<h3>([^<]*)<\/h3>/g, quiet);
 
 // Short texts that are drawn again and again (a narration, a report) are parsed once. Small and bounded: this is not a cache
 // of the thread.
@@ -140,8 +142,9 @@ type Block = {
   tokens?: Token[];
   media?: MediaRef[];
   web?: WebReply;
+  webPictures?: WebReply[];
   parts?: Block[];
-  imageList?: { ordered: boolean; start: number; items: Block[] };
+  pictureList?: { ordered: boolean; start: number };
 };
 
 function paragraphMedia(token: Token, folder: string): MediaRef[] | undefined {
@@ -166,6 +169,21 @@ function paragraphWeb(token: Token) {
   if (part.type === 'text') return webReply(part.text.trim(), '', false);
 }
 
+function appendWebBlock(blocks: Block[], block: Block) {
+  const previous = blocks.at(-1);
+  const pictures = (part?: Block) => part?.pictureList ? undefined
+    : part?.webPictures ?? (part?.web && isWebPicture(part.web) ? [part.web] : undefined);
+  const before = pictures(previous);
+  const next = pictures(block);
+  if (previous && before && next) {
+    previous.raw += '\n\n' + block.raw;
+    previous.webPictures = [...before, ...next];
+    previous.web = undefined;
+  } else {
+    blocks.push(block);
+  }
+}
+
 /** The model may use explicit Markdown line breaks between standalone file links. */
 function lineMedia(token: Token, folder: string): Block[] | undefined {
   if (token.type !== 'paragraph') return;
@@ -181,7 +199,11 @@ function lineMedia(token: Token, folder: string): Block[] | undefined {
       const line = { ...paragraph, tokens };
       return { raw: '', media: paragraphMedia(line, folder), web: paragraphWeb(line) };
     });
-    if (parts.every((part) => part.media || part.web)) return parts;
+    if (parts.every((part) => part.media || part.web)) {
+      const combined: Block[] = [];
+      for (const part of parts) appendWebBlock(combined, part);
+      return combined;
+    }
   }
   // A bare media address on the line after a caption is still a standalone reference.
   const last = inline.at(-1);
@@ -192,7 +214,7 @@ function lineMedia(token: Token, folder: string): Block[] | undefined {
   }
 }
 
-function imageList(token: Token): Block['imageList'] {
+function imageList(token: Token): Block | undefined {
   if (token.type !== 'list') return;
   const list = token as Tokens.List;
   const pictures = list.items.map((item) => {
@@ -202,7 +224,32 @@ function imageList(token: Token): Block['imageList'] {
     if (!other && image?.type === 'image') return webReply(image.href, image.text, true);
   });
   if (!pictures.length || !pictures.every((picture): picture is WebReply => !!picture)) return;
-  return { ordered: list.ordered, start: typeof list.start === 'number' ? list.start : 1, items: pictures.map((web) => ({ raw: '', web })) };
+  return {
+    raw: token.raw, webPictures: pictures,
+    pictureList: { ordered: list.ordered, start: typeof list.start === 'number' ? list.start : 1 },
+  };
+}
+
+function sentencePictures(token: Token, folder: string): Block[] | undefined {
+  if (token.type !== 'paragraph') return;
+  const paragraph = token as Tokens.Paragraph;
+  const pictures: Block[] = [];
+  const withoutPictures = (tokens: Token[]): Token[] => tokens.flatMap<Token>((part) => {
+    if (part.type === 'image') {
+      const media = localMedia(part.href, part.text, folder);
+      const web = webReply(part.href, part.text, true);
+      if (media?.kind === 'picture' || web) {
+        appendWebBlock(pictures, { raw: '', media: media?.kind === 'picture' ? [media] : undefined, web });
+        return part.text ? [{ type: 'text', raw: part.text, text: part.text }] : [];
+      }
+    }
+    if (part.type !== 'link' && 'tokens' in part && Array.isArray(part.tokens)) {
+      return [{ ...part, tokens: withoutPictures(part.tokens) }];
+    }
+    return [part];
+  });
+  const tokens = withoutPictures(paragraph.tokens);
+  if (pictures.length) return [{ raw: '', tokens: [{ ...paragraph, tokens }] }, ...pictures];
 }
 
 function blocksOf(text: string, references?: Links, folder?: string): { blocks: Block[]; links: Links } {
@@ -218,16 +265,16 @@ function blocksOf(text: string, references?: Links, folder?: string): { blocks: 
       previous.tokens!.push(token);
     } else {
       const web = folder === undefined ? undefined : paragraphWeb(token);
-      blocks.push({
-        raw: token.raw, tokens: [token], media, web,
-        parts: folder === undefined || media || web ? undefined : lineMedia(token, folder),
-        imageList: folder === undefined ? undefined : imageList(token),
-      });
+      const list = folder === undefined ? undefined : imageList(token);
+      const parts = folder === undefined || media || web ? undefined : lineMedia(token, folder) ?? sentencePictures(token, folder);
+      appendWebBlock(blocks, list ?? (parts?.length === 1 && parts[0]?.webPictures
+        ? { ...parts[0], raw: token.raw }
+        : { raw: token.raw, tokens: [token], media, web, parts }));
     }
   }
   if (lexed.some((token) => token.type === 'html')) {
     return {
-      blocks: [{ raw: text, parts: blocks.some((block) => block.media || block.web || block.parts || block.imageList) ? blocks : undefined }],
+      blocks: [{ raw: text, parts: blocks.some((block) => block.media || block.web || block.parts || block.webPictures) ? blocks : undefined }],
       links: lexed.links,
     };
   }
@@ -281,6 +328,10 @@ export function inlineMediaPaths(text: string, folder: string): Set<string> {
 }
 
 function mountMedia(slot: HTMLElement, block: Block, session: MediaSession) {
+  if (block.webPictures) return render(() => <ReplyWebPictures pictures={block.webPictures!} list={block.pictureList} session={session}
+    mode={session.web?.()?.mode} blocked={session.web?.()?.blocked ?? []}
+    canOpen={session.web?.()?.canOpen ?? false}
+    open={(url, title) => session.web?.()?.open(url, title) ?? Promise.resolve(false)} />, slot);
   if (block.web) return render(() => <ReplyWebMedia media={block.web!} session={session}
     mode={session.web?.()?.mode} blocked={session.web?.()?.blocked ?? []}
     canOpen={session.web?.()?.canOpen ?? false}
@@ -290,7 +341,7 @@ function mountMedia(slot: HTMLElement, block: Block, session: MediaSession) {
 }
 
 function registerMedia(slot: HTMLElement, block: Block, session: MediaSession) {
-  mediaSlots.set(slot, { key: JSON.stringify(block.media ?? block.web), dispose: mountMedia(slot, block, session) });
+  mediaSlots.set(slot, { key: JSON.stringify(block.media ?? block.web ?? [block.webPictures, block.pictureList]), dispose: mountMedia(slot, block, session) });
 }
 
 export function renderMarkdown(root: HTMLElement, text: string, references?: Links, session?: MediaSession): void {
@@ -310,22 +361,16 @@ export function renderMarkdown(root: HTMLElement, text: string, references?: Lin
     const marks = new Map<string, Block>();
     const mediaMarkup = (part: Block): string => {
       if (part.parts) return part.parts.map(mediaMarkup).join('');
-      if (part.imageList) {
-        const { ordered, start, items } = part.imageList;
-        const tag = ordered ? 'ol' : 'ul';
-        const attribute = ordered && start !== 1 ? ` start="${start}"` : '';
-        return `<${tag}${attribute}>${items.map((item) => `<li>${mediaMarkup(item)}</li>`).join('')}</${tag}>`;
-      }
-      if (!part.media && !part.web) return markup(part);
+      if (!part.media && !part.web && !part.webPictures) return markup(part);
       // Keep raw HTML in one sanitising pass. Only renderer-created markers can mount players.
       const key = crypto.getRandomValues(new Uint32Array(4)).join('-');
       marks.set(key, part);
       return `<div data-reply-media="${key}"></div>`;
     };
-    const source = block.parts || block.imageList ? mediaMarkup(block) : markup(block);
+    const source = block.parts ? mediaMarkup(block) : markup(block);
     template.innerHTML = tidy(source);
     raws.push(block.raw);
-    if (session && (block.media || block.web)) {
+    if (session && (block.media || block.web || block.webPictures)) {
       const slot = document.createElement('div');
       registerMedia(slot, block, session);
       template.content.replaceChildren(slot);

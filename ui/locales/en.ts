@@ -1543,6 +1543,7 @@ export const en = {
   'media.error': 'Could not load the media',
   'media.webUnavailable': 'Set web search to Live to preview media from the web.',
   'error.media.webOff': 'Web search is set to Off.',
+  'media.webOffHint': 'Choose {mode} in {path} to show media.',
   'error.media.webCached': 'Web search is set to Stored copy.',
   'error.media.webBlocked': 'This site is blocked in Settings.',
   'error.media.webHttps': 'Web media needs a secure HTTPS address.',

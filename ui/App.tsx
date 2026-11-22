@@ -2264,6 +2264,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                       canOpen: canBrowse(),
                                       open: (url, title) => openReplyPage(c().id, url, title),
                                       onError: (reason) => fail(reason),
+                                      onSettings: () => openSettings('general'),
                                     }}
                                     messages={c().messages}
                                     earlier={c().earlier}

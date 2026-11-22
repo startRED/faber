@@ -288,7 +288,7 @@ export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: 
           </div>
         </Show>
       </div>
-      <Show when={!props.tile}>
+      <Show when={!props.tile || (props.webAllowed && (status() === 'error' || status() === 'gone'))}>
         <figcaption>
           <Show when={props.webAllowed} fallback={<span>{props.media.name}</span>}>
             <a href={props.media.path}>{props.media.name}</a>
@@ -300,7 +300,7 @@ export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: 
   </div>;
 }
 
-export function ReplyGallery(props: { media: MediaRef[]; session?: Session }) {
+export function ReplyGallery(props: { media: MediaRef[]; session?: Session; webAllowed?: (ref: MediaRef) => boolean }) {
   const context = useContext(ReplyMediaContext);
   const previews = props.media.slice(0, 4);
   let close: (() => void) | undefined;
@@ -308,18 +308,24 @@ export function ReplyGallery(props: { media: MediaRef[]; session?: Session }) {
   const view = (origin: HTMLImageElement, index: number) => {
     const session = props.session ?? context?.();
     if (!session) return;
+    let active = true;
     const shots = props.media.map((ref) => ({
       alt: ref.name,
+      href: props.webAllowed ? ref.path : undefined,
       load: async () => {
-        const src = await session.grant(ref.path);
+        const src = props.webAllowed
+          ? await session.grantWeb(ref.path, () => active && origin.isConnected && !document.hidden && !!props.webAllowed?.(ref))
+          : await session.grant(ref.path);
+        if (!src) throw 'error.media.closed';
         return { src, release: () => session.release(src) };
       },
     }));
-    close = openViewer(origin, shots, index) ?? close;
+    close = openViewer(origin, shots, index, () => { active = false; }) ?? close;
   };
   return <div class="reply-media-gallery" style={{ '--gallery-columns': previews.length }}>
     <For each={previews}>{(media, i) =>
-      <ReplyMedia media={media} session={props.session} tile more={i() === 3 ? props.media.length - 4 : undefined} onView={(img) => view(img, i())} />
+      <ReplyMedia media={media} session={props.session} tile more={i() === 3 ? props.media.length - 4 : undefined}
+        webAllowed={props.webAllowed && (() => !!props.webAllowed?.(media))} onView={(img) => view(img, i())} />
     }</For>
   </div>;
 }

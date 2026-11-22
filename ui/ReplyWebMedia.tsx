@@ -1,8 +1,9 @@
-import { Match, Show, Switch, createSignal } from 'solid-js';
+import { For, Match, Show, Switch, createMemo, createSignal } from 'solid-js';
+import { Dynamic } from 'solid-js/web';
 import type { WebSearch } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { failureText, t } from './i18n.ts';
-import { mediaKind, ReplyMedia, type MediaSession } from './Media.tsx';
+import { mediaKind, ReplyGallery, ReplyMedia, type MediaRef, type MediaSession } from './Media.tsx';
 
 const videoSites = new Map([
   ['youtube.com', 'YouTube'], ['m.youtube.com', 'YouTube'], ['youtu.be', 'YouTube'],
@@ -23,6 +24,7 @@ export interface ReplyWebOptions {
   canOpen: boolean;
   open: (url: string, title: string) => Promise<boolean | undefined>;
   onError?: (reason: unknown) => void;
+  onSettings?: () => void;
 }
 
 export function replyAddress(address: string): URL | undefined {
@@ -46,6 +48,40 @@ export function replyHostBlocked(host: string, blocked: string[]) {
   return blocked.some((entry) => host === entry || host.endsWith('.' + entry));
 }
 
+export function isWebPicture(media: WebReply) {
+  return !media.site && (media.picture || mediaKind(new URL(media.url).pathname) === 'picture');
+}
+
+function webReason(media: WebReply, options: ReplyWebOptions, kind: MediaRef['kind'] | undefined) {
+  if (options.mode === 'off') return t('error.media.webOff');
+  if (options.mode === 'cached') return t('error.media.webCached');
+  if (replyHostBlocked(media.host, options.blocked)) return t('error.media.webBlocked');
+  if (options.mode !== 'live') return t('media.webUnavailable');
+  if (!media.url.startsWith('https://')) return t('error.media.webHttps');
+  if (!kind) return t('error.media.webKind');
+}
+
+export function ReplyWebPictures(props: {
+  pictures: WebReply[]; list?: { ordered: boolean; start: number }; session: MediaSession;
+} & ReplyWebOptions) {
+  const available = createMemo(() => props.pictures.filter(picture => !webReason(picture, props, 'picture')));
+  const gallery = createMemo<MediaRef[]>(() => available().map(picture => ({
+    path: picture.url, name: picture.title, kind: 'picture',
+  })));
+  const renderPicture = (picture: WebReply) => <ReplyWebMedia {...props} media={picture} />;
+  return <Show when={gallery().length > 1 ? gallery() : undefined} keyed fallback={
+    props.list
+      ? <Dynamic component={props.list.ordered ? 'ol' : 'ul'} start={props.list.ordered ? props.list.start : undefined} data-reply-picture-list="">
+        <For each={props.pictures}>{picture => <li>{renderPicture(picture)}</li>}</For>
+      </Dynamic>
+      : <For each={props.pictures}>{renderPicture}</For>
+  }>{(pictures) => <>
+    <ReplyGallery media={pictures} session={props.session}
+      webAllowed={ref => available().some(picture => picture.url === ref.path)} />
+    <For each={props.pictures.filter(picture => !available().includes(picture))}>{renderPicture}</For>
+  </>}</Show>;
+}
+
 export function ReplyWebMedia(props: { media: WebReply; session: MediaSession } & ReplyWebOptions) {
   const [opening, setOpening] = createSignal(false);
   const [refused, setRefused] = createSignal<string>();
@@ -64,14 +100,7 @@ export function ReplyWebMedia(props: { media: WebReply; session: MediaSession } 
   };
   const blocked = () => replyHostBlocked(props.media.host, props.blocked);
   const kind = props.media.picture ? 'picture' : mediaKind(new URL(props.media.url).pathname);
-  const reason = () => {
-    if (props.mode === 'off') return t('error.media.webOff');
-    if (props.mode === 'cached') return t('error.media.webCached');
-    if (blocked()) return t('error.media.webBlocked');
-    if (props.mode !== 'live') return t('media.webUnavailable');
-    if (!props.media.url.startsWith('https://')) return t('error.media.webHttps');
-    if (!kind) return t('error.media.webKind');
-  };
+  const reason = () => webReason(props.media, props, kind);
   return <Switch>
     <Match when={props.media.site && !props.canOpen}>
       <p><a href={props.media.url}>{props.media.title}</a></p>
@@ -88,6 +117,9 @@ export function ReplyWebMedia(props: { media: WebReply; session: MediaSession } 
           <Show when={!blocked() && refused()}><small role="status">{refused()}</small></Show>
         </div>
       </div>}
+    </Match>
+    <Match when={props.mode === 'off'}>
+      <a data-reply-web-off="" href={props.media.url}>{props.media.title}</a>
     </Match>
     <Match when={!props.media.site}>
       <Show when={!reason()} fallback={<div class="reply-web-notice">

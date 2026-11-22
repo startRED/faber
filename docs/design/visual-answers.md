@@ -98,16 +98,18 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
 
 ## Web media in a conversation
 
-- Markdown pictures can use extensionless URLs and photo-only lists. A bare media URL after a caption can preview.
+- Adjacent web pictures share the reply gallery, including hard breaks and picture-only lists. URLs can be extensionless.
+  A Markdown image in a sentence previews below its paragraph. Ordinary links stay links.
+  A bare media URL after a caption can preview.
 - `media_grant_web({ id, url })` uses the visible conversation's lease. Live loads direct media automatically.
   Off and Cached refuse before DNS. Cached uses saved search results. Release or leave revokes the grant.
   Each request reads the current setting.
-- The reply uses scoped media URLs and keeps the original link. A muted notice with an icon distinguishes app refusals from reply text.
-- The host fetches HTTPS and compares the canonical host against Privacy's blocked sites, including subdomains,
-  before lookup and connection. All resolved addresses must be public. There is no DNS fallback. TLS uses system
-  roots without fetching certificate URLs. Every redirect repeats these checks.
-  Requests identify the versioned media client and project URL and carry the byte range, with no proxy, cookies, credentials
-  or referrer. The owner accepted that hostile media addresses can encode conversation data.
+- Replies keep the source links. Off shows one muted notice per reply and points to Live under Settings ›
+  General › Web search. Further Off items are plain titled links. Photo-only lists use normal list spacing.
+- HTTPS hosts and subdomains must pass Privacy checks before DNS and connection. All resolved addresses must be
+  public. There is no DNS fallback. TLS uses system roots without fetching certificate URLs. Redirects repeat
+  the checks. Requests send the client version, project URL and range, without proxy, cookies, credentials or
+  referrer. The owner accepted that hostile media addresses can encode conversation data.
 - The host allows three redirects, five seconds to connect and fifteen seconds overall. Two fetches run at once,
   with up to 62 waiting. A known length and an initial probe establish size and type. An opening range can supply
   the 4 KiB probe. Pictures are capped at 8 MiB, audio and video at 128 MiB with up to 1 MiB per range.

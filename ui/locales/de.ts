@@ -1384,6 +1384,7 @@ export const de: Messages = {
   'media.error': 'Medium konnte nicht geladen werden',
   'media.webUnavailable': 'Stelle die Websuche auf Live, um dieses Medium anzuzeigen.',
   'error.media.webOff': 'Die Websuche ist ausgeschaltet.',
+  'media.webOffHint': 'Wähle {mode} unter {path}, um Medien anzuzeigen.',
   'error.media.webCached': 'Die Websuche verwendet gespeicherte Kopien.',
   'error.media.webBlocked': 'Diese Website ist in den Einstellungen gesperrt.',
   'error.media.webHttps': 'Dieses Medium benötigt eine sichere HTTPS-Adresse.',

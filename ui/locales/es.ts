@@ -1545,6 +1545,7 @@ export const es: Messages = {
   'media.error': 'No se pudo cargar el contenido multimedia',
   'media.webUnavailable': 'Activa la búsqueda web en tiempo real para ver este contenido.',
   'error.media.webOff': 'La búsqueda web está desactivada.',
+  'media.webOffHint': 'Para mostrar los archivos multimedia, selecciona {mode} en {path}.',
   'error.media.webCached': 'La búsqueda web usa copias guardadas.',
   'error.media.webBlocked': 'Este sitio está bloqueado en la configuración.',
   'error.media.webHttps': 'Este contenido necesita una dirección HTTPS segura.',

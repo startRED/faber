@@ -1384,6 +1384,7 @@ export const fr: Messages = {
   'media.error': 'Impossible de charger le média',
   'media.webUnavailable': 'Activez la recherche web en direct pour afficher ce média.',
   'error.media.webOff': 'La recherche web est désactivée.',
+  'media.webOffHint': 'Pour afficher les médias, choisissez {mode} dans {path}.',
   'error.media.webCached': 'La recherche web utilise les copies enregistrées.',
   'error.media.webBlocked': 'Ce site est bloqué dans les paramètres.',
   'error.media.webHttps': 'Ce média nécessite une adresse HTTPS sécurisée.',

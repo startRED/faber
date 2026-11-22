@@ -1542,6 +1542,7 @@ export const ptBR: Messages = {
   'media.error': 'Não foi possível carregar a mídia',
   'media.webUnavailable': 'Ative a busca na web em tempo real para visualizar esta mídia.',
   'error.media.webOff': 'A busca na web está desligada.',
+  'media.webOffHint': 'Para exibir a mídia, selecione {mode} em {path}.',
   'error.media.webCached': 'A busca na web está configurada para usar cópias salvas.',
   'error.media.webBlocked': 'Este site está bloqueado nas configurações.',
   'error.media.webHttps': 'Esta mídia precisa de um endereço HTTPS seguro.',

@@ -2433,6 +2433,14 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
   font-size: var(--fs-sm);
 }
 .reply-web-reason svg { flex: none; }
+.reply-web-off-summary { display: none; }
+.ai:has(> .md a[data-reply-web-off]) > .reply-web-off-summary { display: flex; flex-wrap: wrap; }
+.reply-web-off-summary > span { flex: 1 1 180px; }
+.reply-web-off-summary > button { color: var(--accent-text); text-decoration: underline; }
+.col .ai .md ol[data-reply-picture-list] { gap: 0; }
+.col .ai .md [data-reply-picture-list] > li + li { margin-block-start: 8px; }
+.md [data-reply-picture-list] > li > :is(.reply-media-shell, .reply-web-notice) { margin-block: 0; }
+.md [data-reply-picture-list] > li > .reply-web-notice { min-height: 0; padding: 0; border: 0; }
 @container reply-stage (max-width: 760px) {
   .reply-media-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .reply-media-tile .reply-media-slot { aspect-ratio: 2/1; max-height: 132px; }

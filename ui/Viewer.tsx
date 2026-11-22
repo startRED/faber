@@ -1,5 +1,6 @@
 import { createEffect, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { render } from 'solid-js/web';
+import { api } from './api.ts';
 import { keepFocusIn } from './focus.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
@@ -10,8 +11,10 @@ import { level, millis } from './motion.ts';
 type Shot = {
   src: string;
   alt: string;
+  href?: string;
 } | {
   alt: string;
+  href?: string;
   load: () => Promise<{ src: string; release: () => void }>;
 };
 
@@ -147,7 +150,12 @@ function Viewer(props: { shots: Shot[]; index: number; origin: HTMLElement; full
       }}
     >
       <div class="viewer-stage" onClick={(e) => e.target === e.currentTarget && close()}>
-        <Show when={source()} keyed fallback={<span role="status">{t(loaded()?.shot === shot() ? 'media.gone' : 'file.loading')}</span>}>
+        <Show when={source()} keyed fallback={<span role="status">
+          {t(loaded()?.shot === shot() ? 'media.gone' : 'file.loading')}
+          <Show when={loaded()?.shot === shot() && shot().href}>{href =>
+            <> · <a class="link" href={href()} onClick={event => { event.preventDefault(); void api.openLink(href()); }}>{shot().alt}</a></>
+          }</Show>
+        </span>}>
           {(src) => {
             const swapping = !first;
             first = false;
@@ -164,6 +172,10 @@ function Viewer(props: { shots: Shot[]; index: number; origin: HTMLElement; full
                 classList={{ fresh: swapping }}
                 src={src}
                 alt={shot().alt}
+                onError={() => {
+                  const current = shot();
+                  if (current.href && source() === src) setLoaded({ shot: current, src: undefined });
+                }}
               />
             );
           }}
