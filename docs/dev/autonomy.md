@@ -99,6 +99,14 @@ event type and IDs; the controlled driver checks cover reply ownership and the S
   completion the sample held 603.1 MB and 9.28 CPU seconds across 17 live processes, including the test's CLI gate
   and account checks. The outer meter missed those processes: these are live-tree snapshots, not peaks or
   whole-run CPU totals. The 4.15 s reply reported 25,716 input and 13 output tokens (USD 0.002578 API equivalent).
+- The hidden Windows Electron live proof used three native processes. The first kept the exact overdue
+  deadline and both messages while no account could respond. The second confirmed a real subscription with
+  paid fallback unavailable and produced one GPT-6.1 Terra/low reply. The third reopened that reply and
+  confirmed the account again. The gate recorded one eligible request, and all three owned trees exited.
+  The finished conversation was inspected at 1,280 and 390 pixels. The run took 14.38 s. Before account
+  confirmation, four processes held 138.5 MB private working set and 2.72 accumulated CPU seconds. At
+  completion, 14 held 593.3 MB and 8.33 CPU seconds. These are live-tree samples including the proof's gates.
+  The turn reported 30,244 input and 13 output tokens (USD 0.030309 API equivalent).
 - The native app was exercised with synthetic data and inspected at 1280, 720 and 390 pixels. The final
   no-CLI fixture measured 166.55 MB, below the 400 MB test ceiling. No resident production process was added.
   CLI process-tree peak and incremental processor cost were not measured.
@@ -141,10 +149,6 @@ and the Brazilian Portuguese instruction to connect a subscription. No model req
   A blocked return now shows its reason and any saved note, without counting the old references as active waits.
   The recovered report persisted once. The account and draft actions preserved keyboard focus and existing text.
   The blocked and queued states were inspected at 1,280, 720 and 390 pixels using isolated data.
-- [430](../tasks/430-account-block-and-restart-keep-the-work.md): the native Tauri and Electron restart proofs each
-  produced one signed-in return and kept it after another reopen. The repeatable three-launch test now selects
-  and names the shell at runtime. The hidden Electron fixture stayed below the disconnected 400 MB process-tree
-  ceiling. Its account check and reply used fixtures.
 - [389](../tasks/389-recover-shared-service.md): two active replies sharing a silent service now trigger a bounded
   local probe. With one active reply, a Stop for a known turn also qualifies when its completion notice is missing after
   five seconds, even if the service acknowledged the interrupt or sent a status update. A native MCP tool still open after
