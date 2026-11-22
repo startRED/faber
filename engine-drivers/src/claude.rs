@@ -216,7 +216,7 @@ fn guide_plugin_loaded(launch: &ClaudeLaunch) -> bool {
     launch.area == Area::Project && offers_tools(launch.area, launch.permissions) && launch.flags.plugin_dir
 }
 
-/// Only Faber's original guide and original skills are readable without a card.
+/// Only Faber's original guide and frontend instructions are readable without a card.
 fn guide_allowed(guide: &crate::guide::Guide, plugin_loaded: bool) -> Vec<String> {
     match guide {
         crate::guide::Guide::Plugin { .. } if plugin_loaded => std::iter::once(crate::guide::SKILL_RULE.to_string())
