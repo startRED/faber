@@ -128,6 +128,54 @@ check('reply web media: sentence pictures stay inside their list item or quote',
   }
 });
 
+check('reply web media: isolated pictures stay in lists and quotes', () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const text = [
+    '- ![Local one](./one.png)\n- ![Local two](./two.png)',
+    'Mixed:',
+    '- ![Mixed local](./mixed.png)\n- ![Mixed web](https://example.test/mixed.jpg)',
+    'With words:',
+    '- Prose with [link](https://example.test/page)\n- [x] ![Checked](./checked.png)',
+    '> ![Quoted alone](./quote.png)',
+    'Linked:',
+    '> [![Linked alone](./linked.png)](https://example.test/page)',
+    '- ![Web one](https://example.test/one.jpg)\n- ![Web two](https://example.test/two.jpg)',
+  ].join('\n\n');
+  const dispose = render(() => createComponent(Thread, {
+    conversationId: 'isolated-pictures', options: [], from: 0, onBranch: () => {},
+    replyWeb: { mode: 'live', blocked: [], canOpen: false, open: async () => false },
+    messages: [{ id: 'reply', role: 'assistant', at: 0, text }],
+  }), host);
+  try {
+    const lists = host.querySelectorAll('.md ul');
+    for (const [index, names] of [[0, ['Local one', 'Local two']], [1, ['Mixed local', 'Mixed web']]] as const) {
+      const items = lists[index]!.querySelectorAll(':scope > li');
+      names.forEach((name, i) => {
+        equal(items[i]!.querySelectorAll(`figure[aria-label="${name}"]`).length, 1);
+        equal(items[i]!.querySelector('figcaption')?.textContent, name);
+        equal(items[i]!.textContent?.split(name).length, 2);
+        equal(items[i]!.querySelector('p'), null);
+      });
+    }
+    const items = lists[2]!.querySelectorAll(':scope > li');
+    equal(items[0]!.querySelector('a')?.getAttribute('href'), 'https://example.test/page');
+    equal(items[1]!.querySelector<HTMLInputElement>('input')?.checked, true);
+    equal(items[1]!.querySelectorAll('figure[aria-label="Checked"]').length, 1);
+    equal(items[1]!.textContent?.split('Checked').length, 2);
+    equal(host.querySelectorAll('blockquote figure[aria-label="Quoted alone"]').length, 1);
+    equal(host.querySelector('blockquote')?.textContent?.split('Quoted alone').length, 2);
+    equal(host.querySelector('blockquote')?.querySelector('p'), null);
+    equal(host.querySelectorAll('blockquote')[1]?.querySelector('a')?.textContent, 'Linked alone');
+    deepEqual([...inlineMediaPaths(text, 'C:/workspace')], ['one.png', 'two.png', 'mixed.png', 'checked.png', 'quote.png']);
+    ok([...host.querySelectorAll('.reply-media-gallery')].some(gallery =>
+      gallery.querySelectorAll('figure').length === 2 && gallery.querySelector('figure[aria-label="Web one"]')));
+  } finally {
+    dispose();
+    host.remove();
+  }
+});
+
 function waitFor(host: HTMLElement, selector: string) {
   return new Promise<HTMLElement>((resolve, reject) => {
     const stop = () => { clearTimeout(deadline); observer.disconnect(); };

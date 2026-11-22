@@ -69,8 +69,8 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
 
 ## Local media in a conversation
 
-- Hard breaks separate standalone file links. Images preview below their sentence in paragraphs, lists and quotes.
-  Picture frames keep an outline in forced colors.
+- Hard breaks separate file links. Images preview below their sentence or alone in their list item or quote.
+  An image alone has one caption. Picture frames keep an outline in forced colors.
 - A gallery mounts up to four previews. When there are more pictures, a separate button opens the viewer at the
   next picture, even if every preview failed. The viewer can move through the entire gallery. Equivalent policy
   updates keep it open while changes to the available pictures close it.
@@ -98,7 +98,7 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
 ## Web media in a conversation
 
 - Adjacent web pictures share the gallery across hard breaks and picture-only lists. URLs can be extensionless.
-  Sentence pictures preview below the words inside their item or quote.
+  Pictures stay inside their item or quote, with or without surrounding words.
   Ordinary links stay links. A failed picture keeps its titled link in the preview or viewer.
   A bare media URL after a caption can preview.
 - `media_grant_web({ id, url })` uses the active conversation's lease and current setting. Live loads direct media.

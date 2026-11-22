@@ -235,6 +235,7 @@ function sentencePictures(token: Token, folder: string, nested = false): Block[]
   if ((token.type !== 'paragraph' && token.type !== 'text') || !token.tokens) return;
   const pictures: Block[] = [];
   let hasWords = false;
+  let hasLink = false;
   const withoutPictures = (tokens: Token[]): Token[] => tokens.flatMap<Token>((part) => {
     if (part.type === 'image') {
       const media = localMedia(part.href, part.text, folder);
@@ -245,13 +246,21 @@ function sentencePictures(token: Token, folder: string, nested = false): Block[]
       }
     }
     if ((part.type !== 'link' || nested) && part.type !== 'image' && 'tokens' in part && Array.isArray(part.tokens)) {
+      if (part.type === 'link') hasLink = true;
       return [{ ...part, tokens: withoutPictures(part.tokens) }];
     }
     if (part.type !== 'image' && part.type !== 'html' && part.type !== 'br' && part.type !== 'checkbox' && part.raw.trim()) hasWords = true;
     return [part];
   });
   const tokens = withoutPictures(token.tokens);
-  if (pictures.length && (!nested || hasWords)) return [{ raw: '', tokens: [{ ...token, tokens }] }, ...pictures];
+  if (pictures.length) {
+    if (nested && !hasWords) {
+      if (hasLink) return;
+      const checkbox = token.tokens.filter((part) => part.type === 'checkbox');
+      return [...(checkbox.length ? [{ raw: '', tokens: [{ ...token, tokens: checkbox }] }] : []), ...pictures];
+    }
+    return [{ raw: '', tokens: [{ ...token, tokens }] }, ...pictures];
+  }
 }
 
 function nestedPictureSlots(token: Tokens.List | Tokens.Blockquote, folder: string) {
@@ -262,12 +271,12 @@ function nestedPictureSlots(token: Tokens.List | Tokens.Blockquote, folder: stri
     container.tokens = container.tokens.flatMap((line) => {
       const parts = sentencePictures(line, folder, true);
       if (!parts) return [line];
-      const [words, ...pictures] = parts;
-      return [...words!.tokens!, ...pictures.map((picture) => {
+      return parts.flatMap((picture) => {
+        if (picture.tokens) return picture.tokens;
         const marker: Tokens.HTML = { type: 'html', raw: '', text: '', block: true, pre: false };
         slots.push({ marker, picture });
-        return marker;
-      })];
+        return [marker];
+      });
     });
   });
   return slots.length ? slots : undefined;
