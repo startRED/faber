@@ -1551,6 +1551,7 @@ export const en = {
   'error.media.webKind': 'This media format cannot be previewed.',
   'error.media.webUnreachable': 'Faber could not load this media.',
   'media.webPlay': 'Play {name}',
+  'media.webTitle': 'Video on {site}',
   'media.webSide': 'Opens in the side panel',
   'media.webPaneUnavailable': 'The side panel could not open this page.',
   'media.webOpenBeside': 'Open beside the conversation',

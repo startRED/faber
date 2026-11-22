@@ -191,7 +191,6 @@ export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: 
   const [source, setSource] = createSignal<string>();
   const [status, setStatus] = createSignal<'loading' | 'ready' | 'error' | 'gone'>('loading');
   const [retry, setRetry] = createSignal(0);
-  const [duration, setDuration] = createSignal('');
   const [webFailure, setWebFailure] = createSignal<unknown>();
   let figure!: HTMLElement;
   let image: HTMLImageElement | undefined;
@@ -251,11 +250,7 @@ export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: 
   };
   const playback = () => ({
     controls: true, preload: 'metadata', 'aria-label': props.media.name,
-    onLoadedMetadata: (event: Event) => {
-      const seconds = Math.floor((event.currentTarget as HTMLMediaElement).duration);
-      if (Number.isFinite(seconds)) setDuration(`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`);
-      ready();
-    },
+    onLoadedMetadata: ready,
     onError: failed, onPlay: play,
   } as const);
   if (props.thumb) return <span ref={(el) => { figure = el; }} class="reply-media-thumb" hidden={!source() || status() !== 'ready'} aria-hidden="true">
@@ -298,7 +293,6 @@ export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: 
           <Show when={props.webAllowed} fallback={<span>{props.media.name}</span>}>
             <a href={props.media.path}>{props.media.name}</a>
           </Show>
-          <Show when={props.media.kind === 'video' && duration()}><span>{duration()}</span></Show>
           <Show when={props.media.kind === 'audio'}><small>{(props.webAllowed ? new URL(props.media.path).pathname : props.media.path).split('.').at(-1)?.toUpperCase()}</small></Show>
         </figcaption>
       </Show>

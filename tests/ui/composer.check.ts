@@ -33,11 +33,12 @@ check('composer: the short attachment panel keeps the draft clear and returns ke
       onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => {},
       onRestore: (receive) => { restore = receive; },
     }), page.querySelector('.dock')!);
-    ok(restore({ text: 'Keep this draft.', images: [], files: [{ name: 'notes.pdf', base64: 'eA==' }] }));
+    ok(restore({ text: 'Keep this draft.', images: [{ mediaType: 'image/png', base64: PNG }], files: [] }));
     const field = page.querySelector('textarea')!;
     const thread = page.querySelector('.thread')!;
     const chip = page.querySelector<HTMLButtonElement>('.attachment-count')!;
-    ok(chip, 'the count control exists for an attached file');
+    ok(chip, 'the count control exists for an attached image');
+    ok(chip.querySelector('svg')?.innerHTML !== page.querySelector('.send svg')?.innerHTML, 'the attachment and send glyphs are distinct');
     const panel = page.getElementById(chip.getAttribute('aria-controls')!)!;
     const remove = panel.querySelector<HTMLButtonElement>('.thumb-x')!;
     for (const height of [520, 480]) {
@@ -58,6 +59,8 @@ check('composer: the short attachment panel keeps the draft clear and returns ke
         'composer notices stay with the draft below the attachment panel');
       const target = remove.getBoundingClientRect();
       ok(target.width >= 28 && target.height >= 28 && target.bottom <= height, 'the full removal target fits');
+      const thumbnail = panel.querySelector('.thumb-open')!.getBoundingClientRect();
+      ok(thumbnail.width >= 40 && thumbnail.right <= target.left, 'the removal target leaves the thumbnail visible');
       chip.click();
       equal(chip.getAttribute('aria-expanded'), 'false', 'activating the open count closes the attachment panel');
       equal(page.activeElement, chip, 'closing returns focus to the count control');
@@ -87,6 +90,13 @@ check('composer: the short attachment panel keeps the draft clear and returns ke
     equal(page.querySelector('.attachment-count'), null, 'the last removal clears the count');
     equal(page.activeElement, field, 'the draft gets focus once there is no count control');
     equal(field.value, 'Keep this draft.');
+    ok(restore({ text: field.value, images: [], files: [{ name: 'notes.pdf', base64: 'eA==' }] }));
+    page.querySelector<HTMLButtonElement>('.attachment-count')!.click();
+    await frames();
+    const removeFile = page.querySelector<HTMLButtonElement>('.thumb.file .thumb-x')!;
+    equal(page.activeElement, removeFile, 'the compact tray also opens for a file-only draft');
+    removeFile.click();
+    equal(page.querySelector('.attachment-count'), null);
   } finally {
     dispose(); iframe.remove();
   }

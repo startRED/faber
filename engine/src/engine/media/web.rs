@@ -144,7 +144,7 @@ fn client(pin: Target) -> Result<Client, &'static str> {
         .no_brotli()
         .no_deflate()
         .no_zstd()
-        .user_agent("Faber-Media")
+        .user_agent(concat!("Faber-Media/", env!("CARGO_PKG_VERSION"), " (https://github.com/startRED/faber)"))
         .connect_timeout(Duration::from_secs(5))
         .build()
         .map_err(|_| UNREACHABLE)
@@ -182,10 +182,11 @@ where
     R: Future<Output = Result<Vec<SocketAddr>, &'static str>>,
     S: Future<Output = Result<Response, &'static str>>,
 {
+    let opening_len = if !probe_only && range == Some("bytes=0-") { CHUNK } else { PROBE };
     for hop in 0..=REDIRECTS {
         let pin = target(url, check, resolve).await?;
         check(&pin.url)?;
-        let response = send(pin.clone(), format!("bytes=0-{}", PROBE - 1)).await?;
+        let response = send(pin.clone(), format!("bytes=0-{}", opening_len - 1)).await?;
         check(&pin.url)?;
         if response.status().is_redirection() {
             if hop == REDIRECTS {
@@ -195,7 +196,7 @@ where
             url = pin.url.join(location).map_err(|_| HTTPS)?;
             continue;
         }
-        let result = media(response, range, probe_only, &pin, check, send).await;
+        let result = media(response, range, probe_only, opening_len, &pin, check, send).await;
         check(&pin.url)?;
         return result;
     }
@@ -247,6 +248,7 @@ async fn media<S: Future<Output = Result<Response, &'static str>>>(
     mut response: Response,
     range: Option<&str>,
     probe_only: bool,
+    opening_len: u64,
     pin: &Target,
     check: &impl Fn(&Url) -> Result<(), &'static str>,
     send: &impl Fn(Target, String) -> S,
@@ -257,13 +259,15 @@ async fn media<S: Future<Output = Result<Response, &'static str>>>(
     if total > ITEM_LIMIT {
         return Err(SIZE.into());
     }
-    if start != 0 || (partial && end != prefix - 1) {
+    let requested = total.min(opening_len);
+    if start != 0 || (partial && end != requested - 1) {
         return Err(UNREACHABLE.into());
     }
     let mut bytes = Vec::with_capacity(prefix as usize);
-    let cap = if partial { prefix } else { total.min(IMAGE_LIMIT) };
-    body(&mut response, &mut bytes, prefix as usize, cap as usize).await?;
-    let media_kind = sniff(&bytes).ok_or(KIND)?;
+    let (wanted, cap) = if partial { (requested, requested) } else { (prefix, total.min(IMAGE_LIMIT)) };
+    body(&mut response, &mut bytes, wanted as usize, cap as usize).await?;
+    let signature = if partial { &bytes[..prefix as usize] } else { &bytes };
+    let media_kind = sniff(signature).ok_or(KIND)?;
     let image = media_kind.starts_with("image/");
     if image && total > IMAGE_LIMIT {
         return Err(SIZE.into());
@@ -282,7 +286,7 @@ async fn media<S: Future<Output = Result<Response, &'static str>>>(
     } else {
         (0, total.min(CHUNK) - 1)
     };
-    if !partial || last < prefix {
+    if !partial || last < requested {
         if !partial {
             body(&mut response, &mut bytes, total as usize, total as usize).await?;
         }

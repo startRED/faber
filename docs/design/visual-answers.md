@@ -99,27 +99,27 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
 ## Web media in a conversation
 
 - Markdown pictures can use extensionless URLs and photo-only lists. A bare media URL after a caption can preview.
-- `media_grant_web({ id, url })` uses the visible conversation's existing lease. Direct web pictures, video and
-  audio load automatically in Live mode. Off and Cached refuse before DNS or any request. Cached uses only saved
-  search results. Release or leave invalidates the grant, and each new request reads the current setting.
-- The reply uses only scoped media URLs and keeps the original link, with a notice when access is unavailable.
+- `media_grant_web({ id, url })` uses the visible conversation's lease. Live loads direct media automatically.
+  Off and Cached refuse before DNS. Cached uses saved search results. Release or leave revokes the grant.
+  Each request reads the current setting.
+- The reply uses scoped media URLs and keeps the original link. A muted notice with an icon distinguishes app refusals from reply text.
 - The host fetches HTTPS and compares the canonical host against Privacy's blocked sites, including subdomains,
-  before resolving and before connecting. Every address in the DNS answer must be public. The connection uses
-  that checked answer with no DNS fallback. HTTPS certificates are validated against system trust roots without
-  fetching certificate-supplied URLs. Each redirect repeats the
-  check. Requests carry a fixed user agent and the needed byte range, with no proxy, cookies, credentials or
-  referrer. A hostile reply can encode conversation data in its media address, a risk the owner accepted.
-- The host follows up to three redirects, with five seconds to connect and fifteen seconds per operation including
-  queue time, DNS, redirects and reads. Two fetches run at once and up to 62 wait for their turn. The host requires a known length and checks the first
-  4 KiB for the same byte signatures as local media. Pictures are limited to 8 MiB, audio and video to 128 MiB.
-  A video or audio response serves up to 1 MiB per range. Servers must support ranges for larger audio and video.
-  The scoped response has a fixed media type, no sniffing and no caching. SVG is served whole as an image under
-  the existing sandbox. Only the address and token are kept for later requests.
+  before lookup and connection. All resolved addresses must be public. There is no DNS fallback. TLS uses system
+  roots without fetching certificate URLs. Every redirect repeats these checks.
+  Requests identify the versioned media client and project URL and carry the byte range, with no proxy, cookies, credentials
+  or referrer. The owner accepted that hostile media addresses can encode conversation data.
+- The host allows three redirects, five seconds to connect and fifteen seconds overall. Two fetches run at once,
+  with up to 62 waiting. A known length and an initial probe establish size and type. An opening range can supply
+  the 4 KiB probe. Pictures are capped at 8 MiB, audio and video at 128 MiB with up to 1 MiB per range.
+  Larger audio and video require range support. Scoped responses have a fixed type, no sniffing and no caching.
+  SVG is served whole under the image sandbox. Only the address and token are kept for later requests.
 - Refusals distinguish `error.media.webOff`, `error.media.webCached`, `error.media.webBlocked`,
   `error.media.webHttps`, `error.media.webPrivate`, `error.media.webSize`, `error.media.webKind` and
   `error.media.webUnreachable`. Scope, capacity and malformed range still use the local media keys.
 - A video on a web page uses the built-in browser beside the conversation. Only the video card and one reply-link
-  menu action offer this exception on Windows in Chat and Projects. Video cards send no request before Play.
+  menu action offer this exception on Windows in Chat and Projects. Untitled cards name the video site and keep
+  the original link. Video cards send no request before Play. Duration stays in the player controls, with a dark
+  surface behind the decoded frame.
 
 ## Files written by the agent
 

@@ -220,6 +220,7 @@ img, svg, a { -webkit-user-drag: none; }
 .dock { position: relative; z-index: 1; grid-column: 1; grid-row: 3; }
 .col { width: min(100%, var(--col-w)); margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(22px * var(--dens)); }
 .main:has(.thread > .col) { --head-h: 48px; grid-template-rows: var(--head-h) minmax(0, 1fr); }
+.main:has(.thread > .col) > .topbar { background: var(--bg); }
 .work:has(> .thread > .col) { --reading-gutter: 24px; --reading-prose: 680px; --reading-type: var(--fs-read); --thread-start: 18px; }
 .thread:has(> .col) { scrollbar-gutter: stable both-edges; padding: var(--thread-start) calc(var(--reading-gutter) - var(--scrollbar-w)) var(--thread-tail); }
 .work:has(> .thread > .col) > .dock > :is(.composer, .archived-bar, .kg-note) { width: min(calc(100% - 2 * var(--reading-gutter)), var(--col-w)); }
@@ -229,13 +230,14 @@ img, svg, a { -webkit-user-drag: none; }
 @media (max-width: 760px) {
   .work:has(> .thread > .col) { --reading-gutter: 16px; }
 }
-@media (min-height: 821px) and (forced-colors: none) {
+@media (forced-colors: none) {
   .work:has(> .thread > .col):not(:has(> .thread:focus-within))::after {
     content: ''; grid-area: 1 / 1; pointer-events: none; z-index: 2;
     background: linear-gradient(var(--bg), transparent) top / 100% 6px no-repeat,
-                linear-gradient(transparent, var(--bg)) bottom / 100% 22px no-repeat;
+                linear-gradient(transparent, var(--bg)) bottom / 100% var(--thread-end-fade, 0px) no-repeat;
   }
 }
+@media (min-height: 821px) { .work:has(> .thread > .col) { --thread-end-fade: 22px; } }
 @media (max-height: 540px) {
   .main:has(.thread > .col) { --head-h: var(--h-lg); }
   .work:has(> .thread > .col) { --thread-start: 8px; }
@@ -1032,8 +1034,7 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 /* The foot line: working or done, how long it took, and on the newest reply how long ago it last changed. It gives way before the buttons. */
 /* The foot line alone while the agent works, as tall as the finished row so nothing jumps when its buttons come. */
 .ai .live-foot { display: flex; align-items: center; min-height: var(--h-md); min-width: 0; font-size: var(--fs-xs); color: var(--ink-3); }
-.ai .actions .foot, .ai .live-foot .foot { flex: 0 1 auto; min-width: 0; margin-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); }
-.ai .actions .foot:first-child, .ai .live-foot .foot { margin-left: 0; }
+.ai .actions .foot, .ai .live-foot .foot { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); }
 
 /* Buttons and small parts */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: var(--h-md); padding: 0 12px; border-radius: var(--r-sm); color: var(--ink-2); font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; box-shadow: inset 0 0 0 1px var(--line-2); transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast) var(--ease); }
@@ -1119,9 +1120,10 @@ select.pill option { background: var(--s2); color: var(--ink); }
 @media (min-width: 660px) and (max-height: 540px) {
   .dock > .composer:not(.attachments-open) > .attachments { display: none; }
   .dock > .composer .cbar > .attachment-count {
-    display: inline-flex; min-height: var(--h-sm); margin-inline-start: auto; padding-inline: 9px;
+    display: inline-flex; min-height: var(--h-sm); margin-inline-start: auto; padding-inline: 6px;
     border-radius: var(--r-pill); color: var(--ink-2); white-space: nowrap;
   }
+  .dock > .composer .cbar:has(> .attachment-count) { column-gap: 2px; }
   .dock > .composer .cbar:has(> .attachment-count) > .send { margin-inline-start: 0; }
   .dock > .composer.attachments-open { padding: 0; background: none; box-shadow: none; }
   .dock > .composer.attachments-open::before {
@@ -1142,8 +1144,10 @@ select.pill option { background: var(--s2); color: var(--ink); }
     border-radius: var(--r-md); background: var(--s2); transition: none;
   }
   .dock > .composer.attachments-open .attach-row { max-height: min(120px, 24vh); overflow: auto; padding: 8px; }
-  .dock > .composer.attachments-open .attach-row .thumb:not(.file) { --thumb: 48px; height: 36px; }
-  .dock > .composer .attachment-count[aria-expanded='true'] svg { transform: rotate(180deg); }
+  .dock > .composer.attachments-open .attach-row .thumb:not(.file) { --thumb: 48px; height: 36px; width: calc(var(--thumb) + var(--h-sm) + 8px); }
+  .dock > .composer.attachments-open .thumb-open { width: var(--thumb); }
+  .dock > .composer.attachments-open .thumb:not(.file) .thumb-x { opacity: 1; }
+  .dock > .composer .attachment-count[aria-expanded='false'] svg { transform: rotate(180deg); }
 }
 /* The model chip: its icon and chevron are drawings, the select on top of them is the control. */
 .chip.choose { position: relative; height: var(--h-sm); gap: 6px; padding: 0 8px 0 10px; cursor: default; white-space: nowrap; }
@@ -2346,6 +2350,7 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .reply-media-audio .reply-media-slot { width: min(100%, 300px); min-height: 40px; background: var(--s3); }
 .reply-media-slot > video,
 .reply-media-slot > .reply-media-picture-button { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.reply-media-slot > video { color-scheme: dark; background: Canvas; }
 .reply-media-slot > audio { width: 100%; height: 40px; }
 .reply-media-picture-button { padding: 0; border: 0; background: transparent; color: var(--ink); }
 .reply-media-picture-button img, .md .reply-media-picture-button img { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
@@ -2415,6 +2420,19 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
   border-block-start: 1px solid var(--line-2);
   color: var(--ink-2);
 }
+.reply-web-reason {
+  display: flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--s2);
+  color: var(--ink-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+}
+.reply-web-reason svg { flex: none; }
 @container reply-stage (max-width: 760px) {
   .reply-media-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .reply-media-tile .reply-media-slot { aspect-ratio: 2/1; max-height: 132px; }

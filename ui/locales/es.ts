@@ -1553,6 +1553,7 @@ export const es: Messages = {
   'error.media.webKind': 'Este formato no se puede mostrar aquí.',
   'error.media.webUnreachable': 'Faber no pudo cargar este contenido.',
   'media.webPlay': 'Reproducir {name}',
+  'media.webTitle': 'Vídeo en {site}',
   'media.webSide': 'Se abre en el panel lateral',
   'media.webPaneUnavailable': 'El panel lateral no pudo abrir esta página.',
   'media.webOpenBeside': 'Abrir junto a la conversación',

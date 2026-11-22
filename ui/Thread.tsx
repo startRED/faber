@@ -930,6 +930,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         {/* While the agent works the row holds only the foot line; `.actions` is the finished reply's row, which screen tests wait for.
             Its buttons, time and cost show on hover or focus (the hover bar); the foot line, which says the reply is done, stays. */}
         <div class={working() ? 'live-foot' : 'actions'}>
+          <Show when={foot()}>{(line) => <span class="foot" title={line()}>{line()}</span>}</Show>
           <Show when={!working()}>
           <CopyButton text={() => m().text} />
           <Show when={canSpeak() && text().trim()}>
@@ -986,7 +987,6 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
             )}
           </Show>
           </Show>
-          <Show when={foot()}>{(line) => <span class="foot" title={line()}>{line()}</span>}</Show>
           <Show when={!working()}>
             <When at={m().at} took={m().took} />
             <Show when={costOf(m())}>{(cost) => <span class="cost num" title={costTitle(m(), warm())}>{cost()}</span>}</Show>

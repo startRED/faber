@@ -49,11 +49,16 @@ export function replyHostBlocked(host: string, blocked: string[]) {
 export function ReplyWebMedia(props: { media: WebReply; session: MediaSession } & ReplyWebOptions) {
   const [opening, setOpening] = createSignal(false);
   const [refused, setRefused] = createSignal<string>();
+  const untitledSite = () => replyAddress(props.media.title)?.href === props.media.url ? props.media.site : undefined;
+  const title = () => {
+    const site = untitledSite();
+    return site ? t('media.webTitle', { site }) : props.media.title;
+  };
   const play = async () => {
     if (opening() || blocked()) return;
     setRefused(undefined);
     setOpening(true);
-    try { if (await props.open(props.media.url, props.media.title) === false) setRefused(t('media.webPaneUnavailable')); }
+    try { if (await props.open(props.media.url, title()) === false) setRefused(t('media.webPaneUnavailable')); }
     catch (err) { setRefused(failureText(err)); }
     finally { setOpening(false); }
   };
@@ -73,19 +78,20 @@ export function ReplyWebMedia(props: { media: WebReply; session: MediaSession } 
     </Match>
     <Match when={props.media.site}>
       {(site) => <div class="reply-web-video">
-        <button type="button" class="reply-web-play" aria-label={t('media.webPlay', { name: props.media.title })} disabled={opening() || blocked()} onClick={() => void play()}>
+        <button type="button" class="reply-web-play" aria-label={t('media.webPlay', { name: title() })}
+          aria-description={untitledSite() ? props.media.url : undefined} disabled={opening() || blocked()} onClick={() => void play()}>
           <Icon name="play" />
         </button>
         <div>
-          <a href={props.media.url}>{props.media.title}</a>
-          <small>{site()} · {blocked() ? t('error.browser.blockedHost') : t('media.webSide')}</small>
+          <a href={props.media.url} title={untitledSite() ? props.media.url : undefined}>{title()}</a>
+          <small><Show when={!untitledSite()}>{site()} · </Show>{blocked() ? t('error.browser.blockedHost') : t('media.webSide')}</small>
           <Show when={!blocked() && refused()}><small role="status">{refused()}</small></Show>
         </div>
       </div>}
     </Match>
     <Match when={!props.media.site}>
       <Show when={!reason()} fallback={<div class="reply-web-notice">
-        <a href={props.media.url}>{props.media.title}</a><span>{reason()}</span>
+        <a href={props.media.url}>{props.media.title}</a><span class="reply-web-reason"><Icon name="globe" small />{reason()}</span>
       </div>}>
         <ReplyMedia media={{ path: props.media.url, name: props.media.title, kind: kind! }}
           session={props.session} webAllowed={() => !reason()} />

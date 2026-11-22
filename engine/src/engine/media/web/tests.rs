@@ -101,7 +101,8 @@ async fn server(replies: Vec<(&'static str, String, Vec<u8>)>) -> (SocketAddr, t
             }
             let request = String::from_utf8(request).unwrap().to_ascii_lowercase();
             assert!(request.lines().any(|header| header == format!("range: {range}")), "{request}");
-            assert!(request.lines().any(|header| header == "user-agent: faber-media"));
+            let agent = concat!("user-agent: faber-media/", env!("CARGO_PKG_VERSION"), " (https://github.com/startred/faber)");
+            assert!(request.lines().any(|header| header == agent), "{request}");
             for header in ["cookie:", "authorization:", "referer:"] {
                 assert!(!request.lines().any(|line| line.starts_with(header)), "{request}");
             }
@@ -241,4 +242,33 @@ async fn size_and_bytes_are_refused_with_distinct_keys() {
         assert_eq!(refusal.key, expected);
         server.await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn initial_open_uses_one_request_for_validated_video_bytes() {
+    let mut file = vec![0; CHUNK as usize];
+    file[..4].copy_from_slice(&[0x1a, 0x45, 0xdf, 0xa3]);
+    file[4..11].copy_from_slice(b"\x42\x82\x84webm");
+    let (addr, server) = server(vec![("bytes=0-1048575", partial(0, file.len() - 1, file.len() + 1), file.clone())]).await;
+    let chunk = fixture(addr, &[], Some("bytes=0-"), &AtomicUsize::new(0)).await.unwrap();
+    assert_eq!(chunk.bytes, file);
+    assert_eq!(chunk.kind, "video/webm");
+    assert_eq!(chunk.content_range.as_deref(), Some("bytes 0-1048575/1048577"));
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn initial_partial_response_refuses_bytes_past_its_declared_range() {
+    let mut file = vec![0; 6001];
+    file[..4].copy_from_slice(&[0x1a, 0x45, 0xdf, 0xa3]);
+    file[4..11].copy_from_slice(b"\x42\x82\x84webm");
+    let mut chunks = format!("{:x}\r\n", file.len()).into_bytes();
+    chunks.extend(file);
+    chunks.extend(b"\r\n0\r\n\r\n");
+    let headers =
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-5999/6000\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+    let (addr, server) = server(vec![("bytes=0-1048575", headers.to_owned(), chunks)]).await;
+    let refusal = fixture(addr, &[], Some("bytes=0-"), &AtomicUsize::new(0)).await.unwrap_err();
+    assert_eq!(refusal.key, UNREACHABLE);
+    server.await.unwrap();
 }

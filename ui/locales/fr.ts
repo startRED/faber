@@ -1392,6 +1392,7 @@ export const fr: Messages = {
   'error.media.webKind': 'Ce format de média ne peut pas être affiché ici.',
   'error.media.webUnreachable': 'Faber n’a pas pu charger ce média.',
   'media.webPlay': 'Lire {name}',
+  'media.webTitle': 'Vidéo sur {site}',
   'media.webSide': 'S’ouvre dans le panneau latéral',
   'media.webPaneUnavailable': 'Le panneau latéral n’a pas pu ouvrir cette page.',
   'media.webOpenBeside': 'Ouvrir à côté de la conversation',

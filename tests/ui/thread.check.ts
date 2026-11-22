@@ -436,11 +436,11 @@ check('thread: the last answer and its actions leave 40px above either composer 
     root.style.cssText = `position:fixed;left:0;top:0;width:${width}px;height:${height}px`;
     root.dataset.motion = 'none';
     for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
-    root.innerHTML = '<div class="work" style="height:100%"><div class="thread"><div class="col"></div></div><div class="dock"></div></div>';
+    root.innerHTML = '<div class="main" style="height:100%"><div class="topbar"></div><div class="work"><div class="thread"><div class="col"></div></div><div class="dock"></div></div></div>';
     document.body.append(root);
     const messages: Message[] = Array.from({ length: 30 }, (_, i) => ({
       id: String(i), role: i % 2 ? 'assistant' : 'user', text: 'A long thread with enough text to scroll. '.repeat(10),
-      at: 0, status: 'done', vendor: 'codex', model: 'gpt-6',
+      at: 0, finishedAt: 1, status: 'done', vendor: 'codex', model: 'gpt-6',
     }));
     let fill!: (text: string) => void;
     const disposeThread = render(() => createComponent(Thread, {
@@ -460,6 +460,13 @@ check('thread: the last answer and its actions leave 40px above either composer 
         ok(thread.scrollTop > 0, 'the thread must actually overflow');
         const last = root.querySelector('.col')!.lastElementChild!;
         ok(last.querySelector('.actions'), 'the measured answer includes its action row');
+        const status = last.querySelector('.actions .foot');
+        const prose = last.querySelector('.md');
+        ok(status && prose && Math.abs(status.getBoundingClientRect().left - prose.getBoundingClientRect().left) < 1,
+          'the finished status starts at the answer column');
+        ok(getComputedStyle(root.querySelector('.topbar')!).backgroundColor.startsWith('rgb('), 'the header covers the scrolling transcript');
+        ok(getComputedStyle(root.querySelector('.work')!, '::after').backgroundImage.includes('linear-gradient'),
+          'the top of the scrolling transcript softens partially clipped text');
         const gap = root.querySelector('.dock')!.getBoundingClientRect().top - last.getBoundingClientRect().bottom;
         ok(Math.abs(gap - 40) <= 1, `${width}x${height}: gap ${gap}px with ${text ? 'expanded' : 'empty'} composer`);
       }

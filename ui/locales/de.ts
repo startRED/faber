@@ -1392,6 +1392,7 @@ export const de: Messages = {
   'error.media.webKind': 'Für dieses Medienformat gibt es keine Vorschau.',
   'error.media.webUnreachable': 'Faber konnte dieses Medium nicht laden.',
   'media.webPlay': '{name} abspielen',
+  'media.webTitle': 'Video auf {site}',
   'media.webSide': 'Öffnet sich im Seitenbereich',
   'media.webPaneUnavailable': 'Der Seitenbereich konnte diese Seite nicht öffnen.',
   'media.webOpenBeside': 'Neben der Unterhaltung öffnen',

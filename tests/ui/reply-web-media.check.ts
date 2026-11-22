@@ -29,6 +29,7 @@ check('reply web media: real response line breaks, photo lists and extensionless
   try {
     const notices = 'This site is blocked in Settings.';
     equal(host.querySelector('.reply-web-notice span')?.textContent, notices);
+    ok(host.querySelector('.reply-web-reason svg[aria-hidden="true"]'), 'the app notice has a decorative icon');
     equal(host.querySelectorAll('ol[start="0"] > li .reply-web-notice').length, 2);
     equal(host.querySelectorAll('.reply-web-notice').length, 4);
     equal(host.querySelector(`.reply-web-notice a[href="${clip}"]`)?.getAttribute('href'), clip);
@@ -63,12 +64,14 @@ check('reply web media: notices preserve links and opening the reply assigns no 
   const [blocked, setBlocked] = createSignal(['example.test']);
   const addresses = ['cover.png', 'clip.mp4', 'track.wav'].map((name) => 'https://art.example.test/' + name);
   const names = ['Picture', 'Clip', 'Track'];
+  const untitled = 'https://www.youtube.com/watch?v=untitled';
+  const otherUntitled = 'https://www.youtube.com/watch?v=another';
   let paneOpens = 0;
   const dispose = render(() => createComponent(Thread, {
     conversationId: 'web-reply-notice', options: [], from: 0, onBranch: () => {},
     get replyWeb() { return { mode: mode(), blocked: blocked(), canOpen: canOpen(), open: async () => { paneOpens++; return false; } }; },
     messages: [{ id: 'reply', role: 'assistant', at: 0, text: [
-      ...addresses.map((address, i) => `${i === 0 ? '!' : ''}[${names[i]}](${address})`), reply,
+      ...addresses.map((address, i) => `${i === 0 ? '!' : ''}[${names[i]}](${address})`), reply, untitled, otherUntitled,
       '<img alt="Do not load" src="//example.test/raw.png" srcset="https://example.test/big.png 2x">',
       '<img alt="Do not load" srcset="https://example.test/only-srcset.png 2x">',
     ].join('\n\n') }],
@@ -89,7 +92,14 @@ check('reply web media: notices preserve links and opening the reply assigns no 
       deepEqual(notices.map((notice) => notice.querySelector('a')?.getAttribute('href')), addresses);
       deepEqual(notices.map((notice) => notice.querySelector('a')?.textContent), names);
       equal(host.querySelector('.md :is([src], [srcset], [poster], [data], [background], [action], [formaction], [xlink\\:href], :not(a)[href], video, audio, source, iframe)'), null);
-      equal(host.querySelectorAll('.reply-web-video').length, 1);
+      equal(host.querySelectorAll('.reply-web-video').length, 3);
+      for (const address of [untitled, otherUntitled]) {
+        const link = host.querySelector(`.reply-web-video a[href="${address}"]`);
+        equal(link?.textContent, 'Video on YouTube');
+        equal(link?.getAttribute('title'), address);
+        equal(link?.closest('.reply-web-video')?.querySelector('button')?.getAttribute('aria-description'), address);
+      }
+      equal(host.querySelector(`.reply-web-video a[href="${video}"]`)?.textContent, 'Lesson video');
       equal(paneOpens, 0, 'rendering a reply never opens an external page');
     }
     setBlocked(['example.test', 'youtube.com']);
@@ -98,6 +108,7 @@ check('reply web media: notices preserve links and opening the reply assigns no 
     setCanOpen(false);
     equal(host.querySelector('.reply-web-video'), null);
     equal(host.querySelector(`a[href="${video}"]`)?.textContent, 'Lesson video');
+    equal(host.querySelector(`a[href="${untitled}"]`)?.textContent, untitled);
   } finally {
     dispose();
     host.remove();

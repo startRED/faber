@@ -943,7 +943,7 @@ export function Composer(props: Props) {
         <Show when={count()}>
           <button type="button" class="chip attachment-count" ref={(el) => (attachmentCount = el)}
             aria-expanded={attachmentsOpen()} aria-controls={attachmentPanelId} onClick={toggleAttachments}>
-            {countLabel()} <Icon name="up" small />
+            {countLabel()} <Icon name="down" small />
           </button>
         </Show>
         <Show when={props.busy && stopping()}>

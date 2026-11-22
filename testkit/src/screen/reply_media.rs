@@ -334,6 +334,18 @@ fn play_media(page: &mut Page) -> Result {
         ))?;
         let selector = format!(".reply-media-{tag} {tag}");
         page.wait_for("player source and metadata", &format!("document.querySelector('{selector}')?.readyState >= 1"))?;
+        if tag == "video" {
+            same(
+                page.eval("document.querySelector('.reply-media-video figcaption').textContent.trim()")?,
+                json!("Clip"),
+                "the video caption leaves duration to the player controls",
+            )?;
+            same(
+                page.eval("getComputedStyle(document.querySelector('.reply-media-video video')).colorScheme")?,
+                json!("dark"),
+                "the video uses a dark surface behind the decoded frame",
+            )?;
+        }
         let playing = page.eval(&format!(
             r#"(async () => {{
             const player = document.querySelector('{selector}');

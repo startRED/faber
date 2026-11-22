@@ -1550,6 +1550,7 @@ export const ptBR: Messages = {
   'error.media.webKind': 'Este formato de mídia não pode ser exibido aqui.',
   'error.media.webUnreachable': 'O Faber não conseguiu carregar esta mídia.',
   'media.webPlay': 'Reproduzir {name}',
+  'media.webTitle': 'Vídeo no {site}',
   'media.webSide': 'Abre no painel ao lado',
   'media.webPaneUnavailable': 'O painel ao lado não conseguiu abrir esta página.',
   'media.webOpenBeside': 'Abrir ao lado da conversa',
