@@ -120,8 +120,13 @@ did observe only `note` and `since`, without `until`, in the installed app's own
 distinct observations. The isolated delivered code persists a finite deadline; the installed older app
 was not updated or disturbed while real conversations were active.
 
-- [400](../tasks/400-every-wait-has-a-wake.md): the person installs the update; then verify saved deadlines,
-  autonomous return and truthful wait/blocked/completed UI with isolated data. Installation is not a source fix.
+On 2026-11-22, the installed Windows Electron build (1.0.1-preview.7) ran hidden with a separate data folder,
+a disposable project and a recorded provider. A note-only request through the conversation tool saved exactly
+five minutes between its start and deadline. The native timer saved an account blocker at the deadline without
+an external wake or a person sending a message. The original two messages and the deadline stayed in place.
+The conversation command reported the same blocker, and the screen's status formatter rendered it with the saved note
+and the Brazilian Portuguese instruction to connect a subscription. No model request ran.
+
 - [410](../tasks/410-a-stopped-helper-wakes-its-lead.md): an isolated Windows live run stopped one owned Codex
   read helper while its lead waited. The original lead process stayed live, received the confirmed writer exit
   and unknown CLI cause, and resumed once. Its workspace call observed one real merge conflict, zero registered
