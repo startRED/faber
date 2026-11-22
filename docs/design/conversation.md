@@ -69,7 +69,7 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
   with 12 × 16 px padding and 1.55 leading. At heights up to 540 px it uses 6 × 12 px padding and 40 × 28 px pictures.
   Composer thumbnails are 56 px with a remove button on hover and focus. The dark viewer grows from the thumbnail
   and returns to it. Its arrows and ← → browse pictures, Esc or an outside click closes it, and Tab stays inside.
-  It shows a count and exists only while open. Reply pictures are at most 280 × 200 px.
+  It shows a count and exists only while open. Reply pictures and galleries use the same viewer. Video-site cards open the side panel.
 - Reading width, text selection, scroll anchoring and the latest-message control are in [reading.md](reading.md).
 - Loading earlier messages keeps already drawn top-level message rows and their text nodes by message id. Streaming
   still updates that same row in place; paging does not reparse unchanged ordinary replies or move their text selection

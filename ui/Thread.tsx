@@ -28,7 +28,7 @@ import { PlanList, WrapUpBox } from './Plan.tsx';
 import { Rewind } from './Rewind.tsx';
 import { AnswerChanges } from './AnswerChanges.tsx';
 import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
-import { openLinks, pressImage } from './markdown.tsx';
+import { inlineMediaPaths, openLinks, pressImage } from './markdown.tsx';
 import { PieceReply } from './VisualPiece.tsx';
 import { VisualFiles } from './VisualAnswer.tsx';
 import type { VisualAnswer } from './api.ts';
@@ -36,7 +36,8 @@ import { agentActivity, agentMeta, ChangedLines, Delta, openedAgent, SourceList,
 import { untilReset } from './Sidebar.tsx';
 import { appsOf, AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.tsx';
 import { Quote } from './Floating.tsx';
-import { Strip, Thumb } from './Thumbs.tsx';
+import { Strip } from './Thumbs.tsx';
+import { localMedia, mediaSession, ReplyGallery, ReplyMedia, ReplyMediaContext, type MediaRef } from './Media.tsx';
 import { canSpeak, speaking, stopSpeech, toggleSpeech } from './speech.ts';
 import { catalogName, bytes, compact, duration, failureText, fromEngine, lang, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
@@ -45,24 +46,18 @@ import { windowHidden } from './appearance.ts';
 import { elapsed, waitNeedsAttention, waitWords, warmLeft } from './running.ts';
 import { agePending, ageNow, footText, tickWhile } from './foot.ts';
 import { quotaPending } from './QuotaCard.tsx';
-import { agentState, agentWord, agentSteps, changeOf, isAgentCall, isProgressCall, middle, reviewStop, sameTools, sourcesOf, stepsSummary, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
+import { agentState, agentWord, agentSteps, changeOf, filesOf, isAgentCall, isProgressCall, middle, reviewStop, sameTools, sourcesOf, stepsSummary, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
 import { keepParts, timeline, type Item, type Part } from './timeline.ts';
 import { Team } from './Team.tsx';
 
 /** The line for Faber's own message: reports merged into one turn read in the plural. */
 const wakeKey = (wake: { why: string; ids?: string[] }) => wake.why === 'wake.childDone' && wake.ids?.length ? 'wake.childrenDone' : wake.why;
-const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
-
-// A file the answer created in the chat workspace: images show as a small picture that opens full screen; anything can be saved to
-// the computer.
-function FileCard(props: { conversationId: string; file: { path: string; size: number } }) {
-  const [preview] = createResource(
-    () => (IMAGE.test(props.file.path) ? props.file.path : undefined),
-    (path) => api.readImage(props.conversationId, path),
-  );
+// A file the answer created in the chat workspace can be shown and saved.
+function FileCard(props: { conversationId: string; file: { path: string; size: number }; inline: boolean }) {
+  const preview = () => props.inline ? undefined : localMedia(props.file.path);
   return (
     <div class="file">
-      <Show when={preview()}>{(src) => <Thumb name={props.file.path} src={src()} />}</Show>
+      <Show when={preview()}>{(media) => <ReplyMedia media={media()} />}</Show>
       <div>
         <span>{props.file.path}</span>
         <small>{bytes(props.file.size)}</small>
@@ -312,6 +307,14 @@ function Step(props: { conversationId: string; conversations?: Summary[]; runnin
   const state = () => stepState(props.tool(), props.working);
   const row = () => toolRow(props.tool(), state() !== 'running', props.workingFolder ?? '');
   const fullDetail = () => toolRow(props.tool(), state() !== 'running').detail;
+  const thumbnail = () => {
+    const tool = props.tool();
+    if (tool.ok !== true || !['Read', 'Write', 'Edit', 'MultiEdit', 'fileChange'].includes(tool.name)) return;
+    const [path, second] = filesOf(tool);
+    if (!path || second) return;
+    const ref = localMedia(path, '', props.workingFolder);
+    return ref?.kind === 'picture' ? ref : undefined;
+  };
   const change = createMemo(() => changeOf(props.tool()));
   const output = createMemo(() => {
     const lines = (props.tool().output ?? '').replace(/\s+$/, '').split('\n');
@@ -323,6 +326,9 @@ function Step(props: { conversationId: string; conversations?: Summary[]; runnin
         <span class="step-icon" aria-hidden="true">
           <Show when={state() === 'done'} fallback={<StateGlyph state={stateKind(state())} small />}><ToolGlyph kind={toolKind(props.tool().name)} small /></Show>
         </span>
+        <Show when={thumbnail()}>
+          {(media) => <ReplyMedia media={media()} thumb />}
+        </Show>
         <b>{row().label}</b>
         <Show when={row().detail}><i>{middle(row().detail)}</i></Show>
         <Show when={change()}>{(c) => <Delta change={c()} />}</Show>
@@ -546,6 +552,29 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
   });
   // The agent's own tools, without its subagents' (each subagent's sit in its own row).
   const own = createMemo(() => tools().filter((tool) => !tool.parent && !isAgentCall(tool)), [], { equals: sameTools });
+  const writtenMedia = createMemo(() => {
+    if (props.area !== 'project' || m().status === 'streaming') return [];
+    const files = new Map<string, MediaRef>();
+    for (const tool of own()) {
+      if (tool.ok !== true || !['Write', 'Edit', 'MultiEdit', 'fileChange'].includes(tool.name)) continue;
+      for (const path of filesOf(tool)) {
+        const media = localMedia(path, '', props.workingFolder);
+        if (media) files.set(media.path, media);
+      }
+    }
+    return [...files.values()];
+  });
+  const inlineMedia = createMemo(() => m().files?.length || writtenMedia().length ? inlineMediaPaths(text(), props.workingFolder ?? '') : undefined);
+  const extraMedia = createMemo(() => {
+    const groups: MediaRef[][] = [];
+    for (const media of writtenMedia()) {
+      if (inlineMedia()?.has(media.path)) continue;
+      const last = groups.at(-1);
+      if (media.kind === 'picture' && last?.[0]?.kind === 'picture') last.push(media);
+      else groups.push([media]);
+    }
+    return groups;
+  });
   // The reply as it happened: words, thinking and steps in their order (W1). Each part that did not change keeps its object, so
   // a tick of the stream redraws only the part that grew.
   let before: Part[] | undefined;
@@ -842,8 +871,13 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       </Show>
       <Show when={m().files?.length}>
         <div class="files" aria-label={t('files.label')} ref={animateList}>
-          <For each={m().files}>{(f) => <FileCard conversationId={props.conversationId} file={f} />}</For>
+          <For each={m().files}>{(f) => <FileCard conversationId={props.conversationId} file={f} inline={inlineMedia()?.has(localMedia(f.path)?.path ?? '') ?? false} />}</For>
         </div>
+      </Show>
+      <Show when={extraMedia().length}>
+        <div class="files" aria-label={t('files.label')}><For each={extraMedia()}>{(media) =>
+          media.length > 1 ? <ReplyGallery media={media} /> : <ReplyMedia media={media[0]!} />
+        }</For></div>
       </Show>
       <Show when={sites().length}>
         <div class="files" aria-label={t('site.label')} ref={animateList}>
@@ -1210,6 +1244,13 @@ function AwayLine(props: { away: NonNullable<Message['away']> }) {
 }
 
 export function Thread(props: Shared & { messages: Message[]; temporary?: boolean; archived?: boolean; earlier?: number; queued?: QueuedTurn[]; busy?: boolean; noConnectedAccounts?: boolean; onError?: (err: unknown) => void; onQueuedRecovered?: (id: string, text: string) => void; from: number; until?: number; searchIndex?: number; rewindNotice?: string; onRewind?: () => Promise<void>; onOpenWaitAccounts?: () => void; onWriteWaitMessage?: () => void }) {
+  const conversation = createMemo(() => props.conversationId);
+  const folder = createMemo(() => props.workingFolder ?? '');
+  const media = createMemo(() => {
+    const session = mediaSession(conversation(), folder());
+    onCleanup(session.close);
+    return session;
+  });
   const waitAction = () => {
     if (props.archived) return;
     const problem = props.waitingOn?.problem;
@@ -1257,7 +1298,7 @@ export function Thread(props: Shared & { messages: Message[]; temporary?: boolea
     </Show>
   );
   return (
-    <>
+    <ReplyMediaContext.Provider value={media}>
       <Show when={props.rewindNotice}>
         <p class="woke" classList={{ 'rewind-empty': !props.messages.length }} tabindex={props.messages.length ? undefined : 0} onContextMenu={(e) => { const available = redo(); if (!props.messages.length && available) openMenu(e, [{ id: 'rewind-redo', label: t(available.recovery ? 'rewind.recover' : 'rewind.redo'), run: () => showRestore({ id: available.messageId, role: 'user', text: '', at: 0 }, available) }], e.currentTarget); }}>
           {fromEngine(props.rewindNotice)}
@@ -1355,6 +1396,6 @@ export function Thread(props: Shared & { messages: Message[]; temporary?: boolea
       }</Show>
       <Show when={shown() ? restore() : undefined} keyed>{(target) => <Rewind conversationId={props.conversationId} messageId={target.message.id} point={target.message.rewind} redo={target.redo} conversationNames={props.conversationNames} leaving={!open()} onClose={() => setOpen(false)} onChanged={async () => { await props.onRewind?.(); setRevision((n) => n + 1); }} />}</Show>
       <Quote />
-    </>
+    </ReplyMediaContext.Provider>
   );
 }

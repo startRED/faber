@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { render } from 'solid-js/web';
 import { keepFocusIn } from './focus.ts';
 import { Icon } from './Glyphs.tsx';
@@ -7,43 +7,51 @@ import { level, millis } from './motion.ts';
 
 // The full-screen picture viewer. Its DOM exists only while it is open: opening mounts it on the body, closing takes it away.
 // It holds no state of its own between uses, and the pictures it moves between are read from the page when it opens.
-interface Shot {
+type Shot = {
   src: string;
   alt: string;
-}
+} | {
+  alt: string;
+  load: () => Promise<{ src: string; release: () => void }>;
+};
 
 /** Every picture a person can open: thumbnails, and the pictures inside an answer. */
 const VIEWABLE = 'img[data-view], .md img';
 let opened = false;
 
 /** Opens `img` full screen. The pictures of its conversation (or of the composer it sits in) are the ones the arrows move between. */
-export function openViewer(img: HTMLImageElement): void {
-  if (opened) return;
+export function openViewer(img: HTMLElement, gallery?: Shot[], index?: number, release?: () => void): (() => void) | undefined {
+  if (opened) { release?.(); return; }
   opened = true;
   const scope = img.closest('.composer') ?? img.closest('.col') ?? document.body;
   const seen = [...scope.querySelectorAll<HTMLImageElement>(VIEWABLE)].filter((el) => el === img || el.getClientRects().length > 0);
-  const shots = seen.map((el) => ({ src: el.currentSrc || el.src, alt: el.alt }));
+  const shots = gallery ?? seen.map((el) => ({ src: el.currentSrc || el.src, alt: el.alt }));
   const host = document.createElement('div');
   host.dataset.motion = level(img);
   document.body.append(host);
   const back = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-  const dispose = render(
+  let dispose: () => void;
+  const close = () => {
+    if (!host.isConnected) return;
+    dispose();
+    host.remove();
+    opened = false;
+    release?.();
+    if (back?.isConnected) back.focus({ preventScroll: true });
+  };
+  dispose = render(
     () => (
       <Viewer
         shots={shots}
-        index={Math.max(0, seen.indexOf(img))}
+        index={index ?? Math.max(0, seen.findIndex((image) => image === img))}
         origin={img}
         full={level(img) === 'full'}
-        done={() => {
-          dispose();
-          host.remove();
-          opened = false;
-          if (back?.isConnected) back.focus({ preventScroll: true });
-        }}
+        done={close}
       />
     ),
     host,
   );
+  return close;
 }
 
 /** Where the picture starts when it grows out of its thumbnail (and ends when it goes back): the thumbnail's box, cropped as the
@@ -58,7 +66,7 @@ function fromThumb(small: DOMRect, big: DOMRect): Keyframe {
 }
 const RESTING: Keyframe = { transform: 'translate(0, 0) scale(1)', clipPath: 'inset(0px 0px round 0px)' };
 
-function Viewer(props: { shots: Shot[]; index: number; origin: HTMLImageElement; full: boolean; done: () => void }) {
+function Viewer(props: { shots: Shot[]; index: number; origin: HTMLElement; full: boolean; done: () => void }) {
   const [at, setAt] = createSignal(props.index);
   const [leaving, setLeaving] = createSignal(false);
   let dialog!: HTMLDivElement;
@@ -67,6 +75,29 @@ function Viewer(props: { shots: Shot[]; index: number; origin: HTMLImageElement;
   let timer: ReturnType<typeof setTimeout> | undefined;
   onCleanup(() => clearTimeout(timer));
   const shot = () => props.shots[at()]!;
+  const [loaded, setLoaded] = createSignal<{ shot: Shot; src: string | undefined }>();
+  createEffect(() => {
+    const current = shot();
+    if (!('load' in current)) return;
+    let active = true;
+    let release: (() => void) | undefined;
+    onCleanup(() => {
+      active = false;
+      release?.();
+      setLoaded(undefined);
+    });
+    void current.load().then((image) => {
+      if (!active) return image.release();
+      release = image.release;
+      setLoaded({ shot: current, src: image.src });
+    }, () => { if (active) setLoaded({ shot: current, src: undefined }); });
+  });
+  const source = () => {
+    const current = shot();
+    if ('src' in current) return current.src;
+    const image = loaded();
+    return image?.shot === current ? image.src : undefined;
+  };
   const last = () => props.shots.length - 1;
   const move = (by: number) => {
     setAt((i) => Math.min(last(), Math.max(0, i + by)));
@@ -116,8 +147,8 @@ function Viewer(props: { shots: Shot[]; index: number; origin: HTMLImageElement;
       }}
     >
       <div class="viewer-stage" onClick={(e) => e.target === e.currentTarget && close()}>
-        <Show when={shot()} keyed>
-          {(s) => {
+        <Show when={source()} keyed fallback={<span role="status">{t(loaded()?.shot === shot() ? 'media.gone' : 'file.loading')}</span>}>
+          {(src) => {
             const swapping = !first;
             first = false;
             return (
@@ -131,8 +162,8 @@ function Viewer(props: { shots: Shot[]; index: number; origin: HTMLImageElement;
                 }}
                 class="viewer-img"
                 classList={{ fresh: swapping }}
-                src={s.src}
-                alt={s.alt}
+                src={src}
+                alt={shot().alt}
               />
             );
           }}

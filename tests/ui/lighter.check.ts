@@ -185,10 +185,11 @@ check('feel: hover and colour feedback answers within 80ms, exits take 80ms and 
     '.col .ai .model b',
     '.col .ai .step:not(.thought) .step-line b',
     '.col .ai .md:not(.md ~ .md) > div:first-child > :is(h1, h2, h3):first-child',
+    '.reply-media-picture-button > span',
   ]);
   for (const sheet of document.styleSheets) for (const rule of sheet.cssRules) {
     if (rule instanceof CSSStyleRule && rule.style.fontWeight === '600' && !semibold.delete(rule.selectorText)) heavy.push(rule.selectorText);
   }
-  equal(heavy.join(', '), '', 'only the reply identity, step verbs and first heading use 600');
-  equal(semibold.size, 0, 'all three entries in the reply hierarchy use semibold');
+  equal(heavy.join(', '), '', 'only the reply identity, step verbs, first heading and media actions use 600');
+  equal(semibold.size, 0, 'all entries in the reply hierarchy use semibold');
 });

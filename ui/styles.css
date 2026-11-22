@@ -2291,3 +2291,89 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
   .team-member, .team-chip, .team-state { border: 1px solid CanvasText; }
   .team-member[aria-current='true'] { border-color: Highlight; }
 }
+/* Reply media follows the width of the conversation, including beside a pane. */
+.thread:has(.reply-media-gallery) { container: reply-stage / inline-size; }
+.reply-media-shell, .reply-media-gallery { min-width: 0; }
+.md .reply-media-gallery, .md .reply-media-shell { margin-block: 12px; }
+.md .reply-media-gallery .reply-media-shell { margin: 0; }
+.reply-media-shell figure { margin: 0; min-width: 0; }
+.reply-media-shell figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 9px 12px;
+  font-size: var(--fs-ui);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.reply-media-slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--s2);
+}
+.reply-media-picture .reply-media-slot { aspect-ratio: 3/2; max-height: 48vh; }
+.reply-media-video {
+  background: var(--s1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.reply-media-video .reply-media-slot { aspect-ratio: 16/9; max-height: 48vh; border-radius: 0; }
+.reply-media-audio {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--s1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  padding: 12px;
+}
+.reply-media-audio figcaption { order: -1; display: grid; padding: 0; }
+.reply-media-audio figcaption > span { color: var(--ink); }
+.reply-media-audio .reply-media-slot { width: min(100%, 300px); min-height: 40px; background: var(--s3); }
+.reply-media-slot > video,
+.reply-media-slot > .reply-media-picture-button { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.reply-media-slot > audio { width: 100%; height: 40px; }
+.reply-media-picture-button { padding: 0; border: 0; background: transparent; color: var(--ink); }
+.reply-media-picture-button img, .md .reply-media-picture-button img { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
+.reply-media-picture-button:focus-visible { outline-offset: -3px; }
+.reply-media-picture-button > span {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  min-width: 40px;
+  min-height: 32px;
+  display: grid;
+  place-items: center;
+  padding-inline: 8px;
+  border-radius: var(--r-pill);
+  background: var(--s1);
+  font-size: var(--fs-ui);
+  font-weight: 600;
+}
+.reply-media-status { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; padding: 4px 8px; color: var(--ink-2); font-size: var(--fs-ui); text-align: center; }
+.reply-media-mark { display: grid; place-items: center; width: 48px; height: 36px; }
+.reply-media-mark[data-status="loading"]::before { content: ""; width: 20px; aspect-ratio: 1; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; }
+.reply-media-mark[data-status="error"] { color: var(--danger); }
+.reply-media-gallery { display: grid; grid-template-columns: repeat(var(--gallery-columns), minmax(0, 1fr)); gap: 8px; }
+.reply-media-tile .reply-media-slot { border-radius: var(--r-sm); }
+.reply-media-tile .reply-media-picture-button img { object-fit: cover; }
+.reply-media-thumb:not([hidden]) { display: block; width: 28px; height: 20px; flex: none; }
+.reply-media-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--r-sm); }
+.file:has(> .reply-media-shell) { display: block; }
+.reply-media-dialog { width: min(760px, calc(100vw - 32px)); padding: 12px; color: var(--ink); background: var(--s1); border: 1px solid var(--line-2); border-radius: var(--r-md); }
+.reply-media-dialog::backdrop { background: rgb(0 0 0 / 55%); }
+@container reply-stage (max-width: 760px) {
+  .reply-media-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reply-media-tile .reply-media-slot { aspect-ratio: 2/1; max-height: 132px; }
+}
+@container reply-stage (max-width: 530px) {
+  .reply-media-tile .reply-media-slot { aspect-ratio: 3/2; }
+}

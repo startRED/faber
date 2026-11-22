@@ -26,6 +26,7 @@ pub mod projects;
 pub mod projects_ui;
 pub mod reading;
 pub mod real_work;
+mod reply_media;
 pub mod review;
 pub mod sentinel;
 pub mod settings;
@@ -84,7 +85,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(thread_scroll::scenarios())
         .chain(ux_audit::scenarios())
         .chain(sentinel::scenarios());
-    let all = all.chain(visual_network::scenarios()).chain([local_media::scenario()]);
+    let all = all.chain(visual_network::scenarios()).chain([local_media::scenario(), reply_media::scenario()]);
     #[cfg(windows)]
     let all = all.chain(browser_pane::scenarios());
     #[cfg(windows)]
@@ -135,6 +136,7 @@ impl Costs {
 /// When unsure, list it: a wrong entry costs a few seconds, a missing one costs a flaky run. A test fails when a name says
 /// "memory", "processor", "CPU", "MB", "budget", "frame", "focused", "quota" or "usage limits" and is not listed.
 pub const SOLO: &[(&str, &str)] = &[
+    (reply_media::NAME, "compares reply media memory and idle CPU with a plain reply"),
     (ux_audit::EXTERNAL_LINKS, "compares the computer's browser processes before and after open-link"),
     (long_session::NAME, "memory"),
     (streaming::NAME, "processor, memory and main-thread long tasks while a reply streams"),

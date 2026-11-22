@@ -1,11 +1,13 @@
 import DOMPurify from 'dompurify';
-import { Lexer, type Links, marked, type Token } from 'marked';
-import { createContext, createRenderEffect, useContext, type Accessor } from 'solid-js';
+import { Lexer, type Links, marked, type Token, type Tokens } from 'marked';
+import { createContext, createRenderEffect, onCleanup, useContext, type Accessor } from 'solid-js';
+import { render } from 'solid-js/web';
 import { api } from './api.ts';
 import { fileRenderer, showFile } from './fileref.ts';
 import { iconMarkup } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import { openViewer } from './Viewer.tsx';
+import { localMedia, ReplyGallery, ReplyMedia, ReplyMediaContext, type MediaRef, type MediaSession } from './Media.tsx';
 
 // Model output is untrusted: rendered as Markdown, then stripped of anything that could run. Every piece of HTML that reaches
 // the page passes through DOMPurify here, and nowhere else.
@@ -25,6 +27,18 @@ const LIMIT = 64;
 
 const copiedAt = new WeakMap<Element, ReturnType<typeof setTimeout>>();
 const codeButtons = new WeakSet<Element>();
+const mediaSlots = new WeakMap<Element, { key: string; dispose: () => void }>();
+
+function disposeMedia(node: Node): void {
+  if (!(node instanceof Element)) return;
+  const mounted = mediaSlots.get(node);
+  if (mounted) {
+    mediaSlots.delete(node);
+    mounted.dispose();
+    return;
+  }
+  for (const child of node.children) disposeMedia(child);
+}
 
 // The copy button of a code block: only that block's words, and the icon turns into a check for a moment (one timer, set by the click).
 function copyCode(button: Element) {
@@ -120,11 +134,49 @@ function lex(text: string, references?: Links) {
   if (references) lexer.tokens.links = { ...references };
   return lexer.lex(text);
 }
-function blocksOf(text: string, references?: Links): { blocks: { raw: string; token?: Token }[]; links: Links } {
+type Block = { raw: string; tokens?: Token[]; media?: MediaRef[]; parts?: Block[] };
+
+function paragraphMedia(token: Token, folder: string): MediaRef[] | undefined {
+  if (token.type !== 'paragraph') return;
+  const refs: MediaRef[] = [];
+  for (const part of (token as Tokens.Paragraph).tokens) {
+    if (part.type === 'br' || (part.type === 'text' && !part.text.trim())) continue;
+    const ref = part.type === 'image' || part.type === 'link' ? localMedia(part.href, part.text, folder)
+      : part.type === 'codespan' || (part.type === 'text' && !part.tokens && !/\s/.test(part.text.trim())) ? localMedia(part.text, '', folder)
+      : undefined;
+    if (!ref) return;
+    refs.push(ref);
+  }
+  if (refs.length === 1 || (refs.length > 1 && refs.every((ref) => ref.kind === 'picture'))) return refs;
+}
+
+function replyAddress(address: string): URL | undefined {
+  if (!/^https?:\/\//i.test(address) || /\s/.test(address)) return;
+  try {
+    const url = new URL(address);
+    if (url.hostname && !url.username && !url.password) return url;
+  } catch { return; }
+}
+
+function blocksOf(text: string, references?: Links, folder?: string): { blocks: Block[]; links: Links } {
   const lexed = lex(text, references);
-  const tokens = lexed.filter((token) => token.type !== 'space');
-  if (tokens.some((token) => token.type === 'html')) return { blocks: [{ raw: text }], links: lexed.links };
-  return { blocks: tokens.map((token) => ({ raw: token.raw, token })), links: lexed.links };
+  const blocks: Block[] = [];
+  for (const token of lexed) {
+    if (token.type === 'space') continue;
+    const media = folder === undefined ? undefined : paragraphMedia(token, folder);
+    const previous = blocks.at(-1);
+    if (media?.[0]?.kind === 'picture' && previous?.media?.[0]?.kind === 'picture') {
+      previous.raw += '\n\n' + token.raw;
+      previous.media.push(...media);
+      previous.tokens!.push(token);
+    } else {
+      blocks.push({ raw: token.raw, tokens: [token], media });
+    }
+  }
+  if (lexed.some((token) => token.type === 'html')) {
+    return { blocks: [{ raw: text, parts: blocks.some((block) => block.media) ? blocks : undefined }], links: lexed.links };
+  }
+  return { blocks, links: lexed.links };
 }
 
 // Reconcile only sanitised Markdown. Keeping compatible nodes avoids losing selection, focus and code scroll on a delta.
@@ -132,18 +184,32 @@ function updateNodes(parent: Node, fresh: ChildNode[], start = 0): void {
   for (const [offset, next] of fresh.entries()) {
     const old = parent.childNodes[start + offset];
     if (!old) { parent.appendChild(next); continue; }
-    if (old.nodeType !== next.nodeType || old.nodeName !== next.nodeName) { parent.replaceChild(next, old); continue; }
+    const oldMedia = old instanceof Element ? mediaSlots.get(old) : undefined;
+    const nextMedia = next instanceof Element ? mediaSlots.get(next) : undefined;
+    if (oldMedia && nextMedia && oldMedia.key === nextMedia.key) {
+      disposeMedia(next);
+      continue;
+    }
+    if (old.nodeType !== next.nodeType || old.nodeName !== next.nodeName || oldMedia || nextMedia) {
+      parent.replaceChild(next, old);
+      disposeMedia(old);
+      continue;
+    }
     if (old instanceof Text && next instanceof Text) {
       if (next.data.startsWith(old.data)) old.appendData(next.data.slice(old.length));
       else if (old.data !== next.data) old.replaceData(0, old.length, next.data);
     } else if (old instanceof Element && next instanceof Element) {
-      for (const attribute of [...old.attributes]) if (!next.hasAttribute(attribute.name)) old.removeAttribute(attribute.name);
-      for (const attribute of [...next.attributes]) if (old.getAttribute(attribute.name) !== attribute.value) old.setAttribute(attribute.name, attribute.value);
+      for (const name of old.getAttributeNames()) if (!next.hasAttribute(name)) old.removeAttribute(name);
+      for (const attribute of next.attributes) if (old.getAttribute(attribute.name) !== attribute.value) old.setAttribute(attribute.name, attribute.value);
       // The copy button owns its temporary success icon; new text must not reset it.
       if (!codeButtons.has(old) || !codeButtons.has(next)) updateNodes(old, [...next.childNodes]);
     } else if (old.nodeValue !== next.nodeValue) old.nodeValue = next.nodeValue;
   }
-  while (parent.childNodes.length > start + fresh.length) parent.lastChild!.remove();
+  while (parent.childNodes.length > start + fresh.length) {
+    const removed = parent.lastChild!;
+    parent.removeChild(removed);
+    disposeMedia(removed);
+  }
 }
 
 /**
@@ -153,8 +219,23 @@ function updateNodes(parent: Node, fresh: ChildNode[], start = 0): void {
  */
 export const referenceLinks = (text: string): Links => marked.lexer(text, OPTIONS).links;
 
-export function renderMarkdown(root: HTMLElement, text: string, references?: Links): void {
-  const { blocks, links: ownLinks } = blocksOf(text, references);
+/** Preserve the file's Save and Show actions without drawing a second copy of an inline player. */
+export function inlineMediaPaths(text: string, folder: string): Set<string> {
+  return new Set(blocksOf(text, undefined, folder).blocks.flatMap((block) => block.parts ?? [block])
+    .flatMap((block) => block.media?.map((ref) => ref.path) ?? []));
+}
+
+function mountMedia(slot: HTMLElement, block: Block, session: MediaSession) {
+  const media = block.media!;
+  return render(() => media.length === 1 ? <ReplyMedia media={media[0]!} session={session} /> : <ReplyGallery media={media} session={session} />, slot);
+}
+
+function registerMedia(slot: HTMLElement, block: Block, session: MediaSession) {
+  mediaSlots.set(slot, { key: JSON.stringify(block.media), dispose: mountMedia(slot, block, session) });
+}
+
+export function renderMarkdown(root: HTMLElement, text: string, references?: Links, session?: MediaSession): void {
+  const { blocks, links: ownLinks } = blocksOf(text, references, session?.folder);
   const links = references ?? ownLinks;
   const linked = JSON.stringify(links);
   const before = shown.get(root) ?? { raws: [], nodes: [], links: linked };
@@ -166,10 +247,64 @@ export function renderMarkdown(root: HTMLElement, text: string, references?: Lin
   const sizes: number[] = [];
   for (const block of blocks.slice(same)) {
     const template = document.createElement('template');
-    const tokens = block.token ? [block.token] : lex(block.raw, references);
-    template.innerHTML = tidy(marked.parser(Object.assign(tokens, { links }), OPTIONS));
+    const markup = (part: Block) => marked.parser(Object.assign(part.tokens ?? lex(part.raw, references), { links }), OPTIONS);
+    const marks = new Map<string, Block>();
+    const source = block.parts ? block.parts.map((part) => {
+      if (!part.media) return markup(part);
+      // Keep raw HTML in one sanitising pass. Only renderer-created markers can mount players.
+      const key = crypto.getRandomValues(new Uint32Array(4)).join('-');
+      marks.set(key, part);
+      return `<div data-reply-media="${key}"></div>`;
+    }).join('') : markup(block);
+    template.innerHTML = tidy(source);
     raws.push(block.raw);
-    dress(template.content);
+    if (session && block.media) {
+      const slot = document.createElement('div');
+      registerMedia(slot, block, session);
+      template.content.replaceChildren(slot);
+    } else {
+      if (session) {
+        for (const node of template.content.querySelectorAll('video, audio, iframe, source')) node.remove();
+        for (const img of template.content.querySelectorAll('img')) {
+          img.removeAttribute('srcset');
+          const address = img.getAttribute('src')?.trim() ?? '';
+          const ref = localMedia(address, img.alt, session.folder);
+          const web = replyAddress(address.startsWith('//') ? 'https:' + address : address);
+          if (!web && /^(?:https?:)?\/\//i.test(address)) {
+            img.replaceWith(document.createTextNode(img.alt));
+            continue;
+          }
+          if (!ref && !web) {
+            if (!address.startsWith('data:')) img.removeAttribute('src');
+            continue;
+          }
+          const name = ref?.name ?? (img.alt || web!.href);
+          if (img.closest('a')) {
+            img.replaceWith(document.createTextNode(name));
+            continue;
+          }
+          const link = document.createElement('a');
+          link.href = web?.href ?? '#';
+          if (ref) {
+            link.className = 'file-ref';
+            link.dataset.file = ref.path;
+          }
+          link.textContent = name;
+          img.replaceWith(link);
+        }
+      }
+      dress(template.content);
+      if (session && marks.size) {
+        for (const slot of template.content.querySelectorAll<HTMLElement>('div[data-reply-media]')) {
+          const key = slot.dataset.replyMedia ?? '';
+          const refs = marks.get(key);
+          if (!refs) continue;
+          marks.delete(key);
+          slot.removeAttribute('data-reply-media');
+          registerMedia(slot, refs, session);
+        }
+      }
+    }
     sizes.push(template.content.childNodes.length);
     fresh.push(...template.content.childNodes);
   }
@@ -191,6 +326,29 @@ export function Markdown(props: { text: string; links?: Links }) {
   // The element exists before the first draw: a render effect runs as soon as it is made.
   const root = (<div />) as HTMLDivElement;
   const references = useContext(MarkdownReferences);
-  createRenderEffect(() => renderMarkdown(root, props.text, references?.() ?? props.links));
+  const media = useContext(ReplyMediaContext);
+  let session: MediaSession | undefined;
+  function disposeBlocks() {
+    for (const node of root.children) disposeMedia(node);
+    shown.delete(root);
+  }
+  createRenderEffect(() => {
+    const current = media?.();
+    if (current !== session) {
+      disposeBlocks();
+      root.replaceChildren();
+      session = current;
+    }
+    renderMarkdown(root, props.text, references?.() ?? props.links, current);
+  });
+  root.addEventListener('click', (event) => {
+    const link = (event.target as HTMLElement).closest<HTMLAnchorElement>('a[data-file]');
+    const ref = link && session && localMedia(link.dataset.file ?? '', link.textContent ?? '', session.folder);
+    if (!link || !ref || !session) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void session.open(ref, link);
+  });
+  onCleanup(disposeBlocks);
   return root;
 }

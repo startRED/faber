@@ -20,7 +20,9 @@ and a useful file location is allowed when the person needs to find or open an a
   "Reading", "Running"; past tense once ended like "Read", "Ran"), what it acted on in the mono face cut in the middle
   to one line (`middle`), `+N −N` line counts on file changes, "failed" in the error ink when it failed, and elapsed time
   (`· 2 min`) past half a minute while running. Unknown tools keep their name; an MCP tool reads "Using a tool" (or
-  "Used a tool"), its server.
+  "Used a tool"), its server. A successful step that reads or changes one local picture shows a 28 × 20 px thumbnail
+  beside its icon once the picture loads. Its source is requested only while the row is on screen and released when
+  the row leaves view.
 - A click on a step row (`aria-expanded`) opens `div.step-detail` below it: for a file change, the changed lines
   (`ChangedLines`, up to 40 lines, then "N more lines"); otherwise the full command or path (`code.step-what`) and what
   it returned (`pre.step-out`, up to 30 lines, then "N more lines"). Long input text may show a short preview; commands and file paths stay whole.

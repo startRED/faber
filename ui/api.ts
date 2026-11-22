@@ -1210,6 +1210,10 @@ export const api = {
   saveFile: (id: string, path: string) => invoke<boolean>('save_file', { id, path }),
   showFile: (id: string, path: string) => invoke<void>('show_file', { id, path }),
   readImage: (id: string, path: string) => invoke<string | null>('read_image', { id, path }),
+  mediaEnter: (id: string) => invoke<string>('media_enter', { id }),
+  mediaGrant: (id: string, path: string) => invoke<string>('media_grant', { id, path }),
+  mediaRelease: (lease: string, url: string) => invoke<void>('media_release', { lease, url }),
+  mediaLeave: (lease: string) => invoke<void>('media_leave', { lease }),
   readFileAt: (id: string, path: string) => invoke<FileView>('read_file_at', { id, path }),
   /** Faber's browser pane (R161 step 7): over a box of the screen, off it, a page the person opens, a call's picture. */
   sitePlace: (boxId: number, x: number, y: number, width: number, height: number) => invoke<boolean>('site_place', { load: LOAD, boxId, x, y, width, height }),

@@ -111,6 +111,12 @@ fn persona_teaches_one_small_piece_format_for_both_clis_without_html_execution()
         assert!(schema.contains(required), "{required}");
     }
 }
+
+#[test]
+fn persona_uses_existing_markdown_for_local_reply_media() {
+    let text = persona(&PersonaInput { name: None, tuning: &Default::default(), research: None });
+    assert!(text.contains("Show local pictures, video and audio with standalone Markdown links to relative paths."));
+}
 #[test]
 fn persona_puts_the_reply_language_first_and_above_the_project() {
     // A Portuguese prompt in a project whose AGENTS.md says "write in English" got English replies while the rule was a

@@ -1,5 +1,6 @@
 import { Renderer, type Tokens } from 'marked';
 import { createSignal } from 'solid-js';
+import { mediaKind } from './Media.tsx';
 
 // A file the agent names (`src/app.ts:42`, or a link to it) becomes a link that opens it in the running column (parity P2):
 // `data-file` holds what the agent wrote, and the engine decides whether it is a file inside the conversation's folder.
@@ -17,7 +18,7 @@ export function namesFile(raw: string): boolean {
   if (!/^[^\s.].*\.[A-Za-z][A-Za-z0-9]{0,7}$/.test(name)) return false;
   const folders = /[\\/]/.test(path);
   if (/\s/.test(path) && !folders) return false;
-  return folders || path !== text || SOURCE.test(name);
+  return folders || path !== text || SOURCE.test(name) || mediaKind(name) !== undefined;
 }
 
 /** Whether a link's address names a file rather than a page: no web or mail scheme, or a drive letter, or `file:`. */

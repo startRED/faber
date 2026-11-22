@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
-        Scenario { name: "visual answers: remote reply images and styles send nothing with Web search off or Live", run: reply_network },
+        Scenario { name: "visual answers: remote reply images and styles send nothing in any Web search mode", run: reply_network },
         Scenario {
             name: "visual answers: saved web permission gates HTTPS fixtures while private addresses and Faber stay blocked",
             run: visual_network,
@@ -134,7 +134,8 @@ fn report(page: &mut Page, count: usize, version: u32, live: bool) -> Result {
 fn visual_network(ctx: &mut Ctx) -> Result {
     ctx.write_settings(&json!({ "language": "en", "setup": "done", "appearance": { "base": "sala" },
         "tutorialDone": true, "webSearch": "off" }))?;
-    let server = Server::start(b"if(document.currentScript){window.visualExternalLoaded=true;}else window.visualExternalModuleLoaded=window.visualExternalLoaded===true;".to_vec()).map_err(|e| e.to_string())?;
+    let server = Server::start(b"if(document.currentScript){window.visualExternalLoaded=true;}else window.visualExternalModuleLoaded=window.visualExternalLoaded===true;".to_vec())
+        .map_err(|e| e.to_string())?;
     let private = server.origin.replacen("http:", "https:", 1);
     let messages: Vec<_> = (1..=2).map(|version| {
         let source = format!(r#"```html
@@ -288,15 +289,15 @@ fn reply_network(ctx: &mut Ctx) -> Result {
     let private = server.origin.replacen("http:", "https:", 1);
     let folder = ctx.sb.data.join("conversations");
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
-    for setting in ["off", "live"] {
+    for setting in ["off", "cached", "live"] {
         let markdown = format!(
             r#"![Remote image]({HTTPS_FIXTURE_ORIGIN}/releases/latest)
 
 <p style="background-image:url('{HTTPS_FIXTURE_ORIGIN}/releases/latest')">Remote background</p>
 <style>@import url('{HTTPS_FIXTURE_ORIGIN}/releases/latest');@font-face{{font-family:RemoteReply{setting};src:url('{HTTPS_FIXTURE_ORIGIN}/codex.zip?reply={setting}')}}@font-face{{font-family:PrivateReply{setting};src:url('{private}/codex.zip?reply={setting}')}}</style>
 <p style="font-family:RemoteReply{setting}">Remote font</p><p style="font-family:PrivateReply{setting}">Private font</p>
-<video preload="auto" src="{HTTPS_FIXTURE_ORIGIN}/releases/latest"></video>
-<audio preload="auto" src="{HTTPS_FIXTURE_ORIGIN}/releases/latest"></audio>"#
+<video preload="auto" src="{HTTPS_FIXTURE_ORIGIN}/releases/latest"><source src="{HTTPS_FIXTURE_ORIGIN}/video.mp4"></video>
+<audio preload="auto" src="{HTTPS_FIXTURE_ORIGIN}/releases/latest"><source src="{HTTPS_FIXTURE_ORIGIN}/audio.mp3"></audio>"#
         );
         let conversation = json!({ "id": format!("remote-reply-{setting}"), "title": format!("Remote reply {setting}"),
             "area":"chat", "sessions":{}, "createdAt":1, "updatedAt":2,
@@ -306,14 +307,17 @@ fn reply_network(ctx: &mut Ctx) -> Result {
     }
     let mut app = ctx.launch(no_cli())?;
     app.page.cdp.serve_https_fixture(&server.origin)?;
-    app.page.eval("window.__replyNetworkViolations=[];document.addEventListener('securitypolicyviolation',e=>window.__replyNetworkViolations.push({uri:e.blockedURI,directive:e.effectiveDirective}));void 0")?;
-    for setting in ["off", "live"] {
+    app.page.eval(
+        "window.__replyNetworkViolations=[];document.addEventListener('securitypolicyviolation',e=>window.__replyNetworkViolations.push({uri:e.blockedURI,directive:e.effectiveDirective}));void 0",
+    )?;
+    for setting in ["off", "cached", "live"] {
         save_web(&mut app.page, setting)?;
         app.page.click(&css(".list .item").has_text(&format!("Remote reply {setting}")))?;
-        app.page.wait_visible(&css(".md img[alt='Remote image']"))?;
-        app.page.wait_for(
-            "the reply's remote image to be blocked by Faber's own policy",
-            "window.__replyNetworkViolations.some(e=>e.uri.startsWith('https://visual-fixture.example')&&e.directive==='img-src')",
+        app.page.wait_visible(&css(&format!(".md a[href='{HTTPS_FIXTURE_ORIGIN}/releases/latest']")).has_text("Remote image"))?;
+        same(
+            app.page.count(&css(".md :is(img, video, audio, source, iframe, object, embed, [src], [poster], [srcset])"))?,
+            0,
+            "untrusted reply media do not mount as resource elements",
         )?;
         app.page.wait_for(
             "Faber's own policy to block a private font before its real Origin could authorize the request",
@@ -328,6 +332,6 @@ fn reply_network(ctx: &mut Ctx) -> Result {
         )?;
         app.page.eval("window.__replyNetworkViolations=[];void 0")?;
     }
-    ctx.notes.push("Remote reply images, style url(), @import, public/private fonts, video and audio caused no fixture traffic with Web search off or Live; no visual was opened.".into());
+    ctx.notes.push("Remote reply images, style url(), @import, public/private fonts, video and audio caused no fixture traffic with Web search off, Cached or Live. The video-site card uses a separate UI check.".into());
     Ok(())
 }

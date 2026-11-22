@@ -206,7 +206,7 @@ export interface StepGroup {
 }
 
 /** The files a step names: Claude Code's `file_path`, Codex's list of changes or its changes keyed by path. */
-function filesOf(tool: ToolUse): string[] {
+export function filesOf(tool: ToolUse): string[] {
   const input = tool.input as Record<string, unknown> | unknown[] | null | undefined;
   if (Array.isArray(input)) return input.map((c) => (c as { path?: unknown } | null)?.path).filter((p): p is string => typeof p === 'string');
   if (!input || typeof input !== 'object') return [];
