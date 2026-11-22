@@ -13,6 +13,7 @@ strip with a localized count beside Send or Stop. Opening the count reserves a r
 draft and below the transcript. The first removal target takes focus. Escape or clicking the count closes the panel and
 returns focus to the count. Removing the last attachment returns it to the draft. The panel and the draft can scroll
 internally when long. The home composition, file picker, paste and drop, and draft recovery use the existing behavior.
+When a resize hides a focused attachment in the strip, focus moves to the compact count.
 
 After the first answer, an ordinary new conversation may receive a title of at most six words in the first message's
 language. A link-only or code-only message uses the Settings language. A bare web link immediately shows a localized

@@ -63,6 +63,15 @@ check('composer: the short attachment panel keeps the draft clear and returns ke
       equal(page.activeElement, chip, 'closing returns focus to the count control');
       equal(field.value, 'Keep this draft.');
     }
+    iframe.style.height = '800px';
+    await frames();
+    remove.focus();
+    remove.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    iframe.style.height = '480px';
+    await frames();
+    // The fixture changes its own viewport. The composer normally receives resize from the app window.
+    window.dispatchEvent(new Event('resize'));
+    equal(page.activeElement, chip, 'shrinking with a focused attachment moves focus to the count');
     chip.click();
     await frames();
     setBusy(true);

@@ -1117,7 +1117,7 @@ select.pill option { background: var(--s2); color: var(--ink); }
   .dock > .composer:not(.attachments-open) > .attachments { display: none; }
   .dock > .composer .cbar > .attachment-count {
     display: inline-flex; min-height: var(--h-sm); margin-inline-start: auto; padding-inline: 9px;
-    border: 1px solid var(--line-2); border-radius: var(--r-pill); color: var(--ink-2); white-space: nowrap;
+    border-radius: var(--r-pill); color: var(--ink-2); white-space: nowrap;
   }
   .dock > .composer .cbar:has(> .attachment-count) > .send { margin-inline-start: 0; }
   .dock > .composer.attachments-open { padding: 0; background: none; box-shadow: none; }

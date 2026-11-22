@@ -269,6 +269,7 @@ export function Composer(props: Props) {
   let field: HTMLTextAreaElement | undefined;
   let attachmentCount: HTMLButtonElement | undefined;
   let attachmentPanel: HTMLDivElement | undefined;
+  let attachmentHadFocus = false;
   const attachmentPanelId = createUniqueId();
   const [attachmentsOpen, setAttachmentsOpen] = createSignal(false);
   // The field is measured at most once per frame (16 ms): a change that finds the last measure older than that measures at
@@ -303,7 +304,16 @@ export function Composer(props: Props) {
     observer.observe(field!);
     const resized = () => {
       resize();
-      if (attachmentsOpen() && attachmentCount && getComputedStyle(attachmentCount).display === 'none') setAttachmentsOpen(false);
+      if (!attachmentCount || (!attachmentsOpen() && !attachmentHadFocus)) return;
+      const compact = getComputedStyle(attachmentCount).display !== 'none';
+      if (!compact && attachmentsOpen()) setAttachmentsOpen(false);
+      if (compact && !attachmentsOpen() && attachmentPanel && attachmentHadFocus) {
+        const owner = attachmentPanel.ownerDocument;
+        if (owner.activeElement === owner.body || attachmentPanel.contains(owner.activeElement)) {
+          attachmentHadFocus = false;
+          attachmentCount.focus({ preventScroll: true });
+        }
+      }
     };
     window.addEventListener('resize', resized);
     onCleanup(() => {
@@ -644,8 +654,15 @@ export function Composer(props: Props) {
       attachmentPanel?.querySelector<HTMLButtonElement>('.thumb-x')?.focus({ preventScroll: true });
     }
   };
-  createEffect(on(() => props.draftKey, () => setAttachmentsOpen(false), { defer: true }));
-  createEffect(() => { if (!count()) setAttachmentsOpen(false); });
+  createEffect(on(() => props.draftKey, () => {
+    attachmentHadFocus = false;
+    setAttachmentsOpen(false);
+  }, { defer: true }));
+  createEffect(() => {
+    if (count()) return;
+    attachmentHadFocus = false;
+    setAttachmentsOpen(false);
+  });
   const dropImage = (image: Draft['images'][number]) => batch(() => {
     editDraft((d) => ({ ...d, images: d.images.filter((i) => i !== image) }));
     setAttachmentReadError(undefined);
@@ -722,7 +739,13 @@ export function Composer(props: Props) {
       {/* The row opens and closes with its height, so the box never jumps when the first file lands or the last one goes. */}
       <Show when={shown()}>
         <div class="fold attachments" classList={{ open: count() > 0 }} inert={count() === 0}
-          id={attachmentPanelId} ref={(el) => (attachmentPanel = el)} role="group" aria-label={countLabel()}>
+          id={attachmentPanelId} ref={(el) => (attachmentPanel = el)} role="group" aria-label={countLabel()}
+          on:focusin={() => { attachmentHadFocus = true; }}
+          on:focusout={(e) => {
+            if (e.relatedTarget ? !e.currentTarget.contains(e.relatedTarget as Node) : getComputedStyle(e.currentTarget).display !== 'none') {
+              attachmentHadFocus = false;
+            }
+          }}>
           <div class="fold-inner">
             <div class="attach-row" ref={animateList} onMouseDown={keepEditingFocus}>
               <For each={images()}>{(image) => <Thumb name={called.get(image) ?? t('composer.image')} src={`data:${image.mediaType};base64,${image.base64}`} onRemove={() => removeFromPanel(() => dropImage(image))} />}</For>
