@@ -118,7 +118,7 @@ that only mentions the name, as in a commit message, is refused too.
   person's own MCP servers, plugins and hooks stay on, as in the CLI itself. Claude Code runs in bypass mode. Since R564 its
   file tools reach every folder, the person's key folders (`.ssh`, cloud and GitHub sign-ins), the tools' own settings
   folders and `.git` included, as commands and Codex already did. The deny rules it keeps (`claude::full_access_deny`) close
-  only the AI tools' own sign-in files (`.credentials.json`, `.claude.json`, Codex `auth.json`, Gemini `oauth_creds.json`,
+  only the AI tools' own sign-in files (`.credentials.json`, `.claude.json`, Codex `auth.json`, Antigravity `oauth_creds.json`,
   also where a documented variable moved their folder), the release signing key and changes to Faber's approval records. A
   token a file tool read would be saved in the conversation and sent to the model's maker, which is why those stay closed;
   the rules bind the file tools, not arbitrary commands. Codex runs with `danger-full-access` and `never` approvals and blocks

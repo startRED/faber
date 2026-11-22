@@ -14,7 +14,7 @@ profiles of task `gemini-profiles-in-routing`, weighed by the same quota pace. C
 
 Leave out: anything Projects already has; new profiles or measurements.
 
-Done: engine tests that fail today: a Chat turn routed to Antigravity runs through `agy` (recorded run), Auto in Chat picks a
+Done: engine tests that fail today: a Chat turn routed to Antigravity runs through `agy` (recorded run), Auto in Chat picks an
 Antigravity profile when the others are behind pace, and a Chat conversation never gets project tools on Antigravity; a screen check of
 the Chat model menu with Antigravity connected at 720 px in the longest language. Extends: the "Auto" and model menu rows of the
 product map. What's-new entry in every language. One review by the other vendor.

@@ -27,5 +27,5 @@ three team conversations started under Auto land on all three AIs when each has 
 `ai: "gemini"` runs on the fake `agy`, and the table's invariants (one row per model and effort, scores in range) hold. The
 `leader_eval` example is run once more to show the leader names `ai` sensibly. Extends: "Auto" and "Conversation started by the
 agent" in `docs/product-map.md`, and the models page. What's-new entry in every language ("Antigravity can work on your projects when
-you connect it"). Review: the other vendor and a Gemini-neutral check of the scores (the table is the owner's taste: cards checked
+you connect it"). Review: the other vendor and an Antigravity-neutral check of the scores (the table is the owner's taste: cards checked
 in the body). Cost: none at rest.

@@ -4074,19 +4074,19 @@ async fn a_queued_message_that_cannot_be_dispatched_stays_queued() {
     second.shutdown();
 }
 
-/// Gemini is known (task 055) but nothing discovers, routes or starts it yet.
+/// Antigravity is known (task 055) but nothing discovers, routes or starts it yet.
 #[tokio::test]
 async fn gemini_is_known_but_never_chosen_or_started() {
     assert_eq!(Vendor::ALL.len(), 3);
     assert_eq!(serde_json::to_value(Vendor::Gemini).unwrap(), json!("gemini"));
     assert_eq!(serde_json::from_value::<Vendor>(json!("gemini")).unwrap(), Vendor::Gemini);
     let old: faber_engine::ledger::Ledger = serde_json::from_value(json!({ "claude": {}, "codex": {} })).unwrap();
-    assert!(old.gemini.readings.is_empty(), "a ledger written before Gemini opens with it empty");
+    assert!(old.gemini.readings.is_empty(), "a ledger written before Antigravity opens with it empty");
     for vendor in Vendor::ALL {
-        assert_ne!(faber_engine::helper::other(vendor), Vendor::Gemini, "a helper never comes from Gemini");
+        assert_ne!(faber_engine::helper::other(vendor), Vendor::Gemini, "a helper never comes from Antigravity");
         for name in ["auto", vendor.name()] {
             let pick = pick_model(&choice(name, None), &Vendor::RUNNABLE, None);
-            assert!(pick.is_none_or(|p| p.vendor != Vendor::Gemini), "{name} picked Gemini");
+            assert!(pick.is_none_or(|p| p.vendor != Vendor::Gemini), "{name} picked Antigravity");
         }
     }
     let dir = support::DataFolder::new();
