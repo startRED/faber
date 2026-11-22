@@ -13,6 +13,7 @@ export interface WebReply {
   url: string;
   title: string;
   host: string;
+  picture: boolean;
   site?: string;
 }
 
@@ -38,7 +39,7 @@ export function webReply(address: string, title: string, picture: boolean): WebR
   const host = url.hostname.replace(/\.$/, '');
   const site = !picture && videoSites.get(host.replace(/^www\./, '')) || undefined;
   if (!site && !picture && !mediaKind(url.pathname)) return;
-  return { url: url.href, title: title.trim() || url.href, host, site };
+  return { url: url.href, title: title.trim() || url.href, host, picture, site };
 }
 
 export function replyHostBlocked(host: string, blocked: string[]) {
@@ -57,7 +58,7 @@ export function ReplyWebMedia(props: { media: WebReply; session: MediaSession } 
     finally { setOpening(false); }
   };
   const blocked = () => replyHostBlocked(props.media.host, props.blocked);
-  const kind = mediaKind(new URL(props.media.url).pathname);
+  const kind = props.media.picture ? 'picture' : mediaKind(new URL(props.media.url).pathname);
   const reason = () => {
     if (props.mode === 'off') return t('error.media.webOff');
     if (props.mode === 'cached') return t('error.media.webCached');

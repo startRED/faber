@@ -2317,6 +2317,9 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
   background: var(--s2);
 }
 .reply-media-picture .reply-media-slot { aspect-ratio: 3/2; max-height: 48vh; }
+@media (forced-colors: active) {
+  .reply-media-picture { outline: 1px solid CanvasText; border-radius: var(--r-md); }
+}
 .reply-media-video {
   background: var(--s1);
   border: 1px solid var(--line-2);

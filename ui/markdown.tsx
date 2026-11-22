@@ -135,7 +135,14 @@ function lex(text: string, references?: Links) {
   if (references) lexer.tokens.links = { ...references };
   return lexer.lex(text);
 }
-type Block = { raw: string; tokens?: Token[]; media?: MediaRef[]; web?: WebReply; parts?: Block[] };
+type Block = {
+  raw: string;
+  tokens?: Token[];
+  media?: MediaRef[];
+  web?: WebReply;
+  parts?: Block[];
+  imageList?: { ordered: boolean; start: number; items: Block[] };
+};
 
 function paragraphMedia(token: Token, folder: string): MediaRef[] | undefined {
   if (token.type !== 'paragraph') return;
@@ -159,6 +166,45 @@ function paragraphWeb(token: Token) {
   if (part.type === 'text') return webReply(part.text.trim(), '', false);
 }
 
+/** The model may use explicit Markdown line breaks between standalone file links. */
+function lineMedia(token: Token, folder: string): Block[] | undefined {
+  if (token.type !== 'paragraph') return;
+  const paragraph = token as Tokens.Paragraph;
+  const inline = paragraph.tokens;
+  if (inline.some((part) => part.type === 'br')) {
+    const lines: Token[][] = [[]];
+    for (const part of inline) {
+      if (part.type === 'br') lines.push([]);
+      else lines.at(-1)!.push(part);
+    }
+    const parts = lines.map((tokens) => {
+      const line = { ...paragraph, tokens };
+      return { raw: '', media: paragraphMedia(line, folder), web: paragraphWeb(line) };
+    });
+    if (parts.every((part) => part.media || part.web)) return parts;
+  }
+  // A bare media address on the line after a caption is still a standalone reference.
+  const last = inline.at(-1);
+  const before = inline.at(-2);
+  if (last?.type === 'link' && last.raw === last.href && before?.type === 'text' && before.raw.endsWith('\n')) {
+    const web = paragraphWeb({ ...paragraph, tokens: [last] });
+    if (web) return [{ raw: '', tokens: [{ ...paragraph, tokens: inline.slice(0, -1) }] }, { raw: '', web }];
+  }
+}
+
+function imageList(token: Token): Block['imageList'] {
+  if (token.type !== 'list') return;
+  const list = token as Tokens.List;
+  const pictures = list.items.map((item) => {
+    const [line, extra] = item.tokens;
+    if (item.task || extra || (line?.type !== 'text' && line?.type !== 'paragraph')) return;
+    const [image, other] = line.tokens ?? [];
+    if (!other && image?.type === 'image') return webReply(image.href, image.text, true);
+  });
+  if (!pictures.length || !pictures.every((picture): picture is WebReply => !!picture)) return;
+  return { ordered: list.ordered, start: typeof list.start === 'number' ? list.start : 1, items: pictures.map((web) => ({ raw: '', web })) };
+}
+
 function blocksOf(text: string, references?: Links, folder?: string): { blocks: Block[]; links: Links } {
   const lexed = lex(text, references);
   const blocks: Block[] = [];
@@ -171,11 +217,19 @@ function blocksOf(text: string, references?: Links, folder?: string): { blocks: 
       previous.media.push(...media);
       previous.tokens!.push(token);
     } else {
-      blocks.push({ raw: token.raw, tokens: [token], media, web: folder === undefined ? undefined : paragraphWeb(token) });
+      const web = folder === undefined ? undefined : paragraphWeb(token);
+      blocks.push({
+        raw: token.raw, tokens: [token], media, web,
+        parts: folder === undefined || media || web ? undefined : lineMedia(token, folder),
+        imageList: folder === undefined ? undefined : imageList(token),
+      });
     }
   }
   if (lexed.some((token) => token.type === 'html')) {
-    return { blocks: [{ raw: text, parts: blocks.some((block) => block.media || block.web) ? blocks : undefined }], links: lexed.links };
+    return {
+      blocks: [{ raw: text, parts: blocks.some((block) => block.media || block.web || block.parts || block.imageList) ? blocks : undefined }],
+      links: lexed.links,
+    };
   }
   return { blocks, links: lexed.links };
 }
@@ -222,8 +276,8 @@ export const referenceLinks = (text: string): Links => marked.lexer(text, OPTION
 
 /** Preserve the file's Save and Show actions without drawing a second copy of an inline player. */
 export function inlineMediaPaths(text: string, folder: string): Set<string> {
-  return new Set(blocksOf(text, undefined, folder).blocks.flatMap((block) => block.parts ?? [block])
-    .flatMap((block) => block.media?.map((ref) => ref.path) ?? []));
+  const paths = (block: Block): string[] => block.parts?.flatMap(paths) ?? block.media?.map((ref) => ref.path) ?? [];
+  return new Set(blocksOf(text, undefined, folder).blocks.flatMap(paths));
 }
 
 function mountMedia(slot: HTMLElement, block: Block, session: MediaSession) {
@@ -254,13 +308,21 @@ export function renderMarkdown(root: HTMLElement, text: string, references?: Lin
     const template = document.createElement('template');
     const markup = (part: Block) => marked.parser(Object.assign(part.tokens ?? lex(part.raw, references), { links }), OPTIONS);
     const marks = new Map<string, Block>();
-    const source = block.parts ? block.parts.map((part) => {
+    const mediaMarkup = (part: Block): string => {
+      if (part.parts) return part.parts.map(mediaMarkup).join('');
+      if (part.imageList) {
+        const { ordered, start, items } = part.imageList;
+        const tag = ordered ? 'ol' : 'ul';
+        const attribute = ordered && start !== 1 ? ` start="${start}"` : '';
+        return `<${tag}${attribute}>${items.map((item) => `<li>${mediaMarkup(item)}</li>`).join('')}</${tag}>`;
+      }
       if (!part.media && !part.web) return markup(part);
       // Keep raw HTML in one sanitising pass. Only renderer-created markers can mount players.
       const key = crypto.getRandomValues(new Uint32Array(4)).join('-');
       marks.set(key, part);
       return `<div data-reply-media="${key}"></div>`;
-    }).join('') : markup(block);
+    };
+    const source = block.parts || block.imageList ? mediaMarkup(block) : markup(block);
     template.innerHTML = tidy(source);
     raws.push(block.raw);
     if (session && (block.media || block.web)) {

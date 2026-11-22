@@ -69,6 +69,7 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
 
 ## Local media in a conversation
 
+- Markdown hard breaks can separate standalone file links. Picture frames retain an outline in forced colors.
 - The screen calls `media_enter({ id })` when it starts displaying a conversation. It keeps the returned lease and
   calls `media_leave({ lease })` when leaving, including when it returns to a home or settings screen. Entering a new
   view invalidates the previous lease immediately. An old cleanup cannot close a newer lease. The shell also
@@ -97,6 +98,7 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
 
 ## Web media in a conversation
 
+- Markdown pictures can use extensionless URLs and photo-only lists. A bare media URL after a caption can preview.
 - `media_grant_web({ id, url })` uses the visible conversation's existing lease. Direct web pictures, video and
   audio load automatically in Live mode. Off and Cached refuse before DNS or any request. Cached uses only saved
   search results. Release or leave invalidates the grant, and each new request reads the current setting.

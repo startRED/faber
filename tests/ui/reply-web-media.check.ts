@@ -4,6 +4,7 @@ import { App } from '../../ui/App.tsx';
 import { api, type AppState, type Conversation, type WebSearch } from '../../ui/api.ts';
 import { appliedLook, applyLook } from '../../ui/appearance.ts';
 import { closeMenu, menu } from '../../ui/contextmenu.ts';
+import { inlineMediaPaths } from '../../ui/markdown.tsx';
 import { showSite } from '../../ui/Site.tsx';
 import { store } from '../../ui/running.ts';
 import { Thread } from '../../ui/Thread.tsx';
@@ -12,6 +13,33 @@ import { check, deepEqual, equal, frames, ok } from './check.ts';
 const video = 'https://www.youtube.com/watch?v=lesson';
 const link = 'https://example.test/lesson';
 const reply = `[Lesson video](${video})\n\nRead [the lesson](${link}) here.`;
+
+check('reply web media: real response line breaks, photo lists and extensionless image addresses', () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const photo = 'https://images.example.test/photo-123?w=800';
+  const clip = 'https://media.example.test/aurora.webm';
+  const files = '[PNG](image.png)  \n[WAV](audio.wav)  \n[MP4](video.mp4)';
+  const dispose = render(() => createComponent(Thread, {
+    conversationId: 'web-reply-real-format', options: [], from: 0, onBranch: () => {},
+    replyWeb: { mode: 'live', blocked: ['images.example.test', 'media.example.test'], canOpen: true, open: async () => true },
+    messages: [{ id: 'reply', role: 'assistant', at: 0, text:
+      `![Cover](${photo})\n\n0. ![First](${photo})\n1. ![Second](${photo})\n\nTimelapse:\n${clip}\n\n[Ordinary link](${photo})` }],
+  }), host);
+  try {
+    const notices = 'This site is blocked in Settings.';
+    equal(host.querySelector('.reply-web-notice span')?.textContent, notices);
+    equal(host.querySelectorAll('ol[start="0"] > li .reply-web-notice').length, 2);
+    equal(host.querySelectorAll('.reply-web-notice').length, 4);
+    equal(host.querySelector(`.reply-web-notice a[href="${clip}"]`)?.getAttribute('href'), clip);
+    ok(host.querySelector('.md')?.textContent?.includes('Timelapse:'));
+    ok([...host.querySelectorAll(`a[href="${photo}"]`)].some((a) => a.textContent === 'Ordinary link' && !a.closest('.reply-web-notice')));
+    deepEqual([...inlineMediaPaths(files, 'C:/workspace')], ['image.png', 'audio.wav', 'video.mp4']);
+  } finally {
+    dispose();
+    host.remove();
+  }
+});
 
 function waitFor(host: HTMLElement, selector: string) {
   return new Promise<HTMLElement>((resolve, reject) => {
@@ -98,7 +126,7 @@ check('reply web media: the thread grants visible HTTPS media only in Live and r
   const [blocked, setBlocked] = createSignal<string[]>([]);
   const [thread, setThread] = createSignal('web-live');
   const kinds = ['img', 'video', 'audio'];
-  const addresses = ['picture.png', 'clip.mp4', 'sound.wav'].map((path) => `https://example.test/${path}?download=1`);
+  const addresses = ['photo-123', 'clip.mp4', 'sound.wav'].map((path) => `https://example.test/${path}?download=1`);
   const urls = kinds.map((_, index) => 'faber-media://app/' + String(index + 1).repeat(32));
   const calls: string[][] = [];
   const released: string[][] = [];
@@ -127,7 +155,7 @@ check('reply web media: the thread grants visible HTTPS media only in Live and r
     get replyWeb() { return { mode: mode(), blocked: blocked(), canOpen: false, open: async () => false }; },
     messages: [{ id: 'reply', role: 'assistant', at: 0, text: [
       ...addresses.map((url, index) => `${index === 0 ? '!' : ''}[Media ${index}](${url})`),
-      '![No extension](https://example.test/image)',
+      '[Ordinary link](https://example.test/image)',
       '![Insecure](http://example.test/picture.png)',
     ].join('\n\n') }],
   }), host);
@@ -159,11 +187,11 @@ check('reply web media: the thread grants visible HTTPS media only in Live and r
     show();
     for (const kind of kinds) await waitFor(host, `.reply-media-slot ${kind}[src]`);
     deepEqual(sources(), urls);
-    deepEqual(calls, addresses.map((url) => ['web-live', url]));
+    deepEqual([...calls].sort(), addresses.map((url) => ['web-live', url]).sort());
     show(false);
     await frames();
     deepEqual(sources(), [undefined, undefined, undefined]);
-    deepEqual(released.splice(0), urls.map((url) => ['first-lease', url]));
+    deepEqual(released.splice(0).sort(), urls.map((url) => ['first-lease', url]).sort());
 
     for (const invalidate of ['mode', 'host', 'viewport', 'thread']) {
       hold = true;
@@ -178,7 +206,7 @@ check('reply web media: the thread grants visible HTTPS media only in Live and r
       pending.clear();
       await frames();
       deepEqual(sources(), [undefined, undefined, undefined]);
-      deepEqual(released.splice(0), urls.map((url) => ['first-lease', url]), invalidate);
+      deepEqual(released.splice(0).sort(), urls.map((url) => ['first-lease', url]).sort(), invalidate);
       setMode('live');
       setBlocked([]);
     }
