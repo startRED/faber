@@ -69,8 +69,8 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
 
 ## Local media in a conversation
 
-- Hard breaks separate file links. Images preview inside list items and quotes. An isolated picture has one caption,
-  and a list marker at the card top. Forced colors keep picture outlines.
+- Hard breaks separate links. Consecutive filename lines preview too. Images preview in lists and quotes.
+  An isolated picture keeps one caption and a top marker. Forced colors keep outlines.
 - A gallery mounts up to four previews. When there are more pictures, a separate button opens the viewer at the
   next picture, even if every preview failed. The viewer can move through the entire gallery. Equivalent policy
   updates keep it open while changes to the available pictures close it.
@@ -105,8 +105,8 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
   Off and Cached refuse before DNS. Cached uses saved search results. Release or leave revokes the grant.
 - After HTTP 429 on a gallery preview grant, the visible preview can retry once using the same grant path and the
   site's Retry-After from 1–15 seconds. Missing, malformed or longer waits do not schedule a retry.
-- Replies keep the source links. Off shows one muted notice per reply and points to Live under Settings ›
-  General › Web search. Further Off items are plain titled links. Photo-only lists use normal list spacing.
+- Source links stay visible. Off shows one notice pointing to Settings › General › Web search › Live.
+  Grouped pictures become titled links on separate lines; picture-only lists keep normal spacing.
 - HTTPS hosts and subdomains must pass Privacy checks before DNS and connection. All resolved addresses must be
   public. There is no DNS fallback. TLS uses system roots without fetching certificate URLs. Redirects repeat
   the checks. Requests send the client version, project URL and range, without proxy, cookies, credentials or

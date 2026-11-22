@@ -302,6 +302,27 @@ check('reply web media: equivalent policy updates keep the open gallery viewer',
   }
 });
 
+check('reply web media: Off keeps each picture link in its own paragraph, in lists too', () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const session = mediaSession('off-group', '');
+  const pictures = ['One', 'Two', 'Three'].map((name) => webReply(`https://example.test/${name}.jpg`, name, true)!);
+  const props = { pictures, session, canOpen: false, blocked: [], open: async () => false };
+  for (const list of [undefined, { ordered: false, start: 1 }]) {
+    const dispose = render(() => createComponent(ReplyWebPictures, { ...props, mode: 'off', list }), host);
+    const links = [...host.querySelectorAll('a[data-reply-web-off]')];
+    deepEqual(links.map(link => link.textContent), ['One', 'Two', 'Three']);
+    deepEqual(links.map(link => link.parentElement?.tagName), list ? ['LI', 'LI', 'LI'] : ['P', 'P', 'P']);
+    dispose();
+    host.replaceChildren();
+  }
+  const dispose = render(() => createComponent(ReplyWebPictures, { ...props, mode: 'cached' }), host);
+  equal(host.querySelector('p'), null);
+  deepEqual([...host.querySelectorAll('.reply-web-notice')].map(notice => notice.parentElement), [host, host, host]);
+  dispose();
+  host.remove();
+});
+
 check('reply web media: a busy preview retries once at the site delay while visible', async () => {
   const host = document.createElement('div');
   document.body.append(host);

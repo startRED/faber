@@ -185,11 +185,22 @@ function appendWebBlock(blocks: Block[], block: Block) {
   }
 }
 
-/** The model may use explicit Markdown line breaks between standalone file links. */
+/** The model can separate standalone media with explicit breaks or put bare filenames on consecutive lines. */
 function lineMedia(token: Token, folder: string): Block[] | undefined {
   if (token.type !== 'paragraph') return;
   const paragraph = token as Tokens.Paragraph;
   const inline = paragraph.tokens;
+  const [only] = inline;
+  if (inline.length === 1 && only?.type === 'text' && !only.tokens && typeof only.text === 'string' && only.text.includes('\n')) {
+    const refs = only.text.split('\n').map((line) => {
+      const path = line.trim();
+      return /\s/.test(path) ? undefined : localMedia(path, '', folder);
+    });
+    if (refs.every((ref) => ref !== undefined)) {
+      if (refs.every((ref) => ref.kind === 'picture')) return [{ raw: '', media: refs }];
+      return refs.map((ref) => ({ raw: '', media: [ref] }));
+    }
+  }
   if (inline.some((part) => part.type === 'br')) {
     const lines: Token[][] = [[]];
     for (const part of inline) {

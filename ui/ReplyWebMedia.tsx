@@ -76,7 +76,11 @@ export function ReplyWebPictures(props: {
       ? <Dynamic component={props.list.ordered ? 'ol' : 'ul'} start={props.list.ordered ? props.list.start : undefined} data-reply-picture-list="">
         <For each={props.pictures}>{picture => <li>{renderPicture(picture)}</li>}</For>
       </Dynamic>
-      : <For each={props.pictures}>{renderPicture}</For>
+      : <For each={props.pictures}>{picture =>
+        <Show when={props.mode === 'off'} fallback={renderPicture(picture)}>
+          <p>{renderPicture(picture)}</p>
+        </Show>
+      }</For>
   }>{(pictures) => <>
     <ReplyGallery media={pictures} session={props.session}
       webAllowed={ref => available().some(picture => picture.url === ref.path)} />
