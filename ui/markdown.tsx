@@ -451,7 +451,9 @@ export function renderMarkdown(root: HTMLElement, text: string, references?: Lin
           const item = slot.parentElement;
           const picture = refs.media?.[0]?.kind === 'picture' || refs.webPictures || (refs.web && isWebPicture(refs.web));
           if (picture && item?.tagName === 'LI' && [...item.childNodes].every(node =>
-            node === slot || (!node.textContent?.trim() && (!(node instanceof Element)
+            node === slot || (node instanceof Element && node.matches('ul, ol')
+              && !!(slot.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING))
+            || (!node.textContent?.trim() && (!(node instanceof Element)
               || node.matches('input[type="checkbox"], p:has(> input[type="checkbox"]:only-child)')))
           )) {
             item.dataset.replyPictureOnly = '';

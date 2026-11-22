@@ -180,6 +180,36 @@ check('reply web media: isolated pictures stay in lists and quotes', () => {
   }
 });
 
+check('reply web media: nested pictures and RTL ordered task markers', () => {
+  const host = document.createElement('div');
+  host.dir = 'rtl';
+  document.body.append(host);
+  const text = '1. [x] ![Parent](./parent.png)\n   - Nested words\n\n2. Kept words ![Other](./other.png)\n   - More nested words';
+  const dispose = render(() => createComponent(Thread, {
+    conversationId: 'nested-rtl', options: [], from: 0, onBranch: () => {},
+    messages: [{ id: 'reply', role: 'assistant', at: 0, text }],
+  }), host);
+  try {
+    const items = host.querySelectorAll('.md ol > li');
+    ok(items[0]!.hasAttribute('data-reply-picture-only'));
+    const child = items[0]!.querySelector('ul > li')!;
+    equal(child.hasAttribute('data-reply-picture-only'), false);
+    ok(getComputedStyle(child).listStyleType !== 'none');
+    equal(items[1]!.hasAttribute('data-reply-picture-only'), false);
+    ok(items[1]!.textContent!.includes('Kept words'));
+    ok(items[1]!.textContent!.includes('More nested words'));
+    equal(getComputedStyle(items[0]!, '::before').right, '0px');
+    const checkbox = items[0]!.querySelector('input')!;
+    equal(getComputedStyle(checkbox).right, '28px');
+    const item = items[0]!.getBoundingClientRect();
+    const box = checkbox.getBoundingClientRect();
+    ok(item.right - box.right < box.left - item.left);
+  } finally {
+    dispose();
+    host.remove();
+  }
+});
+
 function waitFor(host: HTMLElement, selector: string) {
   return new Promise<HTMLElement>((resolve, reject) => {
     const stop = () => { clearTimeout(deadline); observer.disconnect(); };
