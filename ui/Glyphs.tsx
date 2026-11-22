@@ -11,6 +11,7 @@ const PATHS = {
   // The speech bubble with a question mark: the one shape that means "needs you".
   ask: ['M7.9 20A9 9 0 1 0 4 16.1L2 22Z', 'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3', 'M12 17h.01'],
   right: ['m9 18 6-6-6-6'],
+  play: ['M8 5v14l11-7Z'],
   left: ['m15 18-6-6 6-6'],
   check: ['M20 6 9 17l-5-5'],
   down: ['m6 9 6 6 6-6'],

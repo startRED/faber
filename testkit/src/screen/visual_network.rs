@@ -290,6 +290,13 @@ fn reply_network(ctx: &mut Ctx) -> Result {
     let folder = ctx.sb.data.join("conversations");
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     for setting in ["off", "cached", "live"] {
+        let direct_media = if setting == "live" {
+            String::new()
+        } else {
+            format!(
+                "\n\n![Direct image]({HTTPS_FIXTURE_ORIGIN}/image.png)\n\n[Direct video]({HTTPS_FIXTURE_ORIGIN}/video.mp4)\n\n[Direct audio]({HTTPS_FIXTURE_ORIGIN}/audio.mp3)"
+            )
+        };
         let markdown = format!(
             r#"![Remote image]({HTTPS_FIXTURE_ORIGIN}/releases/latest)
 
@@ -297,7 +304,7 @@ fn reply_network(ctx: &mut Ctx) -> Result {
 <style>@import url('{HTTPS_FIXTURE_ORIGIN}/releases/latest');@font-face{{font-family:RemoteReply{setting};src:url('{HTTPS_FIXTURE_ORIGIN}/codex.zip?reply={setting}')}}@font-face{{font-family:PrivateReply{setting};src:url('{private}/codex.zip?reply={setting}')}}</style>
 <p style="font-family:RemoteReply{setting}">Remote font</p><p style="font-family:PrivateReply{setting}">Private font</p>
 <video preload="auto" src="{HTTPS_FIXTURE_ORIGIN}/releases/latest"><source src="{HTTPS_FIXTURE_ORIGIN}/video.mp4"></video>
-<audio preload="auto" src="{HTTPS_FIXTURE_ORIGIN}/releases/latest"><source src="{HTTPS_FIXTURE_ORIGIN}/audio.mp3"></audio>"#
+<audio preload="auto" src="{HTTPS_FIXTURE_ORIGIN}/releases/latest"><source src="{HTTPS_FIXTURE_ORIGIN}/audio.mp3"></audio>{direct_media}"#
         );
         let conversation = json!({ "id": format!("remote-reply-{setting}"), "title": format!("Remote reply {setting}"),
             "area":"chat", "sessions":{}, "createdAt":1, "updatedAt":2,
@@ -314,6 +321,11 @@ fn reply_network(ctx: &mut Ctx) -> Result {
         save_web(&mut app.page, setting)?;
         app.page.click(&css(".list .item").has_text(&format!("Remote reply {setting}")))?;
         app.page.wait_visible(&css(&format!(".md a[href='{HTTPS_FIXTURE_ORIGIN}/releases/latest']")).has_text("Remote image"))?;
+        if setting != "live" {
+            for (path, label) in [("image.png", "Direct image"), ("video.mp4", "Direct video"), ("audio.mp3", "Direct audio")] {
+                app.page.wait_visible(&css(&format!(".md a[href='{HTTPS_FIXTURE_ORIGIN}/{path}']")).has_text(label))?;
+            }
+        }
         same(
             app.page.count(&css(".md :is(img, video, audio, source, iframe, object, embed, [src], [poster], [srcset])"))?,
             0,

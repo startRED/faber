@@ -1212,6 +1212,7 @@ export const api = {
   readImage: (id: string, path: string) => invoke<string | null>('read_image', { id, path }),
   mediaEnter: (id: string) => invoke<string>('media_enter', { id }),
   mediaGrant: (id: string, path: string) => invoke<string>('media_grant', { id, path }),
+  mediaGrantWeb: (id: string, url: string) => invoke<string>('media_grant_web', { id, url }),
   mediaRelease: (lease: string, url: string) => invoke<void>('media_release', { lease, url }),
   mediaLeave: (lease: string) => invoke<void>('media_leave', { lease }),
   readFileAt: (id: string, path: string) => invoke<FileView>('read_file_at', { id, path }),

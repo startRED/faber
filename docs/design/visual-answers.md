@@ -100,6 +100,7 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
 - `media_grant_web({ id, url })` uses the visible conversation's existing lease. Direct web pictures, video and
   audio load automatically in Live mode. Off and Cached refuse before DNS or any request. Cached uses only saved
   search results. Release or leave invalidates the grant, and each new request reads the current setting.
+- The reply uses only scoped media URLs and keeps the original link, with a notice when access is unavailable.
 - The host fetches HTTPS and compares the canonical host against Privacy's blocked sites, including subdomains,
   before resolving and before connecting. Every address in the DNS answer must be public. The connection uses
   that checked answer with no DNS fallback. HTTPS certificates are validated against system trust roots without
@@ -116,7 +117,7 @@ controls; these rules extend the large-page and drawing viewer, never add anothe
   `error.media.webHttps`, `error.media.webPrivate`, `error.media.webSize`, `error.media.webKind` and
   `error.media.webUnreachable`. Scope, capacity and malformed range still use the local media keys.
 - A video on a web page uses the built-in browser beside the conversation. Only the video card and one reply-link
-  menu action offer this exception to opening links in the person's browser. These page links use the pane flow.
+  menu action offer this exception on Windows in Chat and Projects. Video cards send no request before Play.
 
 ## Files written by the agent
 

@@ -16,7 +16,7 @@ import {
   type Versions,
 } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
-import { copyItem, openMenu } from './contextmenu.ts';
+import { copyItem, openBesideItem, openMenu } from './contextmenu.ts';
 import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { ActorMark, StateGlyph, ToolGlyph, stateKind, toolKind } from './icons/kinds.tsx';
@@ -38,6 +38,7 @@ import { appsOf, AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.
 import { Quote } from './Floating.tsx';
 import { Strip } from './Thumbs.tsx';
 import { localMedia, mediaSession, ReplyGallery, ReplyMedia, ReplyMediaContext, type MediaRef } from './Media.tsx';
+import { replyAddress, replyHostBlocked, type ReplyWebOptions } from './ReplyWebMedia.tsx';
 import { canSpeak, speaking, stopSpeech, toggleSpeech } from './speech.ts';
 import { catalogName, bytes, compact, duration, failureText, fromEngine, lang, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
@@ -450,6 +451,7 @@ interface Shared {
   running?: RunningItem[];
   onOpenChild?: (c: Summary) => void;
   workingFolder?: string;
+  replyWeb?: ReplyWebOptions;
   endState?: import('./api.ts').RunStateName;
   pieceRevision?: number;
   visuals?: VisualAnswer[];
@@ -724,13 +726,21 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       data-message-index={props.messageIndex}
       tabindex="-1"
       aria-label={t('answer.label')}
-      onContextMenu={(e) =>
+      onContextMenu={(e) => {
+        const link = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>('.md a[href]:not([data-file])') : null;
+        const url = link && replyAddress(link.getAttribute('href') ?? '');
+        const web = props.replyWeb;
         openMenu(e, [
+          ...(web?.canOpen && url && link ? [openBesideItem(() => {
+            if (!link.isConnected) return;
+            if (replyHostBlocked(url.hostname.replace(/\.$/, ''), web.blocked)) return web.onError?.('error.browser.blockedHost');
+            void web.open(url.href, link.textContent?.trim() || url.href).then((opened) => { if (opened === false) web.onError?.('media.webPaneUnavailable'); }, (err: unknown) => web.onError?.(err));
+          })] : []),
           copyItem(m().text),
           ...(!working() && props.prompt ? [{ id: 'redo', label: retry(), run: () => props.onBranch(props.prompt!.id, props.prompt!.text) }] : []),
           ...(!working() && props.onBranchHere ? [{ id: 'branch', label: t('answer.branchHere'), run: () => props.onBranchHere!(m().id) }] : []),
-        ])
-      }
+        ], link ?? undefined);
+      }}
     >
       <div class="model" title={headerTitle() || undefined}>
         <span class="vm" classList={{ claude: m().vendor === 'claude', codex: m().vendor === 'codex' }}>
@@ -1247,7 +1257,7 @@ export function Thread(props: Shared & { messages: Message[]; temporary?: boolea
   const conversation = createMemo(() => props.conversationId);
   const folder = createMemo(() => props.workingFolder ?? '');
   const media = createMemo(() => {
-    const session = mediaSession(conversation(), folder());
+    const session = mediaSession(conversation(), folder(), () => props.replyWeb);
     onCleanup(session.close);
     return session;
   });

@@ -148,6 +148,8 @@ check('motion: closing a column lets the main settle in one step while the colum
 
 check('motion: removing a row has inert exits with full motion and stays instant with reduced motion', async () => {
   const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
+  const base = document.documentElement.getAttribute('data-base');
+  document.documentElement.dataset.base = 'base';
   try {
     for (const reduced of [false, true]) {
       Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
@@ -157,23 +159,29 @@ check('motion: removing a row has inert exits with full motion and stays instant
       root.style.cssText = 'position:fixed;left:10px;top:10px;width:240px;display:grid';
       root.dataset.motion = 'full';
       for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+      root.style.setProperty('--ease-spring', 'linear');
       root.innerHTML = '<div style="height:40px">first</div><div style="height:40px">second</div>';
       document.body.append(root);
       const dispose = render(() => { animateList(root); return [...root.children] as HTMLElement[]; }, root);
       const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       try {
-        await settle(20);
         const row = root.lastElementChild as HTMLElement;
         const y = row.getBoundingClientRect().y;
         root.firstElementChild!.remove();
-        await settle(20);
+        await Promise.resolve();
         const ghost = document.querySelector<HTMLElement>('.motion-exit');
         if (reduced) equal(ghost, null, 'reduced motion makes no exit copy');
         else {
           ok(ghost?.inert, 'the exit copy cannot receive clicks or focus');
           equal(ghost.getAttribute('aria-hidden'), 'true');
-          ok(row.getAnimations().length > 0, 'the surviving row has a FLIP animation');
-          ok(row.getBoundingClientRect().y > 10 && row.getBoundingClientRect().y <= y, 'the row moves through intermediate positions');
+          const movement = row.getAnimations()[0];
+          ok(movement, 'the surviving row has a FLIP animation');
+          movement.pause();
+          movement.currentTime = 0;
+          ok(Math.abs(row.getBoundingClientRect().y - y) < 0.5, 'the row starts at its old position');
+          movement.currentTime = Number(movement.effect!.getComputedTiming().duration) * 0.25;
+          ok(row.getBoundingClientRect().y > 10 && row.getBoundingClientRect().y < y, 'the row moves through intermediate positions');
+          movement.finish();
           const copy = ghost.shadowRoot!.querySelector<HTMLElement>('.motion-exit')!;
           await finished([...row.getAnimations(), ...copy.getAnimations()]);
           await settle(0);
@@ -188,6 +196,8 @@ check('motion: removing a row has inert exits with full motion and stays instant
     }
   } finally {
     Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
+    if (base === null) document.documentElement.removeAttribute('data-base');
+    else document.documentElement.setAttribute('data-base', base);
   }
 });
 

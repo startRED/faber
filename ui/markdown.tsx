@@ -8,6 +8,7 @@ import { iconMarkup } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import { openViewer } from './Viewer.tsx';
 import { localMedia, ReplyGallery, ReplyMedia, ReplyMediaContext, type MediaRef, type MediaSession } from './Media.tsx';
+import { ReplyWebMedia, replyAddress, webReply, type WebReply } from './ReplyWebMedia.tsx';
 
 // Model output is untrusted: rendered as Markdown, then stripped of anything that could run. Every piece of HTML that reaches
 // the page passes through DOMPurify here, and nowhere else.
@@ -54,7 +55,7 @@ function copyCode(button: Element) {
   );
 }
 
-/** Links in answers open in the person's browser, never inside Faber; a file the answer names opens in the running column; a
+/** A regular click on a reply link opens the person's browser; a file the answer names opens in the running column; a
  * picture opens full screen; a code block copies itself. */
 export function openLinks(e: MouseEvent) {
   const target = e.target as HTMLElement;
@@ -134,7 +135,7 @@ function lex(text: string, references?: Links) {
   if (references) lexer.tokens.links = { ...references };
   return lexer.lex(text);
 }
-type Block = { raw: string; tokens?: Token[]; media?: MediaRef[]; parts?: Block[] };
+type Block = { raw: string; tokens?: Token[]; media?: MediaRef[]; web?: WebReply; parts?: Block[] };
 
 function paragraphMedia(token: Token, folder: string): MediaRef[] | undefined {
   if (token.type !== 'paragraph') return;
@@ -150,12 +151,12 @@ function paragraphMedia(token: Token, folder: string): MediaRef[] | undefined {
   if (refs.length === 1 || (refs.length > 1 && refs.every((ref) => ref.kind === 'picture'))) return refs;
 }
 
-function replyAddress(address: string): URL | undefined {
-  if (!/^https?:\/\//i.test(address) || /\s/.test(address)) return;
-  try {
-    const url = new URL(address);
-    if (url.hostname && !url.username && !url.password) return url;
-  } catch { return; }
+function paragraphWeb(token: Token) {
+  if (token.type !== 'paragraph') return;
+  const [part, second] = (token as Tokens.Paragraph).tokens;
+  if (second || !part) return;
+  if (part.type === 'link' || part.type === 'image') return webReply(part.href, part.text, part.type === 'image');
+  if (part.type === 'text') return webReply(part.text.trim(), '', false);
 }
 
 function blocksOf(text: string, references?: Links, folder?: string): { blocks: Block[]; links: Links } {
@@ -170,11 +171,11 @@ function blocksOf(text: string, references?: Links, folder?: string): { blocks: 
       previous.media.push(...media);
       previous.tokens!.push(token);
     } else {
-      blocks.push({ raw: token.raw, tokens: [token], media });
+      blocks.push({ raw: token.raw, tokens: [token], media, web: folder === undefined ? undefined : paragraphWeb(token) });
     }
   }
   if (lexed.some((token) => token.type === 'html')) {
-    return { blocks: [{ raw: text, parts: blocks.some((block) => block.media) ? blocks : undefined }], links: lexed.links };
+    return { blocks: [{ raw: text, parts: blocks.some((block) => block.media || block.web) ? blocks : undefined }], links: lexed.links };
   }
   return { blocks, links: lexed.links };
 }
@@ -226,12 +227,16 @@ export function inlineMediaPaths(text: string, folder: string): Set<string> {
 }
 
 function mountMedia(slot: HTMLElement, block: Block, session: MediaSession) {
+  if (block.web) return render(() => <ReplyWebMedia media={block.web!} session={session}
+    mode={session.web?.()?.mode} blocked={session.web?.()?.blocked ?? []}
+    canOpen={session.web?.()?.canOpen ?? false}
+    open={(url, title) => session.web?.()?.open(url, title) ?? Promise.resolve(false)} />, slot);
   const media = block.media!;
   return render(() => media.length === 1 ? <ReplyMedia media={media[0]!} session={session} /> : <ReplyGallery media={media} session={session} />, slot);
 }
 
 function registerMedia(slot: HTMLElement, block: Block, session: MediaSession) {
-  mediaSlots.set(slot, { key: JSON.stringify(block.media), dispose: mountMedia(slot, block, session) });
+  mediaSlots.set(slot, { key: JSON.stringify(block.media ?? block.web), dispose: mountMedia(slot, block, session) });
 }
 
 export function renderMarkdown(root: HTMLElement, text: string, references?: Links, session?: MediaSession): void {
@@ -250,7 +255,7 @@ export function renderMarkdown(root: HTMLElement, text: string, references?: Lin
     const markup = (part: Block) => marked.parser(Object.assign(part.tokens ?? lex(part.raw, references), { links }), OPTIONS);
     const marks = new Map<string, Block>();
     const source = block.parts ? block.parts.map((part) => {
-      if (!part.media) return markup(part);
+      if (!part.media && !part.web) return markup(part);
       // Keep raw HTML in one sanitising pass. Only renderer-created markers can mount players.
       const key = crypto.getRandomValues(new Uint32Array(4)).join('-');
       marks.set(key, part);
@@ -258,7 +263,7 @@ export function renderMarkdown(root: HTMLElement, text: string, references?: Lin
     }).join('') : markup(block);
     template.innerHTML = tidy(source);
     raws.push(block.raw);
-    if (session && block.media) {
+    if (session && (block.media || block.web)) {
       const slot = document.createElement('div');
       registerMedia(slot, block, session);
       template.content.replaceChildren(slot);

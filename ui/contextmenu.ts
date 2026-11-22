@@ -62,6 +62,8 @@ export const unavailable = (item: MenuItem): boolean => (typeof item.disabled ==
 
 export const copyItem = (text: string): MenuItem => ({ id: 'copy', label: t('menu.copy'), disabled: !text, run: () => void navigator.clipboard.writeText(text) });
 
+export const openBesideItem = (run: () => void): MenuItem => ({ id: 'open-beside', label: t('media.webOpenBeside'), run });
+
 const TEXT_TYPES = new Set(['text', 'search', 'email', 'url', 'tel', 'password', 'number', '']);
 
 /** The text box under the pointer, or nothing for a checkbox, a button and the like. */

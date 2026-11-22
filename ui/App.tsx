@@ -74,6 +74,7 @@ import { archived as archivedPatch, optimistic, withoutConversation, withoutProj
 import { ToEnd } from './Floating.tsx';
 import { followTail, readingPoint, readingWindow, restoreReading, savedReading, type Reading } from './reading.ts';
 import { Thread } from './Thread.tsx';
+import { pauseReplyMedia } from './Media.tsx';
 import { tutorialDue } from './tour.ts';
 import { Tutorial } from './Tutorial.tsx';
 import { Welcome } from './Welcome.tsx';
@@ -1784,8 +1785,22 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     // The same conversation's changes again: the signal does not move, so the column is opened here.
     if (!colShown()) openColumn(true);
   };
-  // Faber's browser is a pane of the window on Windows, and its pages belong to a project conversation (R161 step 7).
-  const canBrowse = () => isWindows && current()?.area === 'project' && current()?.id === place().id;
+  // A reply can open the existing Windows browser pane in either area.
+  const canBrowse = () => isWindows && !!current() && current()!.id === place().id;
+  let replyPage = 0;
+  const openReplyPage = async (id: string, url: string, title: string) => {
+    const here = () => canBrowse() && current()?.id === id;
+    if (!here()) return undefined;
+    const request = ++replyPage;
+    pauseReplyMedia();
+    let opened: boolean;
+    try { opened = await api.siteOpen(id, url); }
+    catch (err) { if (!here() || replyPage !== request) return undefined; throw err; }
+    if (!here() || replyPage !== request) return undefined;
+    if (!opened) return false;
+    showSite({ conversationId: id, url, title });
+    return true;
+  };
   const toggleSite = async () => {
     if (columnExit) {
       const same = !!sideSite();
@@ -2243,6 +2258,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                     running={items()}
                                     onOpenChild={openSummary}
                                     workingFolder={c().workingFolder}
+                                    replyWeb={{
+                                      mode: state().settings.webSearch,
+                                      blocked: state().settings.blockedHosts ?? [],
+                                      canOpen: canBrowse(),
+                                      open: (url, title) => openReplyPage(c().id, url, title),
+                                      onError: (reason) => fail(reason),
+                                    }}
                                     messages={c().messages}
                                     earlier={c().earlier}
                                     endState={state().conversations.find((conversation) => conversation.id === c().id)?.state}

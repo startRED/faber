@@ -1,8 +1,9 @@
 import { createContext, createEffect, createSignal, For, onCleanup, Show, useContext, type Accessor } from 'solid-js';
 import { render } from 'solid-js/web';
 import { Icon } from './Glyphs.tsx';
-import { t } from './i18n.ts';
+import { failureText, t } from './i18n.ts';
 import { api } from './api.ts';
+import type { ReplyWebOptions } from './ReplyWebMedia.tsx';
 import { openViewer } from './Viewer.tsx';
 
 const pictures = /\.(?:png|jpe?g|gif|webp|avif|bmp|svg)$/i;
@@ -53,7 +54,7 @@ function refusal(error: unknown) {
   return key === 'error.media.gone' || key === 'error.media.path';
 }
 
-export function mediaSession(id: string, folder: string) {
+export function mediaSession(id: string, folder: string, web?: Accessor<ReplyWebOptions | undefined>) {
   let lease: Promise<string> | undefined;
   let open = true;
   let requested = 0;
@@ -74,8 +75,13 @@ export function mediaSession(id: string, folder: string) {
     document.removeEventListener('visibilitychange', visibility);
   };
   const release = (url: string) => void lease?.then((value) => api.mediaRelease(value, url)).catch(() => {});
+  const enter = () => lease ??= api.mediaEnter(id).catch((error: unknown) => {
+    lease = undefined;
+    throw error;
+  });
   const session = {
     folder,
+    web,
     retry(path: string) {
       if (!refusal(refusals.get(path))) refusals.delete(path);
     },
@@ -98,10 +104,7 @@ export function mediaSession(id: string, folder: string) {
     async grant(path: string) {
       if (!open) throw 'error.media.closed';
       if (refusals.has(path)) throw refusals.get(path);
-      await (lease ??= api.mediaEnter(id).catch((error: unknown) => {
-        lease = undefined;
-        throw error;
-      }));
+      await enter();
       if (!open) throw 'error.media.closed';
       if (refusals.has(path)) throw refusals.get(path);
       const url = await api.mediaGrant(id, path).catch((error: unknown) => {
@@ -111,6 +114,21 @@ export function mediaSession(id: string, folder: string) {
       if (!open) {
         release(url);
         throw 'error.media.closed';
+      }
+      return url;
+    },
+    async grantWeb(address: string, eligible: () => boolean) {
+      if (!open || !eligible()) return;
+      const owner = await enter();
+      if (!open || !eligible()) return;
+      const url = await api.mediaGrantWeb(id, address);
+      if (!open || !eligible()) {
+        void api.mediaRelease(owner, url).catch(() => {});
+        return;
+      }
+      if (!/^(?:faber-media:\/\/(?:app|localhost)|http:\/\/faber-media\.localhost)\/[a-f0-9]{32}$/.test(url)) {
+        void api.mediaRelease(owner, url).catch(() => {});
+        throw 'error.media.webUnreachable';
       }
       return url;
     },
@@ -166,7 +184,7 @@ export type MediaSession = ReturnType<typeof mediaSession>;
 type Session = MediaSession;
 export const ReplyMediaContext = createContext<Accessor<Session>>();
 
-export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: boolean; tile?: boolean; onView?: (img: HTMLImageElement) => void; more?: number }) {
+export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: boolean; tile?: boolean; onView?: (img: HTMLImageElement) => void; more?: number; webAllowed?: () => boolean }) {
   const context = useContext(ReplyMediaContext);
   const scope = () => props.session ?? context?.();
   const [visible, setVisible] = createSignal(false);
@@ -174,6 +192,7 @@ export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: 
   const [status, setStatus] = createSignal<'loading' | 'ready' | 'error' | 'gone'>('loading');
   const [retry, setRetry] = createSignal(0);
   const [duration, setDuration] = createSignal('');
+  const [webFailure, setWebFailure] = createSignal<unknown>();
   let figure!: HTMLElement;
   let image: HTMLImageElement | undefined;
   let player: HTMLMediaElement | undefined;
@@ -193,12 +212,17 @@ export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: 
     let current = true;
     let url: string | undefined;
     setStatus('loading');
-    void session.grant(path).then((value) => {
-      if (!current) return session.release(value);
+    setWebFailure(undefined);
+    const eligible = () => current && visible() && !document.hidden && figure.isConnected && props.webAllowed?.();
+    const grant = props.webAllowed ? session.grantWeb(path, () => !!eligible()) : session.grant(path);
+    void grant.then((value) => {
+      if (!value) return;
+      if (!current || (props.webAllowed && !eligible())) return session.release(value);
       url = value;
       setSource(value);
     }, (error: unknown) => {
-      if (!current) return;
+      if (!current || (props.webAllowed && !eligible())) return;
+      if (props.webAllowed) setWebFailure(error);
       setStatus(refusal(error) ? 'gone' : 'error');
     });
     onCleanup(() => {
@@ -261,7 +285,7 @@ export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: 
             <span class="reply-media-mark" data-status={status()} aria-hidden="true">
               <Show when={status() !== 'loading'}><Icon name={status() === 'gone' ? 'sheet' : 'close'} /></Show>
             </span>
-            <span>{t(status() === 'gone' ? 'media.gone' : status() === 'error' ? 'media.error' : 'file.loading')}</span>
+            <span>{webFailure() ? failureText(webFailure()) : t(status() === 'gone' ? 'media.gone' : status() === 'error' ? 'media.error' : 'file.loading')}</span>
             <Show when={status() === 'error'}><button type="button" class="btn ghost" onClick={() => {
               scope()?.retry(props.media.path);
               setRetry((n) => n + 1);
@@ -271,9 +295,11 @@ export function ReplyMedia(props: { media: MediaRef; session?: Session; thumb?: 
       </div>
       <Show when={!props.tile}>
         <figcaption>
-          <span>{props.media.name}</span>
+          <Show when={props.webAllowed} fallback={<span>{props.media.name}</span>}>
+            <a href={props.media.path}>{props.media.name}</a>
+          </Show>
           <Show when={props.media.kind === 'video' && duration()}><span>{duration()}</span></Show>
-          <Show when={props.media.kind === 'audio'}><small>{props.media.path.split('.').at(-1)?.toUpperCase()}</small></Show>
+          <Show when={props.media.kind === 'audio'}><small>{(props.webAllowed ? new URL(props.media.path).pathname : props.media.path).split('.').at(-1)?.toUpperCase()}</small></Show>
         </figcaption>
       </Show>
     </figure>

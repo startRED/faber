@@ -2292,7 +2292,7 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
   .team-member[aria-current='true'] { border-color: Highlight; }
 }
 /* Reply media follows the width of the conversation, including beside a pane. */
-.thread:has(.reply-media-gallery) { container: reply-stage / inline-size; }
+.thread:has(.reply-media-gallery, .reply-web-notice) { container: reply-stage / inline-size; }
 .reply-media-shell, .reply-media-gallery { min-width: 0; }
 .md .reply-media-gallery, .md .reply-media-shell { margin-block: 12px; }
 .md .reply-media-gallery .reply-media-shell { margin: 0; }
@@ -2370,10 +2370,55 @@ button.work-chip:hover, a.work-chip:hover { color: var(--ink); }
 .file:has(> .reply-media-shell) { display: block; }
 .reply-media-dialog { width: min(760px, calc(100vw - 32px)); padding: 12px; color: var(--ink); background: var(--s1); border: 1px solid var(--line-2); border-radius: var(--r-md); }
 .reply-media-dialog::backdrop { background: rgb(0 0 0 / 55%); }
+.reply-web-video, .reply-web-notice {
+  margin-block: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-ui);
+}
+.reply-web-video {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  min-height: 68px;
+  background: var(--s1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+}
+.reply-web-video a { font-weight: 600; }
+.reply-web-video small { display: block; color: var(--ink-2); font-size: inherit; }
+.reply-web-play {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--s3);
+  color: var(--ink);
+}
+.reply-web-notice {
+  display: grid;
+  gap: 4px;
+  align-content: center;
+  padding: 12px;
+  min-height: 92px;
+  border-block-start: 1px solid var(--line-2);
+  color: var(--ink-2);
+}
 @container reply-stage (max-width: 760px) {
   .reply-media-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .reply-media-tile .reply-media-slot { aspect-ratio: 2/1; max-height: 132px; }
+  .reply-web-notice { padding-block: 6px; min-height: 84px; }
 }
 @container reply-stage (max-width: 530px) {
   .reply-media-tile .reply-media-slot { aspect-ratio: 3/2; }
+}
+@media (max-height: 540px) {
+  @container reply-stage (max-width: 760px) {
+    .reply-web-notice { min-height: 72px; }
+  }
 }

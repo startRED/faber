@@ -186,6 +186,7 @@ check('feel: hover and colour feedback answers within 80ms, exits take 80ms and 
     '.col .ai .step:not(.thought) .step-line b',
     '.col .ai .md:not(.md ~ .md) > div:first-child > :is(h1, h2, h3):first-child',
     '.reply-media-picture-button > span',
+    '.reply-web-video a',
   ]);
   for (const sheet of document.styleSheets) for (const rule of sheet.cssRules) {
     if (rule instanceof CSSStyleRule && rule.style.fontWeight === '600' && !semibold.delete(rule.selectorText)) heavy.push(rule.selectorText);
