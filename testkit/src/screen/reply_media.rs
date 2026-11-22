@@ -55,7 +55,7 @@ See the clip for details.{tail}"#
     );
     seed(&folder, &work, "reply-play", &media)?;
     let mut app = ctx.launch(no_cli())?;
-    let (media, warm_dom, media_dom) = measure(ctx, &mut app, "reply-play", true)?;
+    let (media, midpoint_dom, media_dom) = measure(ctx, &mut app, "reply-play", true)?;
     for (index, (media, control)) in media.iter().zip(&control).enumerate() {
         let delta = media.heap - control.heap;
         ensure(delta <= 15.0, || format!("cycle {}: closed JS heap is {delta:.1} MiB above control", index + 1))?;
@@ -82,7 +82,8 @@ See the clip for details.{tail}"#
     app.page.click(&css(".list .item").has_text("Reply playback"))?;
     app.page.wait_count(&css(".reply-media-gallery figure"), 2)?;
     narrow_reply(&mut app.page)?;
-    ensure(media_dom[0] == warm_dom[0] && media_dom[1] <= control_dom[1] + 100 && media_dom[2] <= control_dom[2] + 5, || {
+    // WebView2 can initialize documents late, so compare the same measured window as memory.
+    ensure(media_dom[0] == midpoint_dom[0] && media_dom[1] <= control_dom[1] + 100 && media_dom[2] <= control_dom[2] + 5, || {
         let evidence = ctx
             .notes
             .iter()
@@ -91,7 +92,7 @@ See the clip for details.{tail}"#
             .collect::<Vec<_>>()
             .join("; ");
         format!(
-            "final closed DOM [documents, nodes, listeners]: warm media {warm_dom:?}, media {media_dom:?}, control {control_dom:?}; {evidence}"
+            "closed DOM [documents, nodes, listeners]: measured cycle 10 media {midpoint_dom:?}, final media {media_dom:?}, control {control_dom:?}; {evidence}"
         )
     })
 }
@@ -155,7 +156,7 @@ fn measure(ctx: &mut Ctx, app: &mut Opened, id: &str, media: bool) -> Result<(Ve
     let away = css(".list .item").has_text("Another conversation");
     let label = if media { "media" } else { "control" };
     let mut samples = Vec::with_capacity(CYCLES);
-    let mut warm_dom = None;
+    let mut midpoint_dom = None;
     let mut final_dom = None;
     let mut peak = 0.0_f64;
     for cycle in 1..=WARM_CYCLES + CYCLES {
@@ -205,7 +206,7 @@ fn measure(ctx: &mut Ctx, app: &mut Opened, id: &str, media: bool) -> Result<(Ve
         }
 
         let checkpoint = cycle.checked_sub(WARM_CYCLES);
-        let repeated = cycle == 1 || checkpoint == Some(CYCLES) || (!media && matches!(checkpoint, Some(1 | 10)));
+        let repeated = cycle == 1 || matches!(checkpoint, Some(10)) || checkpoint == Some(CYCLES) || (!media && checkpoint == Some(1));
         let dom = if repeated {
             Some(settled_dom(&mut app.page)?)
         } else {
@@ -215,8 +216,8 @@ fn measure(ctx: &mut Ctx, app: &mut Opened, id: &str, media: bool) -> Result<(Ve
         if checkpoint == Some(CYCLES) {
             final_dom = dom;
         }
-        if cycle == 1 {
-            warm_dom = dom;
+        if checkpoint == Some(10) {
+            midpoint_dom = dom;
         }
         let heap = app.page.cdp.call("Runtime.getHeapUsage", json!({}))?["usedSize"].as_f64().ok_or("missing renderer JS heap size")?
             / 1_048_576.0;
@@ -253,7 +254,11 @@ fn measure(ctx: &mut Ctx, app: &mut Opened, id: &str, media: bool) -> Result<(Ve
     let retained = private_under_cap(ctx, app, label, WARM_CYCLES + CYCLES, "idle")?;
     ctx.notes.push(format!("{label}: sampled peak {:.1} MiB, idle {retained:.1} MiB, CPU {idle_cpu:.1}% of one core", peak.max(retained)));
     ensure(!media || idle_cpu < 5.0, || format!("reply media idle CPU {idle_cpu:.1}%, limit 5%"))?;
-    Ok((samples, warm_dom.ok_or("missing first closed DOM measurement")?, final_dom.ok_or("missing final closed DOM measurement")?))
+    Ok((
+        samples,
+        midpoint_dom.ok_or("missing measured cycle 10 DOM measurement")?,
+        final_dom.ok_or("missing final closed DOM measurement")?,
+    ))
 }
 
 fn settled_dom(page: &mut Page) -> Result<[u64; 3]> {
