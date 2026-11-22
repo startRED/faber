@@ -107,6 +107,12 @@ event type and IDs; the controlled driver checks cover reply ownership and the S
   confirmation, four processes held 138.5 MB private working set and 2.72 accumulated CPU seconds. At
   completion, 14 held 593.3 MB and 8.33 CPU seconds. These are live-tree samples including the proof's gates.
   The turn reported 30,244 input and 13 output tokens (USD 0.030309 API equivalent).
+- Hidden Windows Electron scenarios distinguish a healthy wait from a blocked return after a followed
+  conversation disappears and from a recovered report queued until reconnection. The blocker has an amber
+  status with the reason and any saved note. The completed member's report was saved once. Keyboard
+  activation opens Accounts or focuses the existing draft, and closing Accounts restores focus. On 2026-11-22
+  the wait scenarios passed across one combined run and a focused rerun after a DevTools connection reset.
+  The blocked and queued states were inspected at 1,280, 720 and 390 pixels.
 - The native app was exercised with synthetic data and inspected at 1280, 720 and 390 pixels. The final
   no-CLI fixture measured 166.55 MB, below the 400 MB test ceiling. No resident production process was added.
   CLI process-tree peak and incremental processor cost were not measured.
@@ -144,11 +150,6 @@ an external wake or a person sending a message. The original two messages and th
 The conversation command reported the same blocker, and the screen's status formatter rendered it with the saved note
 and the Brazilian Portuguese instruction to connect a subscription. No model request ran.
 
-- [420](../tasks/420-the-screen-tells-waiting-from-stuck.md): hidden Electron checks distinguished a healthy
-  wait, a blocked return after a followed conversation disappeared, and a finished report waiting to reconnect.
-  A blocked return now shows its reason and any saved note, without counting the old references as active waits.
-  The recovered report persisted once. The account and draft actions preserved keyboard focus and existing text.
-  The blocked and queued states were inspected at 1,280, 720 and 390 pixels using isolated data.
 - [389](../tasks/389-recover-shared-service.md): two active replies sharing a silent service now trigger a bounded
   local probe. With one active reply, a Stop for a known turn also qualifies when its completion notice is missing after
   five seconds, even if the service acknowledged the interrupt or sent a status update. A native MCP tool still open after
