@@ -228,17 +228,6 @@ async fn agy_launch_and_recorded_text() {
 }
 
 #[tokio::test]
-async fn an_installed_antigravity_needs_a_connected_account_to_appear_in_choices() {
-    let dir = DataFolder::new();
-    let (spawn, _starts) = support::pipes();
-    let engine = boot(&dir, Permissions::Ask, spawn);
-    assert!(engine.state().vendors.contains(&Vendor::Gemini));
-    engine.note_antigravity_account(AccountStatus::SignedOut, None);
-    assert!(!engine.state().vendors.contains(&Vendor::Gemini));
-    engine.shutdown();
-}
-
-#[tokio::test]
 async fn claude_starts_an_antigravity_child_in_a_project_with_three_connected_ais() {
     let dir = DataFolder::new();
     let folder = support::work_folder();

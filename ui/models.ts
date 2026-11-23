@@ -32,12 +32,6 @@ export function modelOptions(vendors: Vendor[], codexModels: ModelInfo[] = []): 
 
 export const vendorName = (vendor: Vendor) => vendor === 'gemini' ? t('setup.antigravity') : VENDOR_NAME[vendor];
 
-export function availableChoice(options: Option[], choice?: Choice): Choice {
-  return choice && options.some((o) => o.choice.vendor === choice.vendor && o.choice.model === choice.model)
-    ? choice
-    : { vendor: 'auto' };
-}
-
 // "claude-sonnet-5-5" -> "Sonnet 5.5", "gpt-6-luna" -> "GPT-6 Luna", "sonnet" -> "Sonnet".
 export function prettyModel(model: string | undefined): string {
   // "codex" is what the engine reports when the CLI named no model: that is no name to show.

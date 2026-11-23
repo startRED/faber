@@ -1593,8 +1593,6 @@ export const de: Messages = {
   "set.group.type": "Text und Layout",
   "set.group.system": "Benachrichtigungen und System",
   "set.group.ai": "So arbeitet die KI",
-  "set.defaultModel": "Standardmodell",
-  "set.defaultModelHint": "Für neue Unterhaltungen in Chat und Projekten.",
   "set.group.you": "Du",
   'set.notifyMe': 'Mich benachrichtigen',
   "set.notifyHint": "Wenn etwas dich braucht.",

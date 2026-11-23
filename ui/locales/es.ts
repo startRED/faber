@@ -1754,8 +1754,6 @@ export const es: Messages = {
   "set.group.type": "Texto y diseño",
   "set.group.system": "Notificaciones y sistema",
   "set.group.ai": "Cómo trabaja la IA",
-  "set.defaultModel": "Modelo predeterminado",
-  "set.defaultModelHint": "Se usa al iniciar conversaciones en Chat y Proyectos.",
   "set.group.you": "Tú",
   'set.notifyMe': 'Avisarme',
   "set.notifyHint": "Cuando algo te necesite.",

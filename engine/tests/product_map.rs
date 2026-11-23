@@ -18,7 +18,6 @@ fn read(path: &str) -> String {
 /// until it is listed here, and then the map has to name it.
 fn settings_keys() -> Vec<String> {
     let every = Settings {
-        default_model: Some(faber_engine::router::Choice { vendor: "auto".into(), model: None, effort: None }),
         blocked_hosts: Some(Vec::new()),
         extensions_developer_mode: Some(true),
         appearance: Some(Default::default()),

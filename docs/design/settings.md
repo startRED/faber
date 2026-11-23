@@ -4,10 +4,6 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
 
 ## Settings
 
-- General offers the shared marked model menu for the default in new Chat and Projects conversations. The Antigravity
-  group requires a connected account. If a saved model is unavailable, the draft uses Auto until the model comes back.
-  At phone widths the Settings navigation wraps above the screen so controls retain the full width.
-
 - Keyboard: Back takes focus; closing restores the opener (composer, Settings or quota). Tab and rings cover enabled controls; the custom color input explicitly carries the shared focus-visible ring to its wheel on macOS too. Choices keep focus through saves and translations. Checked at 720 px.
 - Settings replaces the shell, as before, with a list of five sections on the left: General, Projects, Appearance,
   Accounts and limits and Privacy, and "Faber <version>" once at the bottom of the list. Ctrl comma opens it on General,

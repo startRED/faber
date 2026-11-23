@@ -4,7 +4,7 @@ import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import { type Option, prettyModel, vendorName } from './models.ts';
 
-export function ModelMenu(props: { options: Option[]; choice: Choice; disabled?: boolean; modelOnlyLabel?: string; onChoice: (choice: Choice) => void }) {
+export function ModelMenu(props: { options: Option[]; choice: Choice; disabled?: boolean; onChoice: (choice: Choice) => void }) {
   const id = createUniqueId();
   const [open, setOpen] = createSignal(false);
   const [query, setQuery] = createSignal('');
@@ -16,12 +16,10 @@ export function ModelMenu(props: { options: Option[]; choice: Choice; disabled?:
   const groups = createMemo(() => (['claude', 'codex', 'gemini'] as Vendor[]).filter((vendor) => models().some((option) => option.choice.vendor === vendor)));
   const matches = (option: Option) => option.label.toLocaleLowerCase().includes(query().trim().toLocaleLowerCase());
   const label = () => props.choice.vendor === 'auto' ? t('model.autoChoose') : props.options.find(selected)?.label ?? prettyModel(props.choice.model);
-  const menuLabel = () => props.modelOnlyLabel ?? t('composer.model');
-  const showEffort = () => !props.modelOnlyLabel && props.choice.vendor !== 'auto' && !!props.choice.model;
   const close = () => { if (panel?.matches(':popover-open')) panel.hidePopover(); setOpen(false); };
   const pick = (option: Option) => {
     const choice = option.choice;
-    props.onChoice(props.modelOnlyLabel || choice.vendor === 'auto' ? choice : { ...choice, effort: selected(option) ? (props.choice.effort ?? DEFAULT_EFFORT) : DEFAULT_EFFORT });
+    props.onChoice(choice.vendor === 'auto' ? choice : { ...choice, effort: selected(option) ? (props.choice.effort ?? DEFAULT_EFFORT) : DEFAULT_EFFORT });
     close();
     trigger.focus();
   };
@@ -61,17 +59,17 @@ export function ModelMenu(props: { options: Option[]; choice: Choice; disabled?:
   </button>;
   return <>
     <button ref={(el) => (trigger = el)} type="button" class="chip choose model-chip" data-tour="auto" disabled={props.disabled}
-      aria-label={`${menuLabel()}: ${label()}${showEffort() ? ` · ${t('effort.label')}: ${t(`effort.${props.choice.effort ?? DEFAULT_EFFORT}`)}` : ''}`}
+      aria-label={`${t('composer.model')}: ${label()}${props.choice.vendor !== 'auto' && props.choice.model ? ` · ${t('effort.label')}: ${t(`effort.${props.choice.effort ?? DEFAULT_EFFORT}`)}` : ''}`}
       aria-haspopup="dialog" aria-expanded={open()} aria-controls={open() ? id : undefined}
       onClick={() => open() ? close() : setOpen(true)}
       onKeyDown={(e) => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setOpen(true); } }}>
       <Show when={props.choice.vendor !== 'auto'} fallback={<Icon name="auto" small />}><span class={`mk ${props.choice.vendor}`} aria-hidden="true" /></Show>
       <span class="model-label">{label()}</span>
-      <Show when={showEffort()}><span class="model-effort">· {t(`effort.${props.choice.effort ?? DEFAULT_EFFORT}`)}</span></Show>
+      <Show when={props.choice.vendor !== 'auto' && props.choice.model}><span class="model-effort">· {t(`effort.${props.choice.effort ?? DEFAULT_EFFORT}`)}</span></Show>
       <Icon name="down" small />
     </button>
     <Show when={open()}>
-      <div ref={(el) => (panel = el)} id={id} popover="auto" class="model-menu" role="dialog" aria-label={menuLabel()}
+      <div ref={(el) => (panel = el)} id={id} popover="auto" class="model-menu" role="dialog" aria-label={t('composer.model')}
         onToggle={(e) => { if (e.target === e.currentTarget && (e as ToggleEvent).newState === 'closed') setOpen(false); }}
         onKeyDown={(e) => {
           if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); trigger.focus(); return; }
@@ -102,7 +100,7 @@ export function ModelMenu(props: { options: Option[]; choice: Choice; disabled?:
           </Show>;
         }}</For>
         <Show when={query().trim() && !models().some(matches)}><p class="model-empty" role="status">{t('model.noMatches')}</p></Show>
-        <Show when={showEffort()}>
+        <Show when={props.choice.vendor !== 'auto' && props.choice.model}>
           <div class="model-efforts" role="group" aria-label={t('effort.label')}>
             <span>{t('effort.label')}</span>
             <For each={['low', 'medium', 'high'] as const}>{(effort) => <button type="button" aria-pressed={(props.choice.effort ?? DEFAULT_EFFORT) === effort} onClick={() => props.onChoice({ ...props.choice, effort })}>{t(`effort.${effort}`)}</button>}</For>

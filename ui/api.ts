@@ -628,7 +628,6 @@ export type WebSearch = 'off' | 'cached' | 'live';
 export type ReasoningSummary = 'default' | 'auto' | 'concise' | 'detailed' | 'none';
 export type ReplyStyle = 'default' | 'short' | 'explained' | 'own';
 export interface Settings {
-  defaultModel?: Choice;
   blockedHosts?: string[];
   extensionsDeveloperMode?: boolean;
   appearance?: Appearance;

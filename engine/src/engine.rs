@@ -2470,7 +2470,7 @@ impl Core {
     }
 
     fn vendors(&self) -> Vec<Vendor> {
-        self.opts.clis.keys().copied().filter(|v| *v != Vendor::Gemini || self.ledger.gemini.plan_seen_at.is_some()).collect()
+        self.opts.clis.keys().copied().collect()
     }
 
     fn replace_clis(&mut self, clis: BTreeMap<Vendor, Cli>) {
@@ -2861,7 +2861,6 @@ impl Core {
         let before = self.store.settings();
         let before_tuning = before.tuning();
         let mut settings = Settings {
-            default_model: patch.default_model.or(before.default_model),
             blocked_hosts: patch
                 .blocked_hosts
                 .as_ref()
