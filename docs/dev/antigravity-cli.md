@@ -180,6 +180,20 @@ answers `sessionId`, `models` (23 ids such as `gemini-3.8-flash-low`; `currentMo
     `session/load` and `session/resume` holds the plan (`name`, `id`, `upgradeUri`) with no model call. No quota numbers
     exist over ACP: `usage_update` is the context window only, and nine guessed method names are error -32601.
 
+### The reader
+
+`engine-drivers/src/agy.rs` reads these messages into the engine's events, with no process: the driver hands `AcpReader`
+each line agy prints (`read`) and each message it writes (`sent`), so an answer is read by the request it answers. A reply
+chunk is `Text` (after a step, `Break` first); a call is a `Tool` named as the screen draws Claude Code's (`Bash`, `Write`
+or `Edit` from the diff, `Read`, `Grep`, `AskUserQuestion`, `mcp__<server>__<tool>` split by the servers given to
+`session/new`; any other call keeps agy's name), ended by `ToolResult` with a command's own output and exit code, cut at
+`TOOL_OUTPUT_CHARS`, and `declined` after a reject. A permission request and a form question are `Permission` events whose
+`request_id` is agy's id; `answer_permission` and `answer_question` build the answer, `cancel_pending` cancels what waits
+after a stop. A session's answer, and a model `set_model` took, is `Started`. The prompt's answer is `Done` (input with
+its cache, output with its thinking); a stop other than `end_turn` adds its `reason.*` key. An error answer to the prompt
+or a setting ends the reply (`reason.fail.rejected` for -32602); one to opening a session, or "Session not found", is
+`error.sessionLost`. Updates during a `session/load` are the replay and are dropped. A call still open ends with its turn.
+
 ### Cost of the ACP recording
 
 72 model calls. The 69 kept read 535,522 input tokens plus 705,004 cache reads and wrote 3,933 output and 45 thinking tokens
