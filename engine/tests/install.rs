@@ -5,6 +5,7 @@
 //! https://claude.ai/install.ps1 (manifest, win32-x64/claude.exe, `install`)
 //! https://api.github.com/repos/openai/codex/releases/latest (asset `digest`)
 //! https://github.com/openai/codex (release archive; rename binary to codex)
+//! https://antigravity.google/cli/install.ps1, checked 2026-11-23 (manifest per platform, SHA-512, agy.exe `install`)
 //!
 //! Proposed adapter: Cli::install_windows delegates to engine::install. Parameters
 //! carry the simulated platform, sources, data/destination directories, transport,
@@ -65,7 +66,20 @@ const BINARY_SHA: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff
 // Its digest was checked independently with Node crypto, not the installer.
 const ZIP_HEX: &str = "504b030414000000000000000000c2412435030000000300000020000000636f6465782d7838365f36342d70632d77696e646f77732d6d7376632e657865616263504b0102140014000000000000000000c24124350300000003000000200000000000000000000000000000000000636f6465782d7838365f36342d70632d77696e646f77732d6d7376632e657865504b050600000000010001004e000000410000000000";
 const ZIP_SHA: &str = "9822b5254c9890463aefb0f59f99087ba31d9c64d3668fa9899f52768258b8ce";
-const HOSTS: &[&str] = &["downloads.claude.ai", "api.github.com", "github.com", "release-assets.githubusercontent.com"];
+const HOSTS: &[&str] = &[
+    "downloads.claude.ai",
+    "api.github.com",
+    "github.com",
+    "release-assets.githubusercontent.com",
+    "antigravity-cli-auto-updater-974169037036.us-central1.run.app",
+    "storage.googleapis.com",
+];
+const AGY_MANIFEST: &str = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/windows_amd64.json";
+const AGY_BINARY: &str =
+    "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.14-5302690847260672/windows-x64/cli_windows_x64.exe";
+// The standard SHA-512 vector for the three bytes `abc` (FIPS 180-2), independent of the installer.
+const AGY_SHA: &str =
+    "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f";
 
 fn zip_bytes() -> Vec<u8> {
     ZIP_HEX.as_bytes().as_chunks::<2>().0.iter().map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap()).collect()
@@ -133,6 +147,8 @@ struct Rig {
     paths: Arc<Mutex<Vec<PathBuf>>>,
     events: Arc<Mutex<Vec<Value>>>,
     fail_spawn_once: Arc<Mutex<bool>>,
+    /// The started installer never closes its output, like a program that hangs.
+    hang: bool,
     /// The files in `install-tmp` at the moment a failure was reported, before the final cleanup could hide them.
     left_at_failure: Arc<Mutex<Option<Vec<String>>>>,
 }
@@ -176,6 +192,9 @@ impl Rig {
             ]
         })).unwrap());
         responses.insert(ARCHIVE.into(), zip_bytes());
+        responses
+            .insert(AGY_MANIFEST.into(), serde_json::to_vec(&json!({"version": "1.5.14", "url": AGY_BINARY, "sha512": AGY_SHA})).unwrap());
+        responses.insert(AGY_BINARY.into(), b"abc".to_vec());
         Self {
             root,
             request,
@@ -185,6 +204,7 @@ impl Rig {
             paths: Arc::default(),
             events: Arc::default(),
             fail_spawn_once: Arc::default(),
+            hang: false,
             left_at_failure: Arc::default(),
         }
     }
@@ -245,6 +265,9 @@ impl Rig {
         let fail = self.fail_spawn_once.clone();
         let data = PathBuf::from(self.request["data_dir"].as_str().unwrap());
         let request_profile = self.request["user_profile"].clone();
+        // Antigravity's official installer runs the binary it placed; the other two run from staging.
+        let agy = (self.request["vendor"] == "gemini").then(|| self.destination().join("agy.exe"));
+        let hang = self.hang;
         let spawn: Spawner = Arc::new(move |program, args, _cwd| {
             let program = PathBuf::from(program);
             // Windows refuses to start a file that is still open for writing; this stand-in refuses the same way.
@@ -252,13 +275,35 @@ impl Rig {
             // Read the actual staged bytes: wrong hash/order/path cannot satisfy this fake.
             let bytes = std::fs::read(&program)?;
             calls.lock().unwrap().push((program.clone(), args.to_vec(), bytes.clone()));
-            if !program.starts_with(&data) || args != ["install"] || bytes != b"abc" {
+            let allowed = agy.as_ref().map_or(program.starts_with(&data), |exe| program == *exe);
+            if !allowed || args != ["install"] || bytes != b"abc" {
                 return Err(io::Error::other("Only the verified native installer may run, directly with install"));
             }
             let mut should_fail = fail.lock().unwrap();
             if *should_fail {
                 *should_fail = false;
                 return Err(io::Error::other("Injected interruption before installation"));
+            }
+            if hang {
+                let (open, stdout) = tokio::io::duplex(8);
+                // The writing end is never dropped, so the output never ends.
+                std::mem::forget(open);
+                return Ok(Proc {
+                    stdin: Box::new(tokio::io::sink()),
+                    stdout: Box::new(stdout),
+                    stderr: None,
+                    child: None,
+                    contained: None,
+                });
+            }
+            if agy.is_some() {
+                return Ok(Proc {
+                    stdin: Box::new(tokio::io::sink()),
+                    stdout: Box::new(tokio::io::empty()),
+                    stderr: None,
+                    child: None,
+                    contained: None,
+                });
             }
             // External executable owns this side effect; writes to profile .local/bin as documented.
             let profile_bin = PathBuf::from(request_profile.as_str().unwrap()).join(".local").join("bin");
@@ -398,7 +443,7 @@ async fn c2_3_release_archive_is_extracted_into_requested_destination_detected_a
 
 #[tokio::test]
 async fn c2_4_network_stays_on_fixed_official_https_hosts_and_rejects_untrusted_sources() {
-    for vendor in ["claude", "codex"] {
+    for vendor in ["claude", "codex", "gemini"] {
         let rig = Rig::new(vendor);
         rig.run().await.expect("Official source must install");
         {
@@ -1080,6 +1125,90 @@ async fn a_server_that_stalls_halfway_fails_the_download_and_leaves_no_part_file
     assert!(started.elapsed() < std::time::Duration::from_secs(30));
     assert!(!part.exists());
     drop(hold_tx);
+}
+
+#[tokio::test]
+async fn antigravity_installs_its_verified_binary_where_its_installer_does_and_runs_its_setup_without_a_shell() {
+    let rig = Rig::new("gemini");
+    let installed = rig.run().await.expect("Verified Antigravity installation must succeed");
+    assert_eq!(*rig.requests.lock().unwrap(), [AGY_MANIFEST, AGY_BINARY], "the manifest, then the binary it names");
+    let exe = rig.destination().join("agy.exe");
+    assert_eq!(std::fs::read(&exe).unwrap(), b"abc");
+    let calls = rig.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1, "only agy.exe itself runs: no PowerShell, no cmd");
+    assert_eq!((&calls[0].0, calls[0].1.as_slice()), (&exe, ["install".to_string()].as_slice()));
+    assert!(rig.paths.lock().unwrap().is_empty(), "agy.exe install sets PATH itself, as the official script leaves it to");
+    rig.assert_detected("agy", &installed);
+    rig.assert_empty_temporary();
+    rig.assert_stages(&["prerequisite", "download", "verify", "install", "done"]);
+}
+
+#[tokio::test]
+async fn an_antigravity_manifest_cannot_send_the_download_elsewhere_or_carry_shell_characters() {
+    let manifest = |version: &str, url: &str| serde_json::to_vec(&json!({"version": version, "url": url, "sha512": AGY_SHA})).unwrap();
+    for (version, url) in [
+        ("1.5.14", "https://attacker.example/antigravity-public/antigravity-cli/agy.exe"),
+        ("1.5.14", "http://storage.googleapis.com/antigravity-public/antigravity-cli/agy.exe"),
+        ("1.5.14", "https://storage.googleapis.com/someone-else/agy.exe"),
+        ("1.5.14", "https://storage.googleapis.com/antigravity-public/antigravity-cli/../../someone-else/agy.exe"),
+        ("1.5.14\" & calc", AGY_BINARY),
+        ("1.5.14|calc", AGY_BINARY),
+        (r"..\..\agy", AGY_BINARY),
+    ] {
+        let mut rig = Rig::new("gemini");
+        rig.responses.insert(AGY_MANIFEST.into(), manifest(version, url));
+        let error = rig.run().await.expect_err("a manifest outside Antigravity's release folder must be refused");
+        assert_eq!(error["key"], "error.setup.download", "{version} {url}");
+        assert_eq!(*rig.requests.lock().unwrap(), [AGY_MANIFEST], "nothing is downloaded: {version} {url}");
+        assert!(rig.calls.lock().unwrap().is_empty());
+        assert!(!rig.destination().join("agy.exe").exists());
+    }
+    for base in ["https://antigravity-cli-auto-updater-974169037036.us-central1.run.app@attacker.example", "https://attacker.example"] {
+        let mut rig = Rig::new("gemini");
+        rig.request["sources"]["agy_base"] = json!(base);
+        rig.run().await.expect_err("only the official manifest host, or a declared loopback source, is asked");
+        assert!(rig.requests.lock().unwrap().is_empty(), "{base}");
+    }
+}
+
+#[test]
+fn of_google_cloud_storage_only_antigravity_s_cli_folder_is_official() {
+    let ok = |url: &str| faber_engine::install::validate_url(url, &[]).is_ok();
+    assert!(ok(AGY_BINARY));
+    assert!(!ok("https://storage.googleapis.com/someone-else/tool.exe"), "another bucket, for a tool or a redirect");
+    assert!(!ok("https://storage.googleapis.com/antigravity-public/antigravity-hub/Antigravity.exe"));
+    assert!(!ok("https://storage.googleapis.com/antigravity-public/antigravity-cli/../../someone-else/x.exe"));
+}
+
+#[tokio::test]
+async fn an_agy_exe_already_in_place_is_left_alone_as_the_official_installer_does() {
+    let rig = Rig::new("gemini");
+    std::fs::write(rig.destination().join("agy.exe"), b"running").unwrap();
+    rig.run().await.expect("an existing agy.exe is an installed CLI");
+    assert_eq!(std::fs::read(rig.destination().join("agy.exe")).unwrap(), b"running");
+    assert!(rig.requests.lock().unwrap().is_empty() && rig.calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_antigravity_binary_that_does_not_match_its_sha512_never_runs_or_lands() {
+    let mut rig = Rig::new("gemini");
+    rig.responses.insert(AGY_BINARY.into(), b"abd".to_vec());
+    let error = rig.run().await.expect_err("a changed binary must be refused");
+    assert_eq!(error["key"], "reason.setup.checksum");
+    assert!(rig.calls.lock().unwrap().is_empty());
+    assert!(!rig.destination().join("agy.exe").exists());
+    rig.assert_empty_temporary();
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_antigravity_setup_that_never_ends_is_stopped_and_the_install_still_finishes() {
+    let mut rig = Rig::new("gemini");
+    rig.hang = true;
+    let started = tokio::time::Instant::now();
+    let installed = rig.run().await.expect("the binary is in place, so the install ends once the setup is stopped");
+    assert_eq!(rig.events.lock().unwrap().last().unwrap()["stage"], "done");
+    assert!(started.elapsed() >= faber_engine::install::AGY_SETUP_LIMIT, "the setup was given its time");
+    rig.assert_detected("agy", &installed);
 }
 
 #[tokio::test]

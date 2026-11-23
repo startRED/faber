@@ -1,8 +1,8 @@
-//! Installation of official AI CLIs (Claude Code, Codex) on Windows.
+//! Installation of official AI CLIs (Claude Code, Codex, Antigravity) on Windows.
 
 use crate::proc::Spawner;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha512};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -17,6 +17,7 @@ pub type Progress<'a> = dyn Fn(Value) + Send + Sync + 'a;
 
 const OFFICIAL_HOSTS: &[&str] = &[
     "downloads.claude.ai",
+    AGY_MANIFEST_HOST,
     "api.github.com",
     "github.com",
     "codeload.github.com",
@@ -36,6 +37,15 @@ const OFFICIAL_HOSTS: &[&str] = &[
     "ftp.osuosl.org",
 ];
 
+/// Antigravity's installer (antigravity.google/cli/install.ps1, read 2026-11-23) asks this host for a manifest per platform.
+const AGY_MANIFEST_HOST: &str = "antigravity-cli-auto-updater-974169037036.us-central1.run.app";
+/// The manifest's binary lives on Google Cloud Storage, a host shared by anyone's buckets: only this folder of it is official,
+/// for every download and every redirect.
+const AGY_PAYLOAD_HOST: &str = "storage.googleapis.com";
+const AGY_PAYLOAD_PATH: &str = "/antigravity-public/antigravity-cli/";
+/// How long `agy install` (which only sets PATH and shell settings) may run before it is ended.
+pub const AGY_SETUP_LIMIT: Duration = Duration::from_secs(60);
+
 /// Verifies that a network URL uses HTTPS and points to an approved official host.
 pub fn validate_url(url: &str, allowed_hosts: &[String]) -> Result<(), String> {
     let parsed = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
@@ -43,7 +53,8 @@ pub fn validate_url(url: &str, allowed_hosts: &[String]) -> Result<(), String> {
         return Err(format!("URL must use HTTPS: {url}"));
     }
     let host = parsed.host_str().ok_or_else(|| format!("Empty host in URL: {url}"))?;
-    let is_official = OFFICIAL_HOSTS.iter().any(|h| h.eq_ignore_ascii_case(host));
+    let is_official = OFFICIAL_HOSTS.iter().any(|h| h.eq_ignore_ascii_case(host))
+        || (host.eq_ignore_ascii_case(AGY_PAYLOAD_HOST) && parsed.path().starts_with(AGY_PAYLOAD_PATH));
     if !is_official {
         return Err(format!("Host '{host}' is not in official hosts list"));
     }
@@ -323,7 +334,7 @@ pub async fn install_windows(
         }));
     }
 
-    if vendor != "claude" && vendor != "codex" {
+    if !["claude", "codex", "gemini"].contains(&vendor) {
         let detail = format!("Unsupported vendor: {vendor}");
         notify(progress, "failed", Some(("error.setup.unsupported", &detail)));
         return Err(json!({
@@ -367,6 +378,10 @@ pub async fn install_windows(
 
     // Stage: prerequisite
     notify(progress, "prerequisite", None);
+
+    if vendor == "gemini" {
+        return install_agy(request, arch, &check_url, fetch, download, spawn, progress, &destination, &download_dir).await;
+    }
 
     let claude_base = request["sources"]["claude_base"].as_str().unwrap_or("https://downloads.claude.ai/claude-code-releases");
     let codex_release = request["sources"]["codex_release"].as_str().unwrap_or("https://api.github.com/repos/openai/codex/releases/latest");
@@ -697,6 +712,130 @@ pub async fn install_windows(
             "command": dest_file.to_string_lossy(),
             "prefix": []
         }))
+    }
+}
+
+/// Antigravity's CLI, the way its official installer does it: the manifest of this platform, the binary it names checked
+/// against the manifest's SHA-512, copied to `destination` as `agy.exe`, then `agy.exe install` for PATH and shell settings.
+/// Like the official script, a failed `agy.exe install` does not fail the install: the binary is in place and Faber finds it
+/// in that folder without PATH.
+#[allow(clippy::too_many_arguments)]
+async fn install_agy(
+    request: &Value,
+    arch: &str,
+    check_url: &(dyn Fn(&str) -> Result<(), String> + Sync),
+    fetch: &Fetch<'_>,
+    download: &Download<'_>,
+    spawn: Spawner,
+    progress: &Progress<'_>,
+    destination: &Path,
+    download_dir: &Path,
+) -> Result<Value, Value> {
+    let base =
+        request["sources"]["agy_base"].as_str().map_or(format!("https://{AGY_MANIFEST_HOST}"), |b| b.trim_end_matches('/').to_string());
+    let platform = match arch {
+        "x86_64" | "x64" => "windows_amd64",
+        "arm64" | "aarch64" => "windows_arm64",
+        _ => return Err(failure(progress, "error.setup.unsupported", format!("Unsupported Windows architecture: {arch}"))),
+    };
+    let manifest_url = format!("{base}/manifests/{platform}.json");
+    check_url(&manifest_url).map_err(|err| failure(progress, "error.setup.download", err))?;
+    let exe = destination.join("agy.exe");
+    // As the official script does: an agy.exe already there updates itself, and may be running, so it is left alone.
+    if exe.is_file() {
+        notify(progress, "done", None);
+        return Ok(json!({ "command": exe.to_string_lossy(), "prefix": [] }));
+    }
+    for dir in [destination, download_dir] {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| failure(progress, "reason.setup.write", format!("Failed to create {}: {e}", dir.display())))?;
+    }
+
+    // Stage: download
+    notify(progress, "download", None);
+    let bytes = fetch(&manifest_url)
+        .map_err(|e| failure(progress, download_reason(&e), format!("Failed to fetch the Antigravity manifest: {e}")))?;
+    let manifest: Value = serde_json::from_slice(&bytes)
+        .map_err(|e| failure(progress, "error.setup.download", format!("Failed to parse the Antigravity manifest: {e}")))?;
+    let (version, url, sha512) = (manifest["version"].as_str(), manifest["url"].as_str(), manifest["sha512"].as_str());
+    let (Some(version), Some(url), Some(sha512)) = (version, url, sha512) else {
+        return Err(failure(
+            progress,
+            "error.setup.download",
+            format!("The Antigravity manifest lacks version, url or sha512: {manifest}"),
+        ));
+    };
+    // the version names a file in the staging folder, and a hash that is not 128 hex digits could match nothing real
+    if !valid_version(version) || sha512.len() != 128 || !sha512.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(failure(progress, "error.setup.download", format!("Unexpected Antigravity manifest: {manifest}")));
+    }
+    check_url(url).map_err(|err| failure(progress, "error.setup.download", err))?;
+    if !reqwest::Url::parse(url).is_ok_and(|u| u.path().starts_with(AGY_PAYLOAD_PATH)) {
+        return Err(failure(progress, "error.setup.download", format!("The Antigravity binary is outside {AGY_PAYLOAD_PATH}: {url}")));
+    }
+    let part = download_dir.join(format!("agy-{version}-{platform}.exe.part"));
+    download_payload(download, url, &part, "Antigravity CLI", progress)?;
+
+    // Stage: verify
+    notify(progress, "verify", None);
+    let got = sha512_of(&part).map_err(|e| {
+        let _ = std::fs::remove_file(&part);
+        failure(progress, "reason.setup.write", format!("Failed to read the Antigravity download: {e}"))
+    })?;
+    verify_payload(&part, &got, sha512, "Antigravity CLI", progress)?;
+
+    // Stage: install
+    notify(progress, "install", None);
+    // Never over an agy.exe that appeared meanwhile: it may be running.
+    let placed = std::fs::OpenOptions::new().write(true).create_new(true).open(&exe).and_then(|mut file| {
+        let copied = std::fs::File::open(&part).and_then(|mut from| io::copy(&mut from, &mut file));
+        drop(file);
+        if copied.is_err() {
+            let _ = std::fs::remove_file(&exe);
+        }
+        copied
+    });
+    if let Err(e) = placed {
+        let _ = std::fs::remove_file(&part);
+        return Err(failure(progress, "error.setup.install", format!("Failed to place agy.exe: {e}")));
+    }
+    let _ = std::fs::remove_file(&part);
+    let Some(exe_str) = exe.to_str() else {
+        return Err(failure(progress, "error.setup.install", "Invalid path encoding for agy.exe".into()));
+    };
+    if let Ok(mut proc) = spawn(exe_str, &["install".to_string()], destination) {
+        // Nothing is typed into it: a question it asks reads the end of input instead of waiting.
+        drop(std::mem::replace(&mut proc.stdin, Box::new(tokio::io::sink())));
+        let run = async {
+            let (mut out, mut err) = (tokio::io::sink(), tokio::io::sink());
+            let drain_err = async {
+                if let Some(e) = proc.stderr.as_mut() {
+                    let _ = tokio::io::copy(e, &mut err).await;
+                }
+            };
+            let _ = tokio::join!(tokio::io::copy(&mut proc.stdout, &mut out), drain_err);
+            if let Some(child) = proc.child.as_mut() {
+                let _ = child.wait().await;
+            }
+        };
+        // Past the limit the process is dropped, which ends it with its job.
+        let _ = tokio::time::timeout(AGY_SETUP_LIMIT, run).await;
+    }
+    if !exe.is_file() {
+        return Err(failure(progress, "error.setup.install", format!("agy.exe was not found at {}", exe.display())));
+    }
+    notify(progress, "done", None);
+    Ok(json!({ "command": exe.to_string_lossy(), "prefix": [] }))
+}
+
+fn sha512_of(path: &Path) -> io::Result<String> {
+    use std::io::Read;
+    let (mut file, mut hasher, mut buf) = (std::fs::File::open(path)?, Sha512::new(), vec![0; 64 * 1024]);
+    loop {
+        match file.read(&mut buf)? {
+            0 => return Ok(crate::hex(&hasher.finalize())),
+            n => hasher.update(&buf[..n]),
+        }
     }
 }
 

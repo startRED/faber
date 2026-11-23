@@ -359,12 +359,13 @@ impl Ctx {
         })
     }
 
-    /// Starts the fake release server. The program it serves is a copy of the fake CLI, zipped like the real asset.
+    /// Starts the fake release server. The program it serves is a copy of the fake CLI, zipped like the real asset, and
+    /// as is for Antigravity.
     pub fn serve_release(&mut self) -> Result<(), String> {
         let payload = std::fs::read(&self.paths.fake_cli).map_err(|e| format!("{}: {e}", self.paths.fake_cli.display()))?;
         let inner = ASSET.trim_end_matches(".zip");
         let archive = zip_of(inner, &payload).map_err(|e| e.to_string())?;
-        self.server = Some(Server::start(archive).map_err(|e| format!("cannot start the release server: {e}"))?);
+        self.server = Some(Server::serving(archive, payload.clone()).map_err(|e| format!("cannot start the release server: {e}"))?);
         self.payload = payload;
         Ok(())
     }

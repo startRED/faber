@@ -78,6 +78,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/cli-qualification.md](dev/cli-qualification.md) | Nightly unauthenticated CLI candidate contracts, bounded metadata receipts and missing compatibility evidence |
 | [dev/plan-boundary-qualification.md](dev/plan-boundary-qualification.md) | Task 500 approval-layer size admission, recorded coverage and ungated observations |
 | [dev/antigravity-cli.md](dev/antigravity-cli.md) | How the Antigravity CLI behaves, recorded: output events, approval, resume, isolation, MCP, quota |
+| [dev/antigravity-install.md](dev/antigravity-install.md) | How Antigravity installs its CLI, read from its own installer, and how Faber does the same |
 | [dev/build-folders.md](dev/build-folders.md) | Build-cache cleanup, disk budget and preserving exact proof artifacts |
 | [dev/fair-bench.md](dev/fair-bench.md) | The fair benchmark against TL-ADE: the meter, the suite and real-work tiers, the notes |
 | [dev/release-1.0.md](dev/release-1.0.md) | Before cutting 1.0: the release checklist |

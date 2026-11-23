@@ -1,8 +1,9 @@
 //! A minimal loopback HTTP server that plays the part of the release host for the setup scenarios: the release
-//! description and one zipped program. Anything else that is asked for is written down as unexpected.
+//! description and one zipped program, and Antigravity's manifest and the program it names. Anything else that is asked
+//! for is written down as unexpected.
 
 use serde_json::json;
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha512};
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,6 +13,9 @@ use std::time::Duration;
 
 /// The asset the engine looks for on Windows x86-64.
 pub const ASSET: &str = "codex-x86_64-pc-windows-msvc.exe.zip";
+
+/// Where Antigravity's manifest sends the download, inside the folder the engine accepts.
+pub const AGY_PROGRAM: &str = "/antigravity-public/antigravity-cli/1.0.0-replay/windows-x64/cli_windows_x64.exe";
 
 /// A zip holding one file, like the official release asset.
 pub fn zip_of(name: &str, payload: &[u8]) -> io::Result<Vec<u8>> {
@@ -37,6 +41,11 @@ pub struct Server {
 impl Server {
     /// Serves `archive` (a zip) as the latest release.
     pub fn start(archive: Vec<u8>) -> io::Result<Server> {
+        Self::serving(archive, Vec::new())
+    }
+
+    /// Serves `archive` as the latest release and `program` as Antigravity's CLI, with a manifest per Windows platform.
+    pub fn serving(archive: Vec<u8>, program: Vec<u8>) -> io::Result<Server> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
         listener.set_nonblocking(true)?;
         let origin = format!("http://127.0.0.1:{}", listener.local_addr()?.port());
@@ -46,16 +55,18 @@ impl Server {
             "assets": [{ "name": ASSET, "browser_download_url": format!("{origin}/codex.zip"), "digest": format!("sha256:{digest}") }],
         })
         .to_string();
+        let manifest = json!({ "version": "1.0.0-replay", "url": format!("{origin}{AGY_PROGRAM}"), "sha512": faber_engine::hex(&Sha512::digest(&program)) })
+            .to_string();
         let (log, stop) = (Arc::new(Mutex::new(Log::default())), Arc::new(AtomicBool::new(false)));
         let (thread_log, thread_stop) = (log.clone(), stop.clone());
         let thread = std::thread::spawn(move || {
-            let (archive, release) = (Arc::new(archive), Arc::new(release));
+            let files = Arc::new(Files { archive, release, program, manifest });
             while !thread_stop.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((stream, peer)) => {
-                        let (log, archive, release) = (thread_log.clone(), archive.clone(), release.clone());
+                        let (log, files) = (thread_log.clone(), files.clone());
                         std::thread::spawn(move || {
-                            let _ = answer(stream, peer, &log, &archive, &release);
+                            let _ = answer(stream, peer, &log, &files);
                         });
                     }
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
@@ -90,7 +101,14 @@ impl Drop for Server {
     }
 }
 
-fn answer(mut stream: TcpStream, peer: SocketAddr, log: &Mutex<Log>, archive: &[u8], release: &str) -> io::Result<()> {
+struct Files {
+    archive: Vec<u8>,
+    release: String,
+    program: Vec<u8>,
+    manifest: String,
+}
+
+fn answer(mut stream: TcpStream, peer: SocketAddr, log: &Mutex<Log>, files: &Files) -> io::Result<()> {
     stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
@@ -110,8 +128,10 @@ fn answer(mut stream: TcpStream, peer: SocketAddr, log: &Mutex<Log>, archive: &[
         }
     }
     let (status, kind, body): (&str, &str, &[u8]) = match path.as_str() {
-        "/releases/latest" | "/" => ("200 OK", "application/json", release.as_bytes()),
-        "/codex.zip" => ("200 OK", "application/zip", archive),
+        "/releases/latest" | "/" => ("200 OK", "application/json", files.release.as_bytes()),
+        "/codex.zip" => ("200 OK", "application/zip", &files.archive),
+        "/manifests/windows_amd64.json" | "/manifests/windows_arm64.json" => ("200 OK", "application/json", files.manifest.as_bytes()),
+        AGY_PROGRAM if !files.program.is_empty() => ("200 OK", "application/octet-stream", &files.program),
         _ => {
             log.lock().unwrap_or_else(|e| e.into_inner()).unexpected.push(path);
             ("404 Not Found", "text/plain", b"not found")
@@ -154,6 +174,18 @@ mod tests {
         assert!(head.starts_with("HTTP/1.1 404"), "{head}");
         assert_eq!(server.requests(), ["/releases/latest", "/codex.zip", "/somewhere/else"]);
         assert_eq!(server.unexpected(), ["/somewhere/else"]);
+        server.stop();
+    }
+
+    #[test]
+    fn it_serves_antigravity_s_manifest_and_the_program_it_names_with_its_sha512() {
+        let mut server = Server::serving(b"zip".to_vec(), b"MZ agy".to_vec()).unwrap();
+        let (_, body) = get(&server.origin, "/manifests/windows_amd64.json");
+        let manifest: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(manifest["url"], format!("{}{AGY_PROGRAM}", server.origin));
+        assert_eq!(manifest["sha512"], faber_engine::hex(&Sha512::digest(b"MZ agy")));
+        assert_eq!(get(&server.origin, AGY_PROGRAM).1, b"MZ agy");
+        assert!(server.unexpected().is_empty());
         server.stop();
     }
 
