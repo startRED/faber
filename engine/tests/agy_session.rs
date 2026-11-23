@@ -140,8 +140,14 @@ async fn family_and_effort(wire: &mut Wire, model: &str, effort: &str) {
 }
 
 async fn default_startup(wire: &mut Wire) {
-    family_and_effort(wire, "gemini-4-hydrogen", "medium").await;
+    select_variant(wire, "gemini-4-hydrogen-medium").await;
     default_mode(wire).await;
+}
+
+async fn select_variant(wire: &mut Wire, model: &str) {
+    let req = support::expect_method(&mut wire.0, "session/set_model").await;
+    assert_eq!(req["params"]["modelId"], model);
+    support::emit(&mut wire.1, json!({"jsonrpc":"2.0","id":req["id"],"result":{}})).await;
 }
 
 async fn default_mode(wire: &mut Wire) {
@@ -298,7 +304,7 @@ async fn auto_routes_to_antigravity(only_antigravity: bool) {
     let id = send_auto(&engine, prompt_text(&recording)).unwrap();
     let mut wire = (input, output);
     handshake(&mut wire, &recording, None, response(&recording, 2), false).await;
-    family_and_effort(&mut wire, "gemini-4-hydrogen", "low").await;
+    select_variant(&mut wire, "gemini-4-hydrogen-low").await;
     default_mode(&mut wire).await;
     replay_turn(&mut wire, &recording, None).await;
     let reply = settled(&engine, &id).await;
@@ -671,6 +677,58 @@ async fn agy_project_tools_follow_permissions_and_write_the_projects_plan() {
 }
 
 #[tokio::test]
+async fn agy_returns_a_missing_plan_to_the_agent_without_waiting_for_the_person() {
+    let dir = DataFolder::new();
+    let (engine, mut wire) = start(&dir, Permissions::FullAccess);
+    let folder = tempfile::tempdir().unwrap();
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+    let id = engine
+        .send(SendRequest {
+            conversation_id: None,
+            area: Area::Project,
+            project_id: Some(project.id),
+            text: "Inspect the project".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "gemini".into(), model: None, effort: None },
+        })
+        .unwrap();
+    let recording = entries("plain");
+    let opened = response(&recording, 2);
+    let session = opened["result"]["sessionId"].clone();
+    support::expect_method(&mut wire.0, "initialize").await;
+    support::emit(&mut wire.1, response(&recording, 1)).await;
+    support::expect_method(&mut wire.0, "session/new").await;
+    support::emit(&mut wire.1, opened).await;
+    default_startup(&mut wire).await;
+    support::expect_method(&mut wire.0, "session/prompt").await;
+    let outside = folder.path().with_extension("outside");
+    let ask = |id: &str| {
+        json!({
+            "jsonrpc":"2.0","id":id,"method":"session/request_permission",
+            "params":{"sessionId":session, "toolCall":{"toolCallId":id,"name":"Read","kind":"read","rawInput":{"Path":outside}},
+                "options":[{"optionId":"allow","kind":"allow_once"},{"optionId":"deny","kind":"reject_once"}]}
+        })
+    };
+    support::emit(&mut wire.1, ask("outside")).await;
+    let refused = tokio::time::timeout(Duration::from_secs(2), support::read_message(&mut wire.0))
+        .await
+        .expect("the agent should receive the refusal without waiting for a click");
+    assert_eq!(refused["result"]["outcome"]["optionId"], "deny");
+    let saved = engine.open(&id).unwrap();
+    assert_eq!(saved.queued.len(), 1);
+    assert_eq!(saved.queued[0].wake.as_ref().unwrap().why, "wake.planContract");
+    assert!(saved.queued[0].text.contains("plan tool"));
+    support::emit(&mut wire.1, ask("again")).await;
+    support::until("a repeated hold should still be visible", || {
+        engine.open(&id).unwrap().messages.last().unwrap().permissions.iter().flatten().any(|p| p.request_id.ends_with("again"))
+    })
+    .await;
+    assert_eq!(engine.open(&id).unwrap().queued.len(), 1, "the same request cannot queue repeated retries");
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn agy_declines_a_question_it_cannot_show() {
     let dir = DataFolder::new();
     let (engine, mut wire) = start(&dir, Permissions::Ask);
@@ -747,22 +805,42 @@ async fn agy_refuses_credential_path_through_junction() {
 
 #[tokio::test]
 async fn agy_sets_listed_model_or_family_and_effort_before_prompt() {
-    for model in ["gemini-3.8-flash-low", "gemini-3.8-flash"] {
+    for (model, listed) in [("gemini-3.8-flash-low", true), ("gemini-3.8-flash", true), ("gemini-3.8-flash", false)] {
         let dir = DataFolder::new();
         let (engine, mut wire) = start(&dir, Permissions::Ask);
         let recording = entries("plain");
         let id = send_with_model(&engine, None, prompt_text(&recording), Some(model));
-        handshake(&mut wire, &recording, None, response(&recording, 2), false).await;
-        if model.ends_with("-low") {
-            let req = support::expect_method(&mut wire.0, "session/set_model").await;
-            assert_eq!(req["params"]["modelId"], model);
-            support::emit(&mut wire.1, json!({"jsonrpc":"2.0","id":req["id"],"result":{}})).await;
+        let mut opened = response(&recording, 2);
+        if !listed {
+            opened["result"]["models"]["availableModels"] = Value::Null;
+        }
+        handshake(&mut wire, &recording, None, opened, false).await;
+        if listed {
+            select_variant(&mut wire, if model.ends_with("-low") { model } else { "gemini-3.8-flash-medium" }).await;
         } else {
             family_and_effort(&mut wire, model, "medium").await;
         }
         default_mode(&mut wire).await;
         replay_turn(&mut wire, &recording, None).await;
-        assert_eq!(settled(&engine, &id).await.text.trim(), "pong");
+        let reply = settled(&engine, &id).await;
+        assert_eq!(reply.text.trim(), "pong");
+        assert_eq!(reply.effort.as_deref(), Some(if model.ends_with("-low") { "low" } else { "medium" }));
         engine.shutdown();
     }
+}
+
+#[tokio::test]
+async fn agy_never_sends_a_prompt_when_the_selected_variant_is_refused() {
+    let dir = DataFolder::new();
+    let (engine, mut wire) = start(&dir, Permissions::Ask);
+    let recording = entries("plain");
+    let id = send_with_model(&engine, None, "Do not run this prompt", Some("gemini-4-neon"));
+    handshake(&mut wire, &recording, None, response(&recording, 2), false).await;
+    let select = support::expect_method(&mut wire.0, "session/set_model").await;
+    assert_eq!(select["params"]["modelId"], "gemini-4-neon-medium");
+    support::emit(&mut wire.1, json!({"jsonrpc":"2.0","id":select["id"],"error":{"code":-32602,"message":"Unsupported model"}})).await;
+    assert_eq!(settled(&engine, &id).await.status, Some(Status::Error));
+    let mut line = String::new();
+    assert_eq!(tokio::time::timeout(support::DEADLINE, wire.0.read_line(&mut line)).await.unwrap().unwrap(), 0);
+    engine.shutdown();
 }

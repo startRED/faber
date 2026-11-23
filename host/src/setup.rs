@@ -106,22 +106,31 @@ pub(crate) async fn check(h: &Host, vendor: String) -> Res<CheckResult> {
         let Some(cli) = cli else {
             // Gone since the last check: no longer connected, so its limits and billing are not shown or trusted.
             h.engine.note_antigravity_account(AccountStatus::SignedOut, None);
-            if was_connected {
+            let models_cleared = lock(&h.antigravity_models).take().is_some();
+            if was_connected || models_cleared {
                 h.announce(&AppEvent::List);
             }
             return Ok(CheckResult { vendor: v, installed: false, account: AccountStatus::Unknown, can_install: cfg!(windows) });
         };
         // The check opens an empty session, which the CLI lists under this folder: it stays inside Faber's data folder.
         let scratch = h.data_dir.join("agy-check");
-        let (account, plan) = match std::fs::create_dir_all(&scratch) {
+        let (account, plan, models) = match std::fs::create_dir_all(&scratch) {
             Ok(()) => {
                 faber_engine::account::antigravity_account(&cli, &faber_engine::proc::real_spawner(), &scratch, SIGN_IN_TIMEOUT).await
             }
-            Err(_) => (AccountStatus::Unknown, None),
+            Err(_) => (AccountStatus::Unknown, None, None),
         };
         // The plan comes with the same answer, so the limits learn it without a second process.
         h.engine.note_antigravity_account(account, plan);
-        if was_connected != h.engine.vendors().contains(&v) {
+        let models_changed = if account == AccountStatus::Unknown {
+            false
+        } else {
+            let mut held = lock(&h.antigravity_models);
+            let changed = *held != models;
+            *held = models;
+            changed
+        };
+        if models_changed || was_connected != h.engine.vendors().contains(&v) {
             h.announce(&AppEvent::List);
         }
         return Ok(CheckResult { vendor: v, installed: true, account, can_install: cfg!(windows) });

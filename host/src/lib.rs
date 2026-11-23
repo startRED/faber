@@ -379,6 +379,7 @@ impl Wiring {
             hidden,
             runtime,
             models: Arc::default(),
+            antigravity_models: Mutex::default(),
             loading_models: Arc::default(),
             pane: OnceLock::new(),
             asks: Mutex::default(),
@@ -399,6 +400,7 @@ pub struct Host {
     pub runtime: Handle,
     /// ChatGPT models this account can use; empty until the Codex CLI answers.
     models: Arc<Mutex<Vec<ModelInfo>>>,
+    antigravity_models: Mutex<Option<Vec<ModelInfo>>>,
     /// Set while Codex is being asked for its limits and models, which starts two Codex processes: one asking at a time is
     /// enough.
     loading_models: Arc<AtomicBool>,

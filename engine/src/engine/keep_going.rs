@@ -233,7 +233,7 @@ fn empty_keep_going_reply(c: &Conversation, at: usize) -> bool {
 
 /// The first choice of every question of an `AskUserQuestion` call, the way the screen answers it (each question's text to the
 /// label picked), and what to write on the reply. None when a question has no choices: only the person can answer that one.
-fn first_choices(input: &serde_json::Value) -> Option<(serde_json::Value, Vec<AutoAnswer>)> {
+pub(super) fn first_choices(input: &serde_json::Value) -> Option<(serde_json::Value, Vec<AutoAnswer>)> {
     let mut answers = serde_json::Map::new();
     let mut chosen = vec![];
     for q in input.get("questions")?.as_array()? {

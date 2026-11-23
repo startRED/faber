@@ -87,11 +87,9 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   The model picker refresh shares one isolated Codex process with this account reading. The account and limits update as
   soon as those two requests settle, even if the model list is still waiting; a reply received before the deadline is kept
   if another request fails or never answers.
-- Antigravity has a card in Accounts and limits only once its CLI (`agy`) is found. It is named "Antigravity" (Gemini is
-  one of its models), says the plan it runs on in one line and shows whether it is connected. Once its check finds it signed
-  in, the card also shows the plan its tier names, the no-reading state (no bars: no quota number exists) and Faber's own
-  spend, as the other cards do without a reading ([quota-pacing.md](../product/quota-pacing.md#antigravity)); it still
-  does not answer (R531). Its sign-in state is asked as on the first run (see first-run.md).
+- Antigravity has a card in Accounts and limits when connected. It shows the tier name and the same quota bars as the
+  other accounts, labeled with their shared model group and reset window. The sidebar shows its tightest live window and
+  names the others in the tooltip. A CLI without a valid quota reading still shows the existing no-reading state.
 - Accounts and limits has one card per AI (the former Connected accounts and Usage limits, one section): its mark, name,
   the plan with its first letter capital, and one status word in a pill that is amber only when a window is really near
   its limit (C002; fast use is said calmly). Then one row per quota window the vendor has reported (name, used share, a

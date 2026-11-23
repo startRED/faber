@@ -217,8 +217,8 @@ impl Core {
             // Return to the agent to state the contract and retry, never allow the held action with a question answer.
             let instruction = "Faber held this action for the plan contract. State size and contract (extends or new_because, and proof) with the plan tool, then retry. This does not grant permission for the action.";
             let (sid, session, vendor) = (live.sid, live.session.clone(), live.vendor);
-            // Codex approvals carry only accept/decline. Its instruction uses the durable wake queue, not an untracked steer.
-            if allow && vendor == Vendor::Codex {
+            // Codex and Antigravity approvals carry only the decision. Give the agent the reason through the durable wake.
+            if allow && vendor != Vendor::Claude {
                 self.send_by_itself(conv, instruction.into(), crate::model::Wake::of("wake.planContract"))?;
             }
             let ack = session.answer_with(request_id, false, allow.then(|| serde_json::json!({"planContract": instruction})));

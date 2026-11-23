@@ -739,6 +739,7 @@ export interface AppState {
   settings: Settings;
   look: Look;
   models: ModelInfo[];
+  antigravityModels?: ModelInfo[];
   running: RunningList;
   background?: BackgroundList;
   quotas: QuotaReading[];

@@ -56,6 +56,7 @@ interface Props {
   /** The vendors that are connected. */
   vendors: Vendor[];
   models?: ModelInfo[];
+  antigravityModels?: ModelInfo[];
   quotas: Quotas;
   usage?: VendorUsage[];
   /** The projects Faber knows, each with its own settings. */
@@ -105,7 +106,7 @@ let lastSection: Section = 'general';
 export const forgetSection = (): void => { lastSection = 'general'; };
 
 export function Settings(props: Props) {
-  const defaultOptions = createMemo(() => modelOptions(props.vendors, props.models));
+  const defaultOptions = createMemo(() => modelOptions(props.vendors, props.models, props.antigravityModels));
   const [section, setSectionNow] = createSignal<Section>(props.start ?? lastSection);
   const setSection = (id: Section) => { hookRequest++; setHookLines([]); lastSection = id; setSectionNow(id); };
   if (props.start) lastSection = props.start;

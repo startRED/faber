@@ -577,16 +577,69 @@ fn antigravity_usage(engine: &Engine) -> Option<faber_engine::usage::VendorUsage
 }
 
 #[tokio::test]
+async fn antigravity_reads_separate_model_group_limits_without_a_model_turn() {
+    let dir = support::DataFolder::new();
+    let now = 2_000_000_000;
+    let reset = chrono::DateTime::from_timestamp(now + 3600, 0).unwrap().to_rfc3339();
+    let reply = json!({
+        "status": "SUCCESS", "conversation_id": "", "num_turns": 0,
+        "usage": {"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0},
+        "command": {"name":"usage","data":{"groups":[
+            {"buckets":[{"id":"gemini-5h","window":"5h","remaining_fraction":0.42,"reset_time":reset}]},
+            {"buckets":[{"id":"3p-5h","window":"5h","remaining_fraction":0.81,"reset_time":reset}]}
+        ]}}
+    })
+    .to_string();
+    let spawn: Spawner = Arc::new(move |_, args, _| {
+        let out = match args {
+            [version] if version == "--version" => "1.5.14\n",
+            [p, usage, ..] if p == "-p" && usage == "/usage" => &reply,
+            _ => return Err(std::io::Error::other("only the version and quota commands are expected")),
+        };
+        let (input, _discard) = tokio::io::duplex(1);
+        Ok(Proc {
+            stdin: Box::new(input),
+            stdout: Box::new(std::io::Cursor::new(out.as_bytes().to_vec())),
+            stderr: None,
+            child: None,
+            contained: None,
+        })
+    });
+    let (engine, _) = engine(&dir, BTreeMap::from([(Vendor::Gemini, Cli { command: "agy".into(), prefix: vec![] })]), spawn);
+    engine.set_time_source(Arc::new(move || now as f64));
+    engine.note_antigravity_account(
+        faber_engine::account::AccountStatus::SignedIn,
+        Some(faber_engine::signals::antigravity_plan(&recorded_session("acct-signed-in")["result"])),
+    );
+    engine.set_utc_offset(0);
+    engine.watch_accounts();
+    support::until("Antigravity never published its model quotas", || engine.quota_view().0.len() == 2).await;
+    let readings = engine.ledger().gemini.zero_turn_readings;
+    assert_eq!(readings["five_hour_agy_gemini"].used, 0.58);
+    assert_eq!(readings["five_hour_agy_3p"].used, 0.19);
+    assert_eq!(readings["five_hour_agy_gemini"].resets_at, (now + 3600) as f64);
+    assert_eq!(antigravity_usage(&engine).unwrap().windows.len(), 2);
+    engine.note_antigravity_account(faber_engine::account::AccountStatus::SignedOut, None);
+    assert!(engine.quota_view().0.is_empty());
+    assert!(engine.ledger().gemini.zero_turn_readings.is_empty());
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn antigravity_recorded_tier_confirms_subscription_billing_and_an_unknown_tier_does_not() {
     let cli = Cli { command: r"C:\Users\Example User\AppData\Local\agy\bin\agy.exe".into(), prefix: vec![] };
     let (spawn, calls, _) = acp_spawner("acct-signed-in", false);
-    let (status, plan) = faber_engine::account::antigravity_account(
+    let (status, plan, models) = faber_engine::account::antigravity_account(
         &cli,
         &spawn,
         std::path::Path::new(r"C:\Faber data\agy-check"),
         Duration::from_millis(300),
     )
     .await;
+    let models = models.expect("the same sign-in check supplies the model list");
+    assert_eq!(models.len(), 23);
+    assert!(models.iter().any(|m| m.id == "claude-opus-5-5-low" && m.label == "Claude Opus 5.5 (Low)"));
+    assert!(models.iter().any(|m| m.id == "gemini-4-neon-high" && m.is_default));
     assert_eq!(calls.lock().unwrap().len(), 1, "the plan comes with the sign-in check: no second process");
     let dir = crate::support::DataFolder::new();
     let (engine, _clock) = antigravity_engine(&dir, 2_000_000_000.0);

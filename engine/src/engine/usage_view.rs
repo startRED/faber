@@ -20,7 +20,7 @@ impl Core {
     pub(super) fn usage(&self) -> Vec<VendorUsage> {
         let now = self.secs();
         let day = ((now + self.utc_offset as f64) / 86_400.0).floor() as i64;
-        // The account view can show a confirmed Antigravity tier before a CLI refresh. It has no quota reading.
+        // The account view can show a confirmed Antigravity tier before a CLI refresh or quota reading.
         let connected = self.ledger.gemini.plan_seen_at.is_some().then_some(Vendor::Gemini);
         self.vendors()
             .into_iter()
@@ -99,7 +99,7 @@ impl Engine {
         self.with(|c| c.antigravity_checked(status, plan))
     }
     /// A turn of Antigravity ended with its CLI's out-of-quota error: out until the reset the error names, or for
-    /// `AGY_BACKOFF` when it names none or one already past. Antigravity has no reading that could show room sooner.
+    /// `AGY_BACKOFF` when it names none or one already past. Model group readings cannot clear a whole-account error.
     pub fn note_antigravity_out(&self, resets_at: Option<f64>) {
         self.with(|c| c.antigravity_out(resets_at))
     }
@@ -128,6 +128,9 @@ impl Core {
             }
             (AccountStatus::SignedOut, _) => {
                 v.plan_seen_at = None;
+                v.readings.clear();
+                v.zero_turn_readings.clear();
+                self.quotas.retain(|(vendor, _), _| *vendor != Vendor::Gemini);
                 self.apply_signals(Vendor::Gemini, Signals { billing: Some(Billing::Unknown), ..Signals::default() });
             }
             _ => v.plan_failed(),

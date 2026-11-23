@@ -82,7 +82,7 @@ Both vendors' counters are read by commands that answer locally, so a reading co
 When it is read (`engine-core/src/cadence.rs`, tested with a fake clock): on start, then every 15 minutes whether the window is
 visible or hidden (the owner’s ceiling is a reading never more than 30 minutes old). A vendor still counting Faber's own use
 (a turn of it running, or work that ended in the last 30 minutes and is not counted yet) is read after its debounce gap
-instead of the 15 minutes, and only when a live reading is older than that gap, so a turn whose own stream keeps the readings
+instead of the 15 minutes, when a known window expires or its reading is older than that gap, so a turn whose own stream keeps the readings
 fresh starts none (R580). The 30 minutes bound an account whose readings keep failing and never settle.
 A turn that runs for hours is read at the gap for as long as it runs. With no turn running, a Faber whose last request
 ended more than 30 minutes ago reads no more often than before. Three things may ask for an earlier
@@ -122,25 +122,15 @@ Settings alike.
 
 ### Antigravity
 
-Recorded on agy 1.5.14 (2026-11-22/23, [antigravity-cli.md](../dev/antigravity-cli.md) items 8 and 12 of "Over ACP").
+The ACP account check reads the plan from `session/new` without calling a model. Google AI Pro and Ultra confirm
+subscription billing. An unknown tier leaves billing unconfirmed and Auto applies its ordinary subscription gate.
 
-Known: the plan. The answer to `session/new` carries `_meta.antigravity.tier` (name and id) with no model call, and the account
-check that already opens one session for the sign-in state keeps it, so no second process runs. Tier `g1-pro-tier` (Google AI
-Pro, recorded) and `g1-ultra-tier` (Google AI Ultra, assumed, not recorded) confirm billing as a subscription; any other tier
-(the free plan, an API key, one not seen yet) or none leaves it unconfirmed, and Auto refuses unconfirmed billing as for the
-other two. Settings shows the tier's name as the plan. Billing is rechecked each run: until the accounts cards check again (or a
-later driver's own session reports the tier), it is unconfirmed.
-
-Not known: any quota number. No zero-token reading exists in the CLI or over ACP (`usage_update` is the context window only),
-and Faber never starts a model turn only to measure. Antigravity therefore has "no confirmed reading": the `quota` tool says
-"no reading yet" with Faber's own spend on it, and Settings' whole-account bars show the no-reading state.
-
-Pace without a reading: the quota
-gate passes it when connected with confirmed subscription billing, with the neutral weight of an AI that has room (never
-preferred or avoided by pace), and only Faber's own spend counts. Its driver, still to come, will report the CLI's
-out-of-quota error through `Engine::note_antigravity_out`, which marks it out until the reset the error names, or for one hour
-(`AGY_BACKOFF`) when it names none or one already past; while out the gate refuses it and Settings shows "out". One hour
-because no reading can show room sooner, and a retry costs at most one refused turn.
+Antigravity 1.5.14 and later stable 1.x releases support the official structured `agy -p /usage --output-format json`
+command. Faber checks the version first, accepts only a successful local command with no conversation, turns or tokens,
+and keeps the known model-group buckets with valid shares and future resets. Unavailable, disabled or unrecognized
+buckets supply no number. The sidebar shows the tightest live group for Antigravity, and Accounts and limits names each
+reported group and window. No group is treated as an account-wide limit. The driver still reports exhaustion separately,
+until the reported reset or for one hour (`AGY_BACKOFF`) if no future reset was named.
 
 ### Quota lag, measured
 

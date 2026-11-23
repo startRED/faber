@@ -284,8 +284,13 @@ pub fn start(opts: AgyOptions, servers: &[Launch], mut on_event: crate::claude::
                             }
                             if let Some(model) = opts.model.as_deref().filter(|model| !model.is_empty()) {
                                 next_id += 1;
-                                if msg["result"]["models"]["availableModels"].as_array().into_iter().flatten().any(|m| m["modelId"] == model) {
-                                    startup.push_back(set_model(next_id, reader.session(), model));
+                                let variant = format!("{model}-{}", opts.effort);
+                                let available = msg["result"]["models"]["availableModels"].as_array();
+                                let exact = [model, variant.as_str()].into_iter().find(|id| {
+                                    available.into_iter().flatten().any(|m| m["modelId"] == *id)
+                                });
+                                if let Some(exact) = exact {
+                                    startup.push_back(set_model(next_id, reader.session(), exact));
                                 } else {
                                     startup.push_back(set_config_option(next_id, reader.session(), "model", model));
                                     next_id += 1;

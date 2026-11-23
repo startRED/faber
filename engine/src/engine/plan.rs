@@ -82,11 +82,24 @@ impl Core {
         if self.convs.get(conv).and_then(|c| c.plan.as_ref()).is_some_and(|p| p.covers(size)) {
             return false;
         }
+        // Full access still holds the action. Return the missing planning work to Antigravity once per human request.
+        let automatic = self.live.get(conv).is_some_and(|l| l.vendor == Vendor::Gemini && l.permissions == Permissions::FullAccess)
+            && self.convs.get(conv).is_some_and(|c| {
+                let is_plan_wake = |wake: &Wake| wake.why == "wake.planContract";
+                !c.queued.iter().any(|q| q.wake.as_ref().is_some_and(is_plan_wake))
+                    && !c
+                        .messages
+                        .iter()
+                        .rev()
+                        .take_while(|m| m.role != Role::User || m.wake.is_some())
+                        .any(|m| m.wake.as_ref().is_some_and(is_plan_wake))
+            });
         let card = serde_json::json!({
             "planBoundary": {"tool": tool, "input": input},
             "questions": [{"question": "plan.contractQuestion", "header": "plan.label", "multiSelect": false,
                 "options": [{"label": "plan.stateContract", "description": "plan.contractDefault"}]}]
         });
+        let first = automatic.then(|| super::keep_going::first_choices(&card)).flatten();
         let turn = if let Some(m) = self.turn(conv) {
             let list = m.permissions.get_or_insert_default();
             list.retain(|p| p.request_id != request);
@@ -98,8 +111,12 @@ impl Core {
         self.save(conv);
         if let Some(turn) = turn {
             self.weigh(conv);
-            self.watch_question(conv, &turn, request);
             self.push(conv, Some(&turn), true);
+            if let Some((answers, chosen)) = first {
+                self.answer_unattended(conv, &turn, request, answers, chosen);
+            } else {
+                self.watch_question(conv, &turn, request);
+            }
         }
         true
     }

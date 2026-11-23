@@ -22,6 +22,8 @@ struct FullState {
     state: AppState,
     look: Look,
     models: Vec<ModelInfo>,
+    #[serde(rename = "antigravityModels", skip_serializing_if = "Option::is_none")]
+    antigravity_models: Option<Vec<ModelInfo>>,
     version: String,
 }
 
@@ -245,7 +247,7 @@ table! {
         let mut state = h.engine.state();
         state.settings = h.shell.shown_settings(std::mem::take(&mut state.settings));
         let look = look::stored(state.settings.appearance.as_ref());
-        Ok(FullState { state, look, models: lock(&h.models).clone(), version: h.shell.version() })
+        Ok(FullState { state, look, models: lock(&h.models).clone(), antigravity_models: lock(&h.antigravity_models).clone(), version: h.shell.version() })
     }
     /// Read-only bootstrap for a session-owned app renderer; never resets the person's streaming feed.
     Read Own("/by") fn app_control_state(h, by: Option<String>) -> FullState {
@@ -255,7 +257,7 @@ table! {
         scope_app_state(&mut state, by.as_deref(), |id| reach::root(id, |at| starters.get(at).cloned()));
         state.settings = h.shell.shown_settings(std::mem::take(&mut state.settings));
         let look = look::stored(state.settings.appearance.as_ref());
-        Ok(FullState { state, look, models: lock(&h.models).clone(), version: h.shell.version() })
+        Ok(FullState { state, look, models: lock(&h.models).clone(), antigravity_models: lock(&h.antigravity_models).clone(), version: h.shell.version() })
     }
     /// A session renderer may open only its own conversation family, without screen privileges.
     Read Own("/id") fn app_control_open(h, id: String) -> Option<Conversation> {

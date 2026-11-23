@@ -15,8 +15,10 @@ Ask and Full access both use `default` so outside file reads still ask the host.
 in Full access and shows the agent's questions in both modes. Other permission modes return `error.notConnected`.
 A file request shows its resolved path (junctions followed); an unresolvable one is refused.
 
-An empty model leaves the CLI default. A listed model id uses `session/set_model`. Otherwise the driver sets `model` and
-then `thought_level` with `session/set_config_option`. Resume does the same. The out-of-quota recogniser
+The existing account check returns the model variants along with the plan. The picker groups variants by model and
+offers only their advertised efforts. On start and resume, a listed id or a family with a listed effort variant uses
+`session/set_model`; the driver waits for acceptance before sending the prompt. When there is no matching listed id,
+the legacy path sets `model` and `thought_level` separately. An empty model leaves the CLI default. The out-of-quota recogniser
 looks for `RESOURCE_EXHAUSTED` in an error answer. This is a guess exercised by a synthetic fixture because no real
 quota error was recorded; it marks the account out and the reply ends with `error.quotaOut`. The session cannot block access to a protected folder inside the working folder, inside its own temp
 folder, within an approved command's or MCP tool's reach, behind a junction changed after the request was judged, or

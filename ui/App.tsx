@@ -1167,7 +1167,17 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       }
       if (e.type === 'list') { setChildUpdates({}); void refresh(); }
       if (e.type === 'saveFailed') setSaveError(failureText({ key: e.key }));
-      if (e.type === 'usage') setState((s) => ({ ...s, usage: e.vendors }));
+      if (e.type === 'usage') {
+        const groups = e.vendors.find((v) => v.vendor === 'gemini')?.windows;
+        setQuotas((current) => {
+          const missing = Object.keys(current).filter((key) => current[key].vendor === 'gemini' && !groups?.some((w) => w.name === current[key].window));
+          if (!missing.length) return current;
+          const next = { ...current };
+          for (const key of missing) delete next[key];
+          return next;
+        });
+        setState((s) => ({ ...s, usage: e.vendors }));
+      }
       if (e.type === 'settings') setState((s) => ({ ...s, settings: e.settings }));
       if (e.type === 'message' && e.message.role === 'assistant') {
         const row = state().conversations.find((c) => c.id === e.conversationId && c.startedBy === current()?.id);
@@ -1603,7 +1613,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (forgotten.some((ok) => !ok)) setSaveError(t('composer.draftRemoveFailed'));
   };
 
-  const options = createMemo(() => (lang(), modelOptions(state().vendors, state().models)));
+  const options = createMemo(() => (lang(), modelOptions(state().vendors, state().models, state().antigravityModels)));
   const project = () => state().projects.find((p) => p.id === projectId());
   // Faber's checks of the last reply (R146), and a compaction, keep the conversation at work: what is written waits for them, and Stop ends them.
   const engineBusy = () => {
@@ -1977,6 +1987,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               saved={state().settings}
               vendors={state().vendors}
               models={state().models}
+              antigravityModels={state().antigravityModels}
               quotas={quotas()}
               usage={state().usage ?? []}
               projects={state().projects}

@@ -12,16 +12,21 @@ export function ModelMenu(props: { options: Option[]; choice: Choice; disabled?:
   let panel: HTMLDivElement | undefined;
   let position = () => {};
   const selected = (option: Option) => option.choice.vendor === props.choice.vendor && option.choice.model === props.choice.model;
+  const currentOption = () => props.options.find(selected);
   const models = createMemo(() => props.options.filter((option) => option.choice.vendor !== 'auto'));
   const groups = createMemo(() => (['claude', 'codex', 'gemini'] as Vendor[]).filter((vendor) => models().some((option) => option.choice.vendor === vendor)));
   const matches = (option: Option) => option.label.toLocaleLowerCase().includes(query().trim().toLocaleLowerCase());
-  const label = () => props.choice.vendor === 'auto' ? t('model.autoChoose') : props.options.find(selected)?.label ?? prettyModel(props.choice.model);
+  const label = () => props.choice.vendor === 'auto' ? t('model.autoChoose') : currentOption()?.label ?? prettyModel(props.choice.model);
   const menuLabel = () => props.modelOnlyLabel ?? t('composer.model');
-  const showEffort = () => !props.modelOnlyLabel && props.choice.vendor !== 'auto' && !!props.choice.model;
+  const efforts = () => currentOption()?.efforts ?? (['low', 'medium', 'high'] as const);
+  const effort = () => props.choice.effort ?? currentOption()?.choice.effort ?? DEFAULT_EFFORT;
+  const showEffort = () => !props.modelOnlyLabel && props.choice.vendor !== 'auto' && !!props.choice.model && efforts().length > 1;
   const close = () => { if (panel?.matches(':popover-open')) panel.hidePopover(); setOpen(false); };
   const pick = (option: Option) => {
     const choice = option.choice;
-    props.onChoice(props.modelOnlyLabel || choice.vendor === 'auto' ? choice : { ...choice, effort: selected(option) ? (props.choice.effort ?? DEFAULT_EFFORT) : DEFAULT_EFFORT });
+    const kept = selected(option) && props.choice.effort;
+    const picked = kept && (!option.efforts || option.efforts.includes(kept)) ? kept : choice.effort ?? DEFAULT_EFFORT;
+    props.onChoice(props.modelOnlyLabel || choice.vendor === 'auto' || option.efforts?.length === 0 ? choice : { ...choice, effort: picked });
     close();
     trigger.focus();
   };
@@ -61,13 +66,13 @@ export function ModelMenu(props: { options: Option[]; choice: Choice; disabled?:
   </button>;
   return <>
     <button ref={(el) => (trigger = el)} type="button" class="chip choose model-chip" data-tour="auto" disabled={props.disabled}
-      aria-label={`${menuLabel()}: ${label()}${showEffort() ? ` · ${t('effort.label')}: ${t(`effort.${props.choice.effort ?? DEFAULT_EFFORT}`)}` : ''}`}
+      aria-label={`${menuLabel()}: ${label()}${showEffort() ? ` · ${t('effort.label')}: ${t(`effort.${effort()}`)}` : ''}`}
       aria-haspopup="dialog" aria-expanded={open()} aria-controls={open() ? id : undefined}
       onClick={() => open() ? close() : setOpen(true)}
       onKeyDown={(e) => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setOpen(true); } }}>
       <Show when={props.choice.vendor !== 'auto'} fallback={<Icon name="auto" small />}><span class={`mk ${props.choice.vendor}`} aria-hidden="true" /></Show>
       <span class="model-label">{label()}</span>
-      <Show when={showEffort()}><span class="model-effort">· {t(`effort.${props.choice.effort ?? DEFAULT_EFFORT}`)}</span></Show>
+      <Show when={showEffort()}><span class="model-effort">· {t(`effort.${effort()}`)}</span></Show>
       <Icon name="down" small />
     </button>
     <Show when={open()}>
@@ -105,7 +110,7 @@ export function ModelMenu(props: { options: Option[]; choice: Choice; disabled?:
         <Show when={showEffort()}>
           <div class="model-efforts" role="group" aria-label={t('effort.label')}>
             <span>{t('effort.label')}</span>
-            <For each={['low', 'medium', 'high'] as const}>{(effort) => <button type="button" aria-pressed={(props.choice.effort ?? DEFAULT_EFFORT) === effort} onClick={() => props.onChoice({ ...props.choice, effort })}>{t(`effort.${effort}`)}</button>}</For>
+            <For each={efforts()}>{(level) => <button type="button" aria-pressed={effort() === level} onClick={() => props.onChoice({ ...props.choice, effort: level })}>{t(`effort.${level}`)}</button>}</For>
           </div>
         </Show>
       </div>

@@ -78,8 +78,9 @@ the request waits re-enters the ordinary permission decision: Ask still asks, re
 refusals still refuse silently before any plan hold. Requests without a current turn are denied, including when a
 contract already covers them. The question cannot approve execution. Choosing its default declines this attempt and tells the
 agent to state the contract and retry, so a CLI waiting on its own serial approval can progress. Claude receives the
-instruction in its denial; Codex receives a durable next-turn wake through the existing queue. A retry still passes admission and ordinary
-permissions. Stop and stale/session checks remain in the existing answer path.
+instruction in its denial; Codex and Antigravity receive a durable next-turn wake through the existing queue. In Full access,
+Faber selects this safe default for Antigravity once per human request. A repeated hold stays visible. A retry still passes
+admission and ordinary permissions. Stop and stale/session checks remain in the existing answer path.
 
 ## Proof and cost
 

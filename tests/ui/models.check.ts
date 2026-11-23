@@ -1,4 +1,4 @@
-import { modelOptions, vendorName } from '../../ui/models.ts';
+import { availableChoice, modelOptions, vendorName } from '../../ui/models.ts';
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { ModelMenu } from '../../ui/ModelMenu.tsx';
@@ -12,6 +12,24 @@ const gpt = (models: Parameters<typeof modelOptions>[1]) =>
 // The owner, 2026-11-22: the third AI is called by its app's name; Gemini is only the name of some of its models (R581).
 check('models: the third AI is named Antigravity, never Gemini', () => {
   equal(vendorName('gemini'), 'Antigravity');
+});
+
+check('models: Antigravity shows only the account models and their supported efforts', () => {
+  const listed = [
+    { id: 'gemini-4-neon-xhigh', label: 'Gemini 4 Neon (XHigh)', isDefault: false },
+    { id: 'gemini-4-neon-medium', label: 'Gemini 4 Neon (Medium)', isDefault: true },
+    { id: 'gemini-pro-orchestrator-neon', label: 'Orchestrator (Neon)', isDefault: false },
+    { id: 'claude-opus-5-5-low', label: 'Claude Opus 5.5 (Low)', isDefault: false },
+  ];
+  const options = modelOptions(['gemini'], [], listed);
+  deepEqual(options.map((o) => o.label), [t('model.autoChoose'), 'Gemini 4 Neon', 'Orchestrator (Neon)', 'Claude Opus 5.5']);
+  deepEqual(availableChoice(options, { vendor: 'gemini', model: 'gemini-4-neon', effort: 'high' }), {
+    vendor: 'gemini', model: 'gemini-4-neon', effort: 'medium',
+  });
+  const opus = options.find((o) => o.choice.model === 'claude-opus-5-5')!;
+  deepEqual(opus.efforts, ['low']);
+  deepEqual(opus.choice, { vendor: 'gemini', model: 'claude-opus-5-5', effort: 'low' });
+  deepEqual(modelOptions(['codex'], [], listed).map((o) => o.choice.vendor), ['auto']);
 });
 
 check('models: every GPT model is listed by its own name, with no generic ChatGPT entry', () => {

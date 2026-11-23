@@ -31,10 +31,11 @@ by connected AI groups with their existing square/diamond marks. Current models 
 default) precede older models in a disclosure; the selected older model is revealed on reopening. Search appears only
 above eight manual models, matches partial names without case sensitivity and searches folded entries too.
 
-Picking another model resets effort to Medium; picking the same model preserves effort. Auto removes manual effort.
-Auto can choose low through xhigh from the measured rows of its held model; manual choices stay low, medium and high.
-Chat and Projects show four Gemini models under the Antigravity mark when connected. Auto can choose Antigravity
-on a confirmed subscription tier with quota available, in Ask or Full access.
+Picking another model resets effort to Medium when available; picking the same model preserves a supported effort.
+Auto removes manual effort. Chat, Projects and the default model setting show the connected Antigravity account's
+model families using its own labels. The composer offers only the efforts that account lists for the model, including
+Extra high where available. A fixed variant needs no effort control. Auto can choose Antigravity on a confirmed
+subscription tier with quota available, in Ask or Full access.
 The existing answer and helper rows name xhigh in every language; the stronger retry carries it through the choice
 contract and saves it like the other efforts. No control or picker layout changes.
 Auto's task guide names supplied-text chores, everyday documents/slides/spreadsheets and scoped code, and multi-part

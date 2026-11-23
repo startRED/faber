@@ -113,7 +113,10 @@ pub fn pick_model(choice: &Choice, available: &[Vendor], codex_recommended: Opti
         return available.contains(&vendor).then(|| {
             let model = choice.model.as_deref().map(|model| pinned(vendor, model));
             let mut chosen = pick(vendor, model, "reason.chosen");
-            chosen.effort = choice.effort.unwrap_or_default().name().into();
+            let variant_effort = model
+                .and_then(|model| model.rsplit_once('-').map(|(_, effort)| effort))
+                .filter(|effort| vendor == Vendor::Gemini && ["low", "medium", "high", "xhigh"].contains(effort));
+            chosen.effort = variant_effort.unwrap_or_else(|| choice.effort.unwrap_or_default().name()).into();
             chosen
         });
     }

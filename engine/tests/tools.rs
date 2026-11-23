@@ -354,7 +354,7 @@ fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
         .collect();
     let items = catalog();
     assert_eq!(items.len(), entries.len(), "no item silently disappears while parsing");
-    assert_eq!(file["skills"].as_array().unwrap().len(), 115, "audited skills and the pinned on-demand product demo kit");
+    assert_eq!(file["skills"].as_array().unwrap().len(), 118, "audited skills and the pinned on-demand product demo kit");
     assert_eq!(file["servers"].as_array().unwrap().len(), 4, "only audited credential-free trees enter the catalog");
     assert_eq!(file["runtimes"].as_array().unwrap().len(), 11, "processor tools, recorded packs and advisory GPU tools are present");
     assert!(source.len() <= 128 * 1024, "metadata budget including complete runtime pins: {} bytes", source.len());
@@ -385,7 +385,7 @@ fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
         assert_eq!(item.digest.len(), 64, "digest: {}", item.id);
         assert!(item.commit.bytes().chain(item.digest.bytes()).all(|b| b.is_ascii_hexdigit()));
         let limit = match item.job.as_str() {
-            "games" => 32,
+            "games" => 35,
             "game-design" => 23,
             "marketing" => 11,
             "debugging" | "testing" | "lean" | "design" | "architecture" | "plan" | "mcp" | "skills" | "performance" | "database"

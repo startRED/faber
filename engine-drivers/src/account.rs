@@ -81,6 +81,54 @@ async fn run_args(cli: &Cli, args: Vec<String>, spawn: &Spawner, cwd: &Path, tim
     tokio::time::timeout(timeout, run).await.ok().flatten()
 }
 
+/// Only versions with the verified local /usage contract may receive the command. Older CLIs sent it as a prompt.
+fn antigravity_has_local_usage(version: &str) -> bool {
+    let parts: Result<Vec<u32>, _> = version.trim().split('.').map(str::parse).collect();
+    matches!(parts.as_deref(), Ok([1, minor, patch]) if (*minor, *patch) >= (5, 14))
+}
+
+pub async fn antigravity_quota(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Vec<(&'static str, f64, f64)>> {
+    let Ran { out, code, replayed, .. } = run_args(cli, vec!["--version".into()], spawn, cwd, timeout).await?;
+    if !(replayed || code == Some(0)) || !antigravity_has_local_usage(&out) {
+        return None;
+    }
+    let args = ["-p", "/usage", "--output-format", "json", "--settings", r#"{"disableSlashCommands":false,"useG1Credits":false}"#];
+    let Ran { out, code, replayed, .. } = run_args(cli, args.map(String::from).to_vec(), spawn, cwd, timeout).await?;
+    (replayed || code == Some(0)).then(|| antigravity_quota_windows(&out)).flatten()
+}
+
+fn antigravity_quota_windows(out: &str) -> Option<Vec<(&'static str, f64, f64)>> {
+    let answer: serde_json::Value = serde_json::from_str(out).ok()?;
+    let token_fields = ["input_tokens", "output_tokens", "thinking_tokens", "cache_read_tokens", "total_tokens"];
+    if answer["status"] != "SUCCESS"
+        || answer["conversation_id"] != ""
+        || answer["num_turns"].as_u64() != Some(0)
+        || token_fields.iter().any(|field| answer["usage"][*field].as_u64() != Some(0))
+        || answer["command"]["name"] != "usage"
+    {
+        return None;
+    }
+    let groups = answer["command"]["data"]["groups"].as_array()?;
+    let mut windows = Vec::new();
+    for bucket in groups.iter().filter_map(|group| group["buckets"].as_array()).flatten() {
+        let window = match (bucket["id"].as_str(), bucket["window"].as_str()) {
+            (Some("gemini-5h"), Some("5h")) => "five_hour_agy_gemini",
+            (Some("gemini-weekly"), Some("weekly")) => "seven_day_agy_gemini",
+            (Some("3p-5h"), Some("5h")) => "five_hour_agy_3p",
+            (Some("3p-weekly"), Some("weekly")) => "seven_day_agy_3p",
+            (Some("gemini-argon-wtu-weekly"), Some("weekly")) => "seven_day_agy_argon",
+            _ => continue,
+        };
+        if bucket.get("disabled").is_some_and(|v| v.as_bool() != Some(false)) {
+            continue;
+        }
+        let Some(remaining) = bucket["remaining_fraction"].as_f64().filter(|v| (0.0..=1.0).contains(v)) else { continue };
+        let Some(resets_at) = bucket["reset_time"].as_str().and_then(utc_seconds) else { continue };
+        windows.push((window, 1.0 - remaining, resets_at));
+    }
+    Some(windows)
+}
+
 /// Runs the status command. Its output is read into memory only to reach a verdict, then dropped; a CLI that fails to start or
 /// does not answer within `timeout` is `Unknown`, and is killed when the check ends.
 pub async fn check(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> AccountStatus {
@@ -91,12 +139,17 @@ pub async fn check(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeo
     if vendor == Vendor::Claude { verdict(vendor, &out, code) } else { verdict(vendor, &format!("{out}\n{err}"), code) }
 }
 
-/// Asks Antigravity's ACP server for a session in `cwd` and reads only the verdict of that answer, with the plan the same answer
-/// names when signed in (`signals::antigravity_plan`; None otherwise). The server is told who is asking, then asked for a
+/// Asks Antigravity's ACP server for a session in `cwd` and reads the sign-in verdict, plan and available models from the
+/// same answer. The server is told who is asking, then asked for a
 /// session, and nothing else: no prompt is ever sent. It ends when the check ends (the process is killed with its handles),
 /// after the answer, `timeout`, or more output than the bound.
-pub async fn antigravity_account(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> (AccountStatus, Option<Signals>) {
-    let unknown = (AccountStatus::Unknown, None);
+pub async fn antigravity_account(
+    cli: &Cli,
+    spawn: &Spawner,
+    cwd: &Path,
+    timeout: Duration,
+) -> (AccountStatus, Option<Signals>, Option<Vec<crate::codex::ModelInfo>>) {
+    let unknown = (AccountStatus::Unknown, None, None);
     let args: Vec<String> = cli.prefix.iter().cloned().chain(status_args(Vendor::Gemini).iter().map(|a| a.to_string())).collect();
     let Ok(p) = crate::proc::spawn_background(spawn, &cli.command, &args, cwd) else { return unknown };
     // Held to the end of the check: dropping them ends the process.
@@ -118,19 +171,44 @@ pub async fn antigravity_account(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout
             let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
             if v["id"] == 1 {
                 if v.get("result").is_none() {
-                    return Some((AccountStatus::Unknown, None));
+                    return Some((AccountStatus::Unknown, None, None));
                 }
                 let session = json!({ "cwd": cwd.to_string_lossy(), "mcpServers": [] });
                 stdin.write_all(request(2, "session/new", session).as_bytes()).await.ok()?;
                 stdin.flush().await.ok()?;
             } else if let Some(status) = acp_session_verdict(&v) {
-                let plan = (status == AccountStatus::SignedIn).then(|| crate::signals::antigravity_plan(&v["result"]));
-                return Some((status, plan));
+                let result = &v["result"];
+                let plan = (status == AccountStatus::SignedIn).then(|| crate::signals::antigravity_plan(result));
+                let models = (status == AccountStatus::SignedIn).then(|| antigravity_models(&result["models"])).flatten();
+                return Some((status, plan, models));
             }
         }
         None
     };
     tokio::time::timeout(timeout, run).await.ok().flatten().unwrap_or(unknown)
+}
+
+fn antigravity_models(models: &serde_json::Value) -> Option<Vec<crate::codex::ModelInfo>> {
+    let mut seen = std::collections::BTreeSet::new();
+    let available = models["availableModels"].as_array()?;
+    Some(
+        available
+            .iter()
+            .take(128)
+            .filter_map(|model| {
+                let id = model["modelId"].as_str()?;
+                if id.is_empty()
+                    || id.len() > 128
+                    || !id.bytes().all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
+                    || !seen.insert(id)
+                {
+                    return None;
+                }
+                let label: String = model["name"].as_str().unwrap_or(id).chars().filter(|c| !c.is_control()).take(128).collect();
+                Some(crate::codex::ModelInfo { id: id.into(), label, description: None, is_default: models["currentModelId"] == id })
+            })
+            .collect(),
+    )
 }
 
 /// The verdict of the server's answer to `session/new` (id 2); None for any other line. Only a session id counts as signed in,
@@ -546,6 +624,29 @@ fn verdict(vendor: Vendor, output: &str, code: Option<i32>) -> AccountStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn antigravity_usage_requires_a_supported_stable_cli_and_a_metered_zero_turn() {
+        for version in ["1.4.10", "1.5.13", "1.5.14-preview.1", "2.0.0", "unknown"] {
+            assert!(!antigravity_has_local_usage(version), "{version}");
+        }
+        assert!(antigravity_has_local_usage("1.5.14\n"));
+        let mut reply = json!({
+            "status":"SUCCESS","conversation_id":"","num_turns":0,
+            "usage":{"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0},
+            "command":{"name":"usage","data":{"groups":[{"buckets":[
+                {"id":"gemini-5h","window":"5h","remaining_fraction":0.25,"reset_time":"2026-10-20T08:00:00Z"},
+                {"id":"3p-5h","window":"5h","disabled":true,"remaining_fraction":0.0,"reset_time":"2026-10-20T08:00:00Z"},
+                {"id":"gemini-weekly","window":"weekly","remaining_fraction":1.5,"reset_time":"2026-10-20T08:00:00Z"}
+            ]}]}}
+        });
+        assert_eq!(antigravity_quota_windows(&reply.to_string()), Some(vec![("five_hour_agy_gemini", 0.75, 1_792_483_200.0)]));
+        reply["num_turns"] = json!(1);
+        assert!(antigravity_quota_windows(&reply.to_string()).is_none());
+        reply["num_turns"] = json!(0);
+        reply["usage"].as_object_mut().unwrap().remove("total_tokens");
+        assert!(antigravity_quota_windows(&reply.to_string()).is_none());
+    }
 
     /// The arguments of the `/usage` session are what they were when the project roles built them: this list was captured from
     /// that code before it was retired, with the added protections for taste and lesson files.

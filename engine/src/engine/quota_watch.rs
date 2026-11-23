@@ -1,6 +1,6 @@
 //! Keeping the quota readings fresh without asking a model anything. Claude Code answers `/usage` itself; Codex's server
-//! answers `account/rateLimits/read`. (A Claude Code whose `/usage` prints no percentages is read by one tiny request instead,
-//! `account::claude_probe`.) Both are short-lived hidden processes that Faber starts on the schedule in
+//! answers `account/rateLimits/read`. Antigravity answers a structured local `/usage`. (A Claude Code whose `/usage`
+//! prints no percentages is read by one tiny request instead, `account::claude_probe`.) The short-lived hidden processes run on
 //! `cadence.rs`: at start, on a timer, after a request ends, on focus and on wake. Readings that arrive during a request
 //! (Claude's rate-limit events, Codex's rate-limit updates) go through the same `note_quota`.
 
@@ -9,16 +9,18 @@ use crate::account::{UsageRead, claude_probe, claude_usage};
 use crate::ledger::VendorLedger;
 
 /// Whether a vendor's quota is read at its short gap instead of every quarter of an hour (R580): one of its turns runs, or
-/// its own work that ended within `FAST_FOR` is still uncounted; and a live reading is older than the gap, so the turn's own
-/// stream has not just refreshed it. Without the bound an account whose readings keep failing would be read fast for ever.
+/// its own work that ended within `FAST_FOR` needs a reading; and a known window expired or was read before the gap.
+/// Without the bound an account whose readings keep failing would be read fast for ever.
 fn reads_fast(ledger: &VendorLedger, running: bool, gap: f64, now: f64) -> bool {
     let newest = ledger.work.iter().map(|w| w.finished).chain(ledger.folded.iter().map(|f| f.finished)).fold(f64::MIN, f64::max);
-    let recent = ledger.counting(now) && (0.0..=crate::cadence::FAST_FOR).contains(&(now - newest));
-    (running || recent) && ledger.readings.values().any(|r| r.resets_at > now && now - r.read_at >= gap)
+    let expired = ledger.readings.values().any(|r| r.resets_at <= now);
+    let recent = (expired || ledger.counting(now)) && (0.0..=crate::cadence::FAST_FOR).contains(&(now - newest));
+    (running || recent) && (expired || ledger.readings.values().any(|r| now - r.read_at >= gap))
 }
 
 const CLAUDE_TIMEOUT: Duration = Duration::from_secs(45);
 const CODEX_TIMEOUT: Duration = Duration::from_secs(20);
+const ANTIGRAVITY_TIMEOUT: Duration = Duration::from_secs(12);
 
 /// Marks a vendor’s reading as under way for exactly as long as the task that does it lives: whichever way that task ends
 /// (an answer, a failure, the engine going away, a panic), the mark is lifted, so a vendor is never left unread for good.
@@ -149,8 +151,28 @@ impl Core {
                         }
                         c.emit_usage();
                     }
-                    // Not yet: no CLI is discovered for it, so the loop above skipped it.
-                    Vendor::Gemini => {}
+                    Vendor::Gemini => {
+                        let Some(windows) = account::antigravity_quota(&cli, &spawn, &cwd, ANTIGRAVITY_TIMEOUT).await else { return };
+                        let Some(core) = me.upgrade() else { return };
+                        let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
+                        if c.opts.clis.get(&vendor) != Some(&cli) || c.ledger.of(vendor).plan_seen_at.is_none() {
+                            return;
+                        }
+                        let now = c.secs();
+                        let live: BTreeMap<_, _> = windows
+                            .into_iter()
+                            .filter(|(_, _, reset)| *reset > now)
+                            .map(|(window, used, resets_at)| (window, EngineEvent::Quota { window: window.into(), used, resets_at }))
+                            .collect();
+                        c.quotas.retain(|(v, window), _| *v != vendor || live.contains_key(window.as_str()));
+                        let ledger = c.ledger.of_mut(vendor);
+                        ledger.readings.retain(|window, _| live.contains_key(window.as_str()));
+                        ledger.zero_turn_readings.retain(|window, _| live.contains_key(window.as_str()));
+                        if live.is_empty() {
+                            c.emit_usage();
+                        }
+                        c.zero_turn_checked(vendor, live.into_values().collect());
+                    }
                 }
             });
             break;
@@ -314,5 +336,21 @@ mod tests {
             !reads_fast(&worked(VendorLedger { lag: 600.0, ..Default::default() }, NOW - 100.0), true, 300.0, NOW),
             "never read: the timer's turn"
         );
+    }
+
+    #[test]
+    fn a_vendor_with_work_keeps_the_short_gap_when_a_known_window_expires() {
+        for gap in [crate::cadence::CLAUDE_GAP, crate::cadence::CODEX_GAP] {
+            let mut ledger = VendorLedger::default();
+            ledger.record("five_hour", 0.86, NOW, NOW - gap - 1.0, 0);
+            ledger.record("seven_day", 0.12, NOW + 3600.0, NOW - 11.0, 0);
+            assert!(!reads_fast(&ledger, false, gap, NOW), "an idle account still waits");
+            ledger.worked(
+                crate::ledger::Work { start: NOW - 60.0, finished: NOW - 10.0, model: "m".into(), cost: None, incomplete: false },
+                NOW,
+            );
+            assert!(reads_fast(&ledger, false, gap, NOW), "recent work needs the new window");
+            assert!(!reads_fast(&ledger, false, gap, NOW + crate::cadence::FAST_FOR), "the retry window stays bounded");
+        }
     }
 }

@@ -3,8 +3,8 @@ import { render } from 'solid-js/web';
 import { api, type Message, type VendorUsage } from '../../ui/api.ts';
 import { percent, t, useLanguage, type Lang } from '../../ui/i18n.ts';
 import { Settings } from '../../ui/Settings.tsx';
-import { Sidebar } from '../../ui/Sidebar.tsx';
-import { ageOf, floorOnly, freshness } from '../../ui/sidebar.ts';
+import { Sidebar, windowName } from '../../ui/Sidebar.tsx';
+import { ageOf, floorOnly, freshness, lineReading, seedQuotas } from '../../ui/sidebar.ts';
 import { Thread } from '../../ui/Thread.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -19,6 +19,21 @@ const usage = (over: Partial<VendorUsage> & { readAt?: number; uncounted?: numbe
 }];
 
 const quotas = { 'codex:seven_day': { vendor: 'codex' as const, window: 'seven_day', used: 0.44, resetsAt: NOW / 1000 + 86_400 } };
+
+check('quota: Antigravity shows the tightest live group and identifies its window', () => {
+  useLanguage('pt-BR');
+  try {
+    const readings = seedQuotas([
+      { vendor: 'gemini', window: 'seven_day_agy_gemini', used: 0.25, resetsAt: at(-3600) },
+      { vendor: 'gemini', window: 'five_hour_agy_3p', used: 0.86, resetsAt: at(-1800) },
+      { vendor: 'gemini', window: 'seven_day_agy_argon', used: 1, resetsAt: at(1) },
+    ]);
+    const line = lineReading(readings, 'gemini', NOW)!;
+    equal(line.used, 0.86);
+    equal(windowName(line.window), `Claude e GPT · ${t('quota.five_hour')}`);
+    equal(windowName('seven_day_agy_argon'), `Gemini 4 Argon · ${t('quota.seven_day')}`);
+  } finally { useLanguage('en'); }
+});
 
 function sidebar(u: VendorUsage[], withQuota = true) {
   const host = document.createElement('div');

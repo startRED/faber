@@ -143,7 +143,7 @@ folder entries/depth and manifest bytes before building its snapshot. CPU work i
 open/project/action. Filesystem commands run on blocking workers rather than the window's command thread. Inventory
 returns an unavailable state within two seconds; one scanner owns its permit until it actually finishes, even after
 timeout, so retries cannot accumulate stalled readers. Disk cost includes disabled items, manual and pending agent Undo copies and leased snapshots.
-Metadata is capped at 36 KiB; stored job limits are 32 for building games, 11 for marketing, 23 for game design
+Metadata is capped at 36 KiB; stored job limits are 35 for building games, 11 for marketing, 23 for game design
 and 14 for any remaining job, checked in engine tests. Only metadata and localized words ship. Actual working-set/CPU
 measurements and the native screen suite belong to the lead's unsandboxed validation; no measured saving is claimed.
 
