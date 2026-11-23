@@ -1,5 +1,5 @@
-import { createEffect, createSignal, For, type JSX, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
-import { api, type Appearance, type Look, PERMISSION_MODES, type PermissionMode, type Project, type ReasoningSummary, type Settings as Saved, type Vendor, type VendorUsage, type ReplyStyle, type WebSearch } from './api.ts';
+import { createEffect, createMemo, createSignal, For, type JSX, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
+import { api, type Appearance, type Look, type ModelInfo, PERMISSION_MODES, type PermissionMode, type Project, type ReasoningSummary, type Settings as Saved, type Vendor, type VendorUsage, type ReplyStyle, type WebSearch } from './api.ts';
 import { AccountsSection } from './Accounts.tsx';
 import { AppearanceSection } from './Appearance.tsx';
 import { Fold, Group, Opt, PickMenu, Segmented, Toggle } from './controls.tsx';
@@ -8,11 +8,13 @@ import { Icon } from './Glyphs.tsx';
 import { failureText, LANGUAGES, t } from './i18n.ts';
 import { hasBrowserExtensions } from './shell.ts';
 import { openShortcuts } from './Shortcuts.tsx';
-import { vendorName } from './models.ts';
+import { ModelMenu } from './ModelMenu.tsx';
+import { availableChoice, modelOptions, vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { ProjectsSection } from './ProjectSettings.tsx';
 import { Recents } from './Recents.tsx';
 import type { Quotas } from './sidebar.ts';
+import './settings.css';
 
 // Settings: five sections, one grammar. A group is a card, an option is one row (its name and one line at the left, its
 // control at the right) and the long text of an option unfolds from the "?" next to its name (ui/controls.tsx).
@@ -53,6 +55,7 @@ interface Props {
   saved: Saved;
   /** The vendors that are connected. */
   vendors: Vendor[];
+  models?: ModelInfo[];
   quotas: Quotas;
   usage?: VendorUsage[];
   /** The projects Faber knows, each with its own settings. */
@@ -102,6 +105,7 @@ let lastSection: Section = 'general';
 export const forgetSection = (): void => { lastSection = 'general'; };
 
 export function Settings(props: Props) {
+  const defaultOptions = createMemo(() => modelOptions(props.vendors, props.models));
   const [section, setSectionNow] = createSignal<Section>(props.start ?? lastSection);
   const setSection = (id: Section) => { hookRequest++; setHookLines([]); lastSection = id; setSectionNow(id); };
   if (props.start) lastSection = props.start;
@@ -243,6 +247,14 @@ export function Settings(props: Props) {
               </Opt>
             </Group>
             <Group title={t('set.group.ai')}>
+              <Opt id="set-default-model" label={t('set.defaultModel')} hint={t('set.defaultModelHint')}>
+                <ModelMenu
+                  options={defaultOptions()}
+                  choice={availableChoice(defaultOptions(), props.saved.defaultModel)}
+                  modelOnlyLabel={t('set.defaultModel')}
+                  onChoice={(defaultModel) => void save({ defaultModel })}
+                />
+              </Opt>
               <Opt id="set-permissions" label={t('set.permissions')} hint={t(`set.permissions.${mode()}.line`)} more={[...t(MORE[mode()]).split('\n'), t('set.enforcement.note'), ...(mode() === 'dontAsk' ? [t('set.enforcement.full')] : [t('set.enforcement.claude'), t('set.enforcement.codex')]), ...(mode() === 'auto' ? [t('set.enforcement.fallback')] : [])]}>
                 <PickMenu
                   id="set-permissions-pick"

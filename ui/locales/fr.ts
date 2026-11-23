@@ -1593,6 +1593,8 @@ export const fr: Messages = {
   "set.group.type": "Texte et mise en page",
   "set.group.system": "Notifications et système",
   "set.group.ai": "Comment l’IA travaille",
+  "set.defaultModel": "Modèle par défaut",
+  "set.defaultModelHint": "Pour les nouvelles conversations dans Chat et Projets.",
   "set.group.you": "Vous",
   'set.notifyMe': 'Me prévenir',
   "set.notifyHint": "Quand quelque chose a besoin de vous.",

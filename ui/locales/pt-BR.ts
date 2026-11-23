@@ -1751,6 +1751,8 @@ export const ptBR: Messages = {
   "set.group.type": "Texto e layout",
   "set.group.system": "Notificações e sistema",
   "set.group.ai": "Como a IA trabalha",
+  "set.defaultModel": "Modelo padrão",
+  "set.defaultModelHint": "Usado ao iniciar conversas no Chat e nos Projetos.",
   "set.group.you": "Você",
   'set.notifyMe': 'Me notifique',
   "set.notifyHint": "Quando algo precisar de você.",
