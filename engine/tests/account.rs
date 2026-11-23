@@ -466,3 +466,86 @@ async fn c1_5_saving_another_setting_preserves_skipped_setup_on_disk_and_in_app_
     assert_eq!(serde_json::to_value(engine.state().settings).unwrap()["setup"], "skipped");
     engine.shutdown();
 }
+
+/// Antigravity's installer puts `agy.exe` in `%LOCALAPPDATA%\agy\bin`, which an app started from the desktop may not have on
+/// its PATH.
+#[test]
+fn antigravity_is_found_in_its_installer_folder_outside_path() {
+    let env = |key: &str| (key == "LOCALAPPDATA").then(|| r"C:\Users\Example User\AppData\Local".to_string());
+    let installed = r"C:\Users\Example User\AppData\Local\agy\bin\agy.exe";
+    let found = Cli::find_in("agy", "", true, &env, &|p| p == installed, &|_| panic!("a native program is never read"));
+    assert_eq!(found, Some(Cli { command: installed.into(), prefix: vec![] }));
+    assert_eq!(Cli::find_in("agy", "", true, &|_| None, &|p| p == installed, &|_| String::new()), None);
+}
+
+/// Plays an Antigravity account recording (`tests/fixtures/agy/acct-*.jsonl`): what the server printed goes out, and what
+/// Faber writes is kept. With `open`, the output stays open after the recording, like a server that never answers.
+fn acp_spawner(name: &str, open: bool) -> (Spawner, Calls, Arc<Mutex<Vec<u8>>>) {
+    let path = format!("{}/../tests/fixtures/agy/{name}.jsonl", env!("CARGO_MANIFEST_DIR"));
+    let printed: String = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{path}: {e}"))
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .filter(|v| v["dir"] == "stdout")
+        .map(|v| format!("{}\n", v["msg"].as_str().unwrap()))
+        .collect();
+    let calls: Calls = Arc::default();
+    let written: Arc<Mutex<Vec<u8>>> = Arc::default();
+    let (recorded, kept) = (calls.clone(), written.clone());
+    let spawn: Spawner = Arc::new(move |bin, args, _cwd| {
+        recorded.lock().unwrap().push((bin.into(), args.to_vec()));
+        let (mut out, stdout) = tokio::io::duplex(64 * 1024);
+        let (stdin, mut input) = tokio::io::duplex(64 * 1024);
+        let printed = printed.clone();
+        tokio::spawn(async move {
+            let _ = out.write_all(printed.as_bytes()).await;
+            if open {
+                std::future::pending::<()>().await;
+            }
+        });
+        let kept = kept.clone();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            while let Ok(n @ 1..) = tokio::io::AsyncReadExt::read(&mut input, &mut buf).await {
+                kept.lock().unwrap().extend_from_slice(&buf[..n]);
+            }
+        });
+        Ok(Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None })
+    });
+    (spawn, calls, written)
+}
+
+#[tokio::test]
+async fn antigravity_sign_in_state_is_the_verdict_of_a_new_session_and_nothing_else_is_asked() {
+    let cli = Cli { command: r"C:\Users\Example User\AppData\Local\agy\bin\agy.exe".into(), prefix: vec![] };
+    let scratch = std::path::Path::new(r"C:\Faber data\agy-check");
+    for (recording, open, expected) in [
+        ("acct-signed-in", false, json!("signedIn")),
+        ("acct-signed-out", false, json!("signedOut")),
+        ("acct-garbage", false, json!("unknown")),
+        ("acct-no-answer", true, json!("unknown")),
+    ] {
+        let (spawn, calls, written) = acp_spawner(recording, open);
+        let began = Instant::now();
+        let status = tokio::time::timeout(
+            Duration::from_secs(5),
+            faber_engine::account::check(Vendor::Gemini, &cli, &spawn, scratch, Duration::from_millis(300)),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{recording}: the check ignored its timeout"));
+        assert_eq!(serde_json::to_value(status).unwrap(), expected, "{recording}");
+        assert!(began.elapsed() < Duration::from_secs(2), "{recording}");
+        assert_eq!(*calls.lock().unwrap(), vec![(cli.command.clone(), vec!["acp".to_string()])], "{recording}");
+        // What was written may still sit in the pipe to the recording's reader.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let sent: Vec<Value> =
+            String::from_utf8(written.lock().unwrap().clone()).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let methods: Vec<&str> = sent.iter().map(|m| m["method"].as_str().unwrap()).collect();
+        let expected_methods: &[&str] = if recording == "acct-garbage" { &["initialize"] } else { &["initialize", "session/new"] };
+        assert_eq!(methods, expected_methods, "{recording}: only the handshake and a session are ever asked for");
+        if let Some(session) = sent.get(1) {
+            assert_eq!(session["params"], json!({ "cwd": scratch.to_string_lossy(), "mcpServers": [] }), "{recording}");
+        }
+    }
+    assert_eq!(faber_engine::account::login_args(Vendor::Gemini), &["acp", "--login"]);
+}

@@ -2013,6 +2013,8 @@ export const en = {
   'setup.body': 'Claude: Pro or Max. Codex: ChatGPT Plus or Pro. One plan is enough. Choosing only checks installation and account; install or sign in separately.',
   'setup.claude': 'Claude',
   'setup.chatgpt': 'Codex',
+  'setup.antigravity': 'Antigravity',
+  'setup.antigravityPlan': 'Google AI Pro or Ultra. The free plan works too, with a smaller weekly limit.',
   'setup.none': 'None for now',
   'setup.checking': 'Checking…',
   'setup.notInstalled': 'Not installed',

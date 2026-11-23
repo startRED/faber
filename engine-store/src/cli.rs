@@ -83,7 +83,7 @@ fn shim_targets(shim: &str) -> Vec<String> {
 impl Cli {
     /// Finds a CLI on PATH, then in the folders the official installers use, which an app started from the desktop
     /// may not have on its PATH: the native installer's `~/.local/bin` (https://code.claude.com/docs/en/setup), npm's
-    /// global folder on Windows, and Homebrew's on macOS.
+    /// global folder and Antigravity's `%LOCALAPPDATA%\agy\bin` on Windows, and Homebrew's on macOS.
     pub fn find_in(
         name: &str,
         path_var: &str,
@@ -96,6 +96,7 @@ impl Cli {
         if windows {
             dirs.extend(env("USERPROFILE").map(|h| format!("{h}\\.local\\bin")));
             dirs.extend(env("APPDATA").map(|a| format!("{a}\\npm")));
+            dirs.extend(env("LOCALAPPDATA").map(|a| format!("{a}\\agy\\bin")));
         } else {
             dirs.extend(env("HOME").map(|h| format!("{h}/.local/bin")));
             dirs.extend(["/opt/homebrew/bin".to_string(), "/usr/local/bin".to_string()]);

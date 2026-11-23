@@ -2018,6 +2018,8 @@ export const es: Messages = {
   'setup.body': 'Claude: Pro o Max. Codex: ChatGPT Plus o Pro. Basta un plan. Elegir solo comprueba la instalación y la cuenta; instalar o iniciar sesión es otra acción.',
   'setup.claude': 'Claude',
   'setup.chatgpt': 'Codex',
+  'setup.antigravity': 'Antigravity',
+  'setup.antigravityPlan': 'Google AI Pro o Ultra. El plan gratuito también sirve, con un límite semanal menor.',
   'setup.none': 'Ninguna por ahora',
   'setup.checking': 'Comprobando…',
   'setup.notInstalled': 'No instalado',

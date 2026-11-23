@@ -9,6 +9,16 @@ How the first-run steps and the tutorial look and behave. The Settings screen is
   already saved). Opened later, from the no-AI state or from
   Settings, the same cards have no stepper and only a Close button. They save `setup` and nothing else, so reconnecting an
   account never restarts the first run or the tutorial.
+- Antigravity is a third choice, after Codex, only once its CLI (`agy`) is found on PATH or in its installer's folder
+  (`%LOCALAPPDATA%\agy\bin` on Windows): Faber does not install it yet, so a newcomer without it sees the same choices as
+  before. Its card says the plan under its name ("Google AI Pro or Ultra. The free plan works too, with a smaller weekly
+  limit.", from antigravity.google/docs/plans, 2026-11-22) and offers Sign in, which runs `agy acp --login` in a terminal the
+  person sees. Whether it is signed in comes from Antigravity's ACP server: `agy acp`, a handshake, then one new session in
+  `<data>/agy-check`, read for a session (signed in) or "Authentication required" (signed out); no prompt is sent, and the
+  process ends with the answer or after 20 s. The cards ask once when they open (only when `agy` is found) and again only on
+  Check again, never on window focus as for the other two. Each ask leaves one empty conversation in the CLI's own list,
+  under that folder; Faber keeps only the verdict. Connected Antigravity cannot answer yet: it is not one of the AIs Faber
+  lists or starts (R531).
 - A failed install explains the problem and next step in the card, with Try again and the official page together. The same card appears in Settings. A rejected install request also leaves the card ready to retry when no progress event arrived.
 - Step 2 shows the three themes side by side, each a small live render drawn with its own tokens. A choice changes the whole
   screen at once and saves nothing. Under the cards: text size (the same 13 to 18 px slider as Appearance), density, motion, "Do you already use

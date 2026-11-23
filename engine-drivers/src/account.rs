@@ -5,15 +5,19 @@
 //! when not (https://code.claude.com/docs/en/cli-reference).
 //! Codex: `codex login`, `codex login status` prints the active mode and exits 0 when signed in
 //! (https://developers.openai.com/codex/cli/reference/#codex-login).
+//! Antigravity: `agy acp --login` signs in with Google and exits. It has no status command, so Faber asks its ACP server
+//! (`agy acp`) for a new session: a session means signed in, error -32000 "Authentication required" means not. No model
+//! is called, but the CLI lists the empty session as a conversation of its own (tests/fixtures/agy/acct-*.jsonl).
 
 use crate::cli::Cli;
 use crate::model::Vendor;
 use crate::proc::Spawner;
 use crate::signals::{Signals, claude_plan};
 use serde::Serialize;
+use serde_json::json;
 use std::path::Path;
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,8 +32,7 @@ pub fn login_args(vendor: Vendor) -> &'static [&'static str] {
     match vendor {
         Vendor::Claude => &["auth", "login"],
         Vendor::Codex => &["login"],
-        // Not yet: no CLI is discovered for it, so nothing signs in.
-        Vendor::Gemini => &[],
+        Vendor::Gemini => &["acp", "--login"],
     }
 }
 
@@ -37,7 +40,8 @@ pub fn status_args(vendor: Vendor) -> &'static [&'static str] {
     match vendor {
         Vendor::Claude => &["auth", "status"],
         Vendor::Codex => &["login", "status"],
-        Vendor::Gemini => &[],
+        // The ACP server, which `acp_check` talks to: it prints nothing until asked.
+        Vendor::Gemini => &["acp"],
     }
 }
 
@@ -80,8 +84,64 @@ async fn run_args(cli: &Cli, args: Vec<String>, spawn: &Spawner, cwd: &Path, tim
 /// Runs the status command. Its output is read into memory only to reach a verdict, then dropped; a CLI that fails to start or
 /// does not answer within `timeout` is `Unknown`, and is killed when the check ends.
 pub async fn check(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> AccountStatus {
+    if vendor == Vendor::Gemini {
+        return acp_check(cli, spawn, cwd, timeout).await;
+    }
     let Some(Ran { out, err, code, .. }) = run(vendor, cli, spawn, cwd, timeout).await else { return AccountStatus::Unknown };
     if vendor == Vendor::Claude { verdict(vendor, &out, code) } else { verdict(vendor, &format!("{out}\n{err}"), code) }
+}
+
+/// Asks Antigravity's ACP server for a session in `cwd` and reads only the verdict of that answer. The server is told who is
+/// asking, then asked for a session, and nothing else: no prompt is ever sent. It ends when the check ends (the process is
+/// killed with its handles), after the answer, `timeout`, or more output than the bound.
+async fn acp_check(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> AccountStatus {
+    let args: Vec<String> = cli.prefix.iter().cloned().chain(status_args(Vendor::Gemini).iter().map(|a| a.to_string())).collect();
+    let Ok(p) = crate::proc::spawn_background(spawn, &cli.command, &args, cwd) else { return AccountStatus::Unknown };
+    // Held to the end of the check: dropping them ends the process.
+    let (_child, _contained, mut stdin) = (p.child, p.contained, p.stdin);
+    if let Some(err) = p.stderr {
+        // Drained to the end so a chatty server never blocks on a full pipe; nothing is kept, so it needs no bound. It ends
+        // when the process does.
+        tokio::spawn(async move { tokio::io::copy(&mut { err }, &mut tokio::io::sink()).await });
+    }
+    let request = |id: u32, method: &str, params: serde_json::Value| {
+        format!("{}\n", json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))
+    };
+    let run = async {
+        let hello = json!({ "protocolVersion": 1, "clientCapabilities": {}, "clientInfo": { "name": "faber", "version": env!("CARGO_PKG_VERSION") } });
+        stdin.write_all(request(1, "initialize", hello).as_bytes()).await.ok()?;
+        stdin.flush().await.ok()?;
+        let mut lines = tokio::io::BufReader::new(p.stdout.take(OUTPUT_LIMIT)).lines();
+        while let Some(line) = lines.next_line().await.ok()? {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+            if v["id"] == 1 {
+                if v.get("result").is_none() {
+                    return Some(AccountStatus::Unknown);
+                }
+                let session = json!({ "cwd": cwd.to_string_lossy(), "mcpServers": [] });
+                stdin.write_all(request(2, "session/new", session).as_bytes()).await.ok()?;
+                stdin.flush().await.ok()?;
+            } else if let Some(status) = acp_session_verdict(&v) {
+                return Some(status);
+            }
+        }
+        None
+    };
+    tokio::time::timeout(timeout, run).await.ok().flatten().unwrap_or(AccountStatus::Unknown)
+}
+
+/// The verdict of the server's answer to `session/new` (id 2); None for any other line. Only a session id counts as signed in,
+/// and only the authentication error as signed out: anything else the server says is unsure.
+fn acp_session_verdict(v: &serde_json::Value) -> Option<AccountStatus> {
+    if v["id"] != 2 {
+        return None;
+    }
+    if v["result"]["sessionId"].as_str().is_some_and(|s| !s.is_empty()) {
+        return Some(AccountStatus::SignedIn);
+    }
+    let auth =
+        v["error"]["code"] == -32000 && v["error"]["message"].as_str().is_some_and(|m| m.to_ascii_lowercase().contains("authentication"));
+    Some(if auth { AccountStatus::SignedOut } else { AccountStatus::Unknown })
 }
 
 /// Which newer flags the installed Claude Code lists in `--help` (one short hidden run, output bounded). None when it did not

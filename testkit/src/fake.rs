@@ -92,6 +92,9 @@ impl Dispatch {
 }
 
 pub fn run(env: &Env, args: &[String], stdin: &mut dyn BufRead, stdout: &mut dyn Write, stderr: &mut dyn Write) -> io::Result<i32> {
+    if args.first().is_some_and(|a| a == "acp") {
+        return agy_acp(env.state_dir.as_deref(), args, stdin, stdout);
+    }
     if env.recording.parent().and_then(Path::file_name).is_some_and(|name| name == "agy") {
         return agy_print(&env.recording, stdout, stderr);
     }
@@ -251,6 +254,33 @@ fn agy_print(recording: &Path, stdout: &mut dyn Write, stderr: &mut dyn Write) -
     }
     stdout.flush()?;
     Ok(code)
+}
+
+/// Antigravity's ACP server as the account check meets it (`tests/fixtures/agy/acct-*.jsonl`): it answers the handshake,
+/// then a new session while the marker says signed in and "Authentication required" otherwise. `acp --login` sets the marker.
+fn agy_acp(state: Option<&Path>, args: &[String], stdin: &mut dyn BufRead, stdout: &mut dyn Write) -> io::Result<i32> {
+    let marker = state.ok_or_else(|| io::Error::other("the Antigravity fake needs FABER_FAKE_STATE_DIR"))?.join("gemini.signed-in");
+    if args.iter().map(String::as_str).eq(["acp", "--login"]) {
+        std::fs::write(&marker, "true")?;
+        return Ok(0);
+    }
+    for line in stdin.lines() {
+        let Ok(request) = serde_json::from_str::<Value>(&line?) else { continue };
+        let answer = match request["method"].as_str() {
+            Some("initialize") => {
+                json!({ "jsonrpc": "2.0", "id": request["id"], "result": { "protocolVersion": 1, "agentInfo": { "name": "Antigravity ACP Server" } } })
+            }
+            Some("session/new") if marker.exists() => json!({ "jsonrpc": "2.0", "id": request["id"], "result": {
+                "sessionId": "00000000-0000-4000-8000-000000000001", "models": { "availableModels": [] } } }),
+            Some("session/new") => {
+                json!({ "jsonrpc": "2.0", "id": request["id"], "error": { "code": -32000, "message": "Authentication required" } })
+            }
+            _ => json!({ "jsonrpc": "2.0", "id": request["id"], "error": { "code": -32601, "message": "Method not found" } }),
+        };
+        writeln!(stdout, "{answer}")?;
+        stdout.flush()?;
+    }
+    Ok(0)
 }
 
 fn append(state: &Path, record: &Value) -> io::Result<()> {

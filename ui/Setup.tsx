@@ -34,6 +34,10 @@ export function noteSetupProgress(e: SetupProgress) {
   setProgresses((prev) => ({ ...prev, [e.vendor]: e }));
 }
 
+// Antigravity is offered only once its CLI is found on this PC: Faber does not install it yet.
+const VENDORS = ['claude', 'codex', 'gemini'] as const;
+const NAMES = { claude: 'setup.claude', codex: 'setup.chatgpt', gemini: 'setup.antigravity' } as const;
+
 const underway = (v: Vendor) => {
   const step = progresses()[v]?.step;
   return step !== undefined && step !== 'done' && step !== 'failed';
@@ -41,7 +45,7 @@ const underway = (v: Vendor) => {
 
 export function Setup(props: SetupProps) {
   // An AI still installing from an earlier visit is picked already, so its card shows where the install is.
-  const [selected, setSelected] = createSignal<Subscription[]>((['claude', 'codex'] as const).filter(underway));
+  const [selected, setSelected] = createSignal<Subscription[]>(VENDORS.filter(underway));
   const [checks, setChecks] = createSignal<Partial<Record<Vendor, Check>>>({});
   const [waitings, setWaitings] = createSignal<Partial<Record<Vendor, boolean>>>({});
   const [errors, setErrors] = createSignal<Partial<Record<Vendor, { key: string; detail?: string }>>>({});
@@ -87,13 +91,15 @@ export function Setup(props: SetupProps) {
   const onToggle = (option: Subscription) => {
     const next = toggleSubscription(selected(), option);
     setSelected(next);
-    if (option !== 'none' && next.includes(option)) {
+    // Antigravity was checked when the cards opened: each check opens a session the CLI keeps in its list.
+    if (option !== 'none' && next.includes(option) && !(option === 'gemini' && checks().gemini)) {
       void checkVendor(option as Vendor);
     }
   };
 
   onMount(() => {
     const onFocus = () => {
+      // Not Antigravity: each of its checks opens a session in its list, so it is checked again only on Check again.
       for (const v of ['claude', 'codex'] as const) {
         if (selected().includes(v) && waitings()[v]) {
           void checkVendor(v);
@@ -108,6 +114,11 @@ export function Setup(props: SetupProps) {
       });
     }
     for (const v of selected()) if (v !== 'none') void checkVendor(v);
+    // Only a found CLI is checked, so with none installed this starts nothing.
+    void api.setupCheck('gemini').then(
+      (res) => res.installed && setChecks((prev) => ({ ...prev, gemini: res })),
+      () => undefined,
+    );
     const unlisten = api.on((e) => {
       if (e.type === 'setup') {
         if (e.step === 'done') {
@@ -133,11 +144,14 @@ export function Setup(props: SetupProps) {
 
   const first = () => props.mode === 'firstRun';
   // "None for now" only means something in the first run; opened later, Close already says it.
-  const choices: [Subscription, string][] = [
+  const all: [Subscription, string][] = [
     ['claude', t('setup.claude')],
     ['codex', t('setup.chatgpt')],
+    ['gemini', t('setup.antigravity')],
     ...(first() ? [['none', t('setup.none')] as [Subscription, string]] : []),
   ];
+  // The same entries every time, so the picks already on screen are kept when Antigravity's appears.
+  const choices = () => all.filter(([option]) => option !== 'gemini' || checks().gemini?.installed);
 
   return (
     <Stage step={first() ? 1 : undefined} labelledby="setup-heading">
@@ -150,7 +164,7 @@ export function Setup(props: SetupProps) {
         <p class="sub">{t('setup.body')}</p>
 
         <div class="picks" role="group" aria-label={t('setup.title')}>
-          <For each={choices}>
+          <For each={choices()}>
             {([option, label]) => (
               <button type="button" class="pick" aria-pressed={selected().includes(option)} onClick={() => onToggle(option)}>
                 <Show when={option !== 'none'}>
@@ -168,7 +182,7 @@ export function Setup(props: SetupProps) {
         </div>
 
         <div class="setup-cards" ref={animateList}>
-          <For each={(['claude', 'codex'] as const).filter((v) => selected().includes(v))}>
+          <For each={VENDORS.filter((v) => selected().includes(v))}>
             {(vendor) => {
               const card = () =>
                 setupCard(
@@ -184,11 +198,14 @@ export function Setup(props: SetupProps) {
               return (
                 <div class="setup-card" data-vendor={vendor} ref={animateList}>
                   <div class="setup-card-header">
-                    <h2>{vendor === 'claude' ? t('setup.claude') : t('setup.chatgpt')}</h2>
+                    <h2>{t(NAMES[vendor])}</h2>
                     <span class={`setup-badge ${card().status}`}>
                       {fromEngine(`setup.${card().status}`)}
                     </span>
                   </div>
+                  <Show when={vendor === 'gemini'}>
+                    <p class="hint">{t('setup.antigravityPlan')}</p>
+                  </Show>
 
                   <Show when={card().status === 'installing' && progresses()[vendor]?.step}>
                     {(step) => (

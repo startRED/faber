@@ -16,6 +16,10 @@ const BUDGET_MB: f64 = 400.0;
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "setup: picked actions remain visible at 720x480", run: picked_actions_visible },
+        Scenario {
+            name: "setup: Antigravity is offered only once agy is found, and signs in, in French at 720 px",
+            run: antigravity_when_found,
+        },
         Scenario { name: "C5.1: installed signed-in Claude connects without reinstalling and answers the first question", run: c5_1 },
         Scenario { name: "C5.2: missing ChatGPT installs from loopback, signs in and answers without reopening", run: c5_2 },
         Scenario { name: "C5.3: None persists, shows connection guidance and never reopens setup automatically", run: c5_3_none },
@@ -58,6 +62,58 @@ fn picked_actions_visible(ctx: &mut Ctx) -> Result {
         app.page.wait_for(&format!("{action} visible above the footer"), &above)?;
         app.page.eval(&format!("[...document.querySelectorAll('.pick')].find(b => b.textContent.trim() === {label}).click()"))?;
     }
+    ctx.close(app.id)
+}
+
+/// Antigravity's choice appears only once `agy` is found: here in the folder its installer uses, which the sandbox's PATH does
+/// not hold. French is the step's longest language, and 720 px its narrowest window.
+fn antigravity_when_found(ctx: &mut Ctx) -> Result {
+    ctx.write_settings(&serde_json::json!({ "language": "fr" }))?;
+    let mut app = ctx.launch(claude_installed(ctx))?;
+    wait_for_guide(&mut app)?;
+    let name = app.page.text_of("setup.antigravity")?;
+    let pick = guide(&mut app)?.role("button", &name).exact();
+    let claude = guide(&mut app)?.role("button", &app.page.text_of("setup.claude")?).exact();
+    app.page.wait_visible(&claude)?;
+    // The check of a missing CLI answers at once; this leaves it time to have shown a choice it should not.
+    pause(2.0);
+    same(app.page.count(&pick)?, 0, "without agy there is no Antigravity choice")?;
+    ctx.close(app.id)?;
+
+    let bin = if cfg!(windows) { ctx.sb.profile.join("AppData/Local/agy/bin") } else { ctx.sb.profile.join(".local/bin") };
+    std::fs::create_dir_all(&bin).map_err(|e| e.to_string())?;
+    std::fs::copy(&ctx.paths.fake_cli, bin.join(if cfg!(windows) { "agy.exe" } else { "agy" })).map_err(|e| e.to_string())?;
+    let mut app = ctx.launch(claude_installed(ctx))?;
+    wait_for_guide(&mut app)?;
+    app.page.cdp.call(
+        "Emulation.setDeviceMetricsOverride",
+        serde_json::json!({ "width": 720, "height": 480, "deviceScaleFactor": 1, "mobile": false }),
+    )?;
+    let pick = guide(&mut app)?.role("button", &name).exact();
+    app.page.wait_visible(&pick)?;
+    app.page.click(&pick)?;
+    let sign_in = card("gemini").role("button", &app.page.text_of("setup.signIn")?).exact();
+    app.page.wait_visible(&sign_in)?;
+    let plan = app.page.text_of("setup.antigravityPlan")?;
+    app.page.wait_visible(&card("gemini").text(&plan).exact())?;
+    let fits = "(() => { const b = document.querySelector('.setup-card[data-vendor=\"gemini\"] .setup-card-actions button').getBoundingClientRect(), f = document.querySelector('.first-foot').getBoundingClientRect(), box = document.querySelector('.firstrun'); return b.bottom <= f.top && b.right <= innerWidth && box.scrollWidth <= box.clientWidth; })()";
+    app.page.wait_for("Antigravity's sign-in visible above the footer, nothing wider than the window", fits)?;
+    ctx.shot(&mut app, "setup-antigravity-fr-720")?;
+    // 720 px is the narrowest the window can be (electron/main.ts), so that and a wide window are the two to see.
+    app.page.cdp.call(
+        "Emulation.setDeviceMetricsOverride",
+        serde_json::json!({ "width": 1280, "height": 800, "deviceScaleFactor": 1, "mobile": false }),
+    )?;
+    ctx.shot(&mut app, "setup-antigravity-fr-1280")?;
+    ensure(ctx.sb.data.join("agy-check").is_dir(), || "the sign-in check runs in a scratch folder inside Faber's data".into())?;
+    app.page.click(&sign_in)?;
+    let marker = ctx.sb.state.join("gemini.signed-in");
+    eventually("the fake Antigravity sign-in to complete", Duration::from_secs(15), || marker.exists())?;
+    let again = card("gemini").role("button", &app.page.text_of("setup.checkAgain")?).exact();
+    if app.page.is_visible(&again)? {
+        app.page.click(&again)?;
+    }
+    connected(&mut app, "gemini")?;
     ctx.close(app.id)
 }
 

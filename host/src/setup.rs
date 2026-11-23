@@ -40,6 +40,7 @@ pub fn parse_vendor(s: &str) -> Option<Vendor> {
     match s.trim().to_ascii_lowercase().as_str() {
         "claude" => Some(Vendor::Claude),
         "codex" | "chatgpt" => Some(Vendor::Codex),
+        "gemini" | "antigravity" => Some(Vendor::Gemini),
         _ => None,
     }
 }
@@ -60,6 +61,12 @@ pub fn detect_clis_with(env: &dyn Fn(&str) -> Option<String>) -> BTreeMap<Vendor
             cli.map(|c| (v, c))
         })
         .collect()
+}
+
+/// Antigravity's `agy`. It is found and signed in to here only: until its driver exists it is not one of the CLIs the engine
+/// lists or starts (R531), so it never joins `detect_clis`.
+fn find_agy() -> Option<Cli> {
+    find_cli_candidate("agy", &|k| std::env::var(k).ok())
 }
 
 fn find_cli_candidate(name: &str, env: &dyn Fn(&str) -> Option<String>) -> Option<Cli> {
@@ -88,6 +95,18 @@ pub(crate) async fn check(h: &Host, vendor: String) -> Res<CheckResult> {
     let Some(v) = parse_vendor(&vendor) else {
         return Err("error.setup.check".into());
     };
+    if v == Vendor::Gemini {
+        let Some(cli) = find_agy() else {
+            return Ok(CheckResult { vendor: v, installed: false, account: AccountStatus::Unknown, can_install: false });
+        };
+        // The check opens an empty session, which the CLI lists under this folder: it stays inside Faber's data folder.
+        let scratch = h.data_dir.join("agy-check");
+        let account = match std::fs::create_dir_all(&scratch) {
+            Ok(()) => faber_engine::account::check(v, &cli, &faber_engine::proc::real_spawner(), &scratch, SIGN_IN_TIMEOUT).await,
+            Err(_) => AccountStatus::Unknown,
+        };
+        return Ok(CheckResult { vendor: v, installed: true, account, can_install: false });
+    }
     let clis = detect_clis();
     let installed = clis.contains_key(&v);
     h.engine.replace_clis(clis.clone());
@@ -115,8 +134,8 @@ pub(crate) async fn sign_in(vendor: String) -> Res<()> {
     let Some(v) = parse_vendor(&vendor) else {
         return Err("error.setup.signIn".into());
     };
-    let clis = detect_clis();
-    let Some(cli) = clis.get(&v) else {
+    let cli = if v == Vendor::Gemini { find_agy() } else { detect_clis().remove(&v) };
+    let Some(cli) = cli else {
         return Err("error.setup.signIn".into());
     };
     let mut args = cli.prefix.clone();
@@ -131,7 +150,8 @@ pub(crate) async fn sign_in(vendor: String) -> Res<()> {
 pub(crate) async fn install(h: &Host, vendor: String) -> Res<()> {
     // An update never ends the process in the middle of an install: the shell holds it off until this is dropped.
     let _running = h.shell.hold_install()?;
-    let Some(v) = parse_vendor(&vendor) else {
+    // Faber does not install Antigravity's CLI yet: its card is offered only once `agy` is found.
+    let Some(v) = parse_vendor(&vendor).filter(|v| *v != Vendor::Gemini) else {
         h.announce(&SetupProgressEvent {
             event_type: "setup".into(),
             vendor: Vendor::Claude,
@@ -234,6 +254,12 @@ mod tests {
 
         let codex_args = faber_engine::account::login_args(Vendor::Codex);
         assert_eq!(codex_args, &["login"]);
+        assert_eq!(parse_vendor("gemini"), Some(Vendor::Gemini));
+        assert!(terminal::is_safe(&faber_engine::TerminalCommand {
+            command: r"C:\Users\Test\AppData\Local\agy\bin\agy.exe".into(),
+            args: faber_engine::account::login_args(Vendor::Gemini).iter().map(|a| a.to_string()).collect(),
+            cwd: PathBuf::from(r"C:\Users\Test"),
+        }));
 
         let safe_cmd = faber_engine::TerminalCommand {
             command: "claude.exe".into(),

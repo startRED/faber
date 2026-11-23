@@ -1062,9 +1062,33 @@ check('settings: reversing a section switch before its exit ends keeps the lates
 /** Runs a check with both CLIs saying someone is signed in, as the accounts section asks them when it opens. */
 async function signedIn<T>(run: () => Promise<T> | T): Promise<T> {
   const was = api.setupCheck;
-  api.setupCheck = async (vendor) => ({ vendor, installed: true, account: 'signedIn', canInstall: false });
+  api.setupCheck = async (vendor) => ({ vendor, installed: vendor !== 'gemini', account: 'signedIn', canInstall: false });
   try { return await run(); } finally { api.setupCheck = was; }
 }
+
+check('settings: Antigravity has a card only once its CLI is found, named for the provider and with the plan it runs on', async () => {
+  useLanguage('en');
+  const was = api.setupCheck;
+  try {
+    for (const found of [false, true]) {
+      api.setupCheck = async (vendor) => ({ vendor, installed: vendor !== 'gemini' || found, account: 'signedOut', canInstall: false });
+      const view = mount(() => createComponent(Settings, {
+        look: look(), saved: {}, vendors: [], start: 'accounts', now: Date.now(), quotas: {},
+        onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+      }));
+      try {
+        await tick();
+        await tick();
+        const card = view.host.querySelector<HTMLElement>('.acct[data-vendor="gemini"]');
+        equal(!!card, found, found ? 'a found agy has a card' : 'no card without agy');
+        if (card) {
+          equal(card.querySelector('h3')!.textContent, en['setup.antigravity'], 'named Antigravity, not after one of its models');
+          ok(card.textContent!.includes(en['setup.antigravityPlan']), 'the card names the plan it runs on');
+        }
+      } finally { view.stop(); }
+    }
+  } finally { api.setupCheck = was; }
+});
 
 check('settings: the accounts card writes Faber\'s spend in the person\'s format, never four decimals', () => {
   const usage = [{ vendor: 'claude', plan: 'max', state: 'ok', learning: false, relearning: false, foreignUse: false, overageOn: false, billedPerUse: false,

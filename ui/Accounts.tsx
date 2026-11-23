@@ -12,7 +12,9 @@ import { ageWords, untilReset, windowName } from './Sidebar.tsx';
 // Every note about how the numbers are read sits behind one "Details" fold; nothing here asks the person to act, except the
 // plan the CLI could not name.
 
-const VENDORS: Vendor[] = ['claude', 'codex'];
+// Antigravity has a card only once its CLI is found; it is named for the provider, as Gemini is only one of its models.
+const VENDORS: Vendor[] = ['claude', 'codex', 'gemini'];
+const shownName = (v: Vendor) => (v === 'gemini' ? t('setup.antigravity') : vendorName(v));
 const WORDS = { checking: 'set.checking', connected: 'set.connected', notConnected: 'set.notConnected', unsure: 'set.unsure' } as const;
 /** Amber only near a real limit (C002): running low or out. Fast use is said calmly. */
 const WARN: ReadonlySet<VendorUsage['state']> = new Set(['low', 'out']);
@@ -124,13 +126,16 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
       <header class="acct-head" ref={animateList}>
         <h3 class="vm" id={`acct-${v()}-name`}>
           <VendorMark vendor={v()} />
-          {vendorName(v())}
+          {shownName(v())}
         </h3>
         <Show when={props.shown && u()}>{(x) => <span class="acct-plan">{x().plan ? t('usage.plan', { plan: planName(x().plan!) }) : t('usage.planUnknown')}</span>}</Show>
         <span class="acct-pill" classList={{ on: line() === 'connected', warn: warn() }} title={u() && line() === 'connected' ? (billing() ? t(billing() === 'billed' ? 'usage.billedPerUse' : 'usage.authNeeded') : t(`usage.state.${u()!.state}`)) : undefined}>
           {word()}
         </span>
       </header>
+      <Show when={v() === 'gemini'}>
+        <p class="acct-foot">{t('setup.antigravityPlan')}</p>
+      </Show>
       <Show when={props.shown && u()}>
         {(x) => (
           <>
@@ -235,7 +240,7 @@ export function AccountsSection(props: { vendors: Vendor[]; quotas: Quotas; usag
           {t('set.openSetup')}
         </button>
       </div>
-      <For each={VENDORS}>
+      <For each={VENDORS.filter((v) => { const c = checks()[v]; return v !== 'gemini' || (c !== undefined && c !== 'failed' && c.installed); })}>
         {(v) => <Card vendor={v} check={checks()[v]} shown={props.vendors.includes(v)} quotas={props.quotas} usage={props.usage} now={props.now} />}
       </For>
       <ForgetLearned />
