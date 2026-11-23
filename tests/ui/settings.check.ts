@@ -1062,11 +1062,11 @@ check('settings: reversing a section switch before its exit ends keeps the lates
 /** Runs a check with both CLIs saying someone is signed in, as the accounts section asks them when it opens. */
 async function signedIn<T>(run: () => Promise<T> | T): Promise<T> {
   const was = api.setupCheck;
-  api.setupCheck = async (vendor) => ({ vendor, installed: vendor !== 'gemini', account: 'signedIn', canInstall: false });
+  api.setupCheck = async (vendor) => ({ vendor, installed: vendor !== 'gemini', account: vendor === 'gemini' ? 'unknown' : 'signedIn', canInstall: false });
   try { return await run(); } finally { api.setupCheck = was; }
 }
 
-check('settings: Antigravity has a card only once its CLI is found, named for the provider and with the plan it runs on', async () => {
+check('settings: Antigravity has a card with or without its CLI, like the other two, named for the provider and with the plan it runs on', async () => {
   useLanguage('en');
   const was = api.setupCheck;
   try {
@@ -1080,11 +1080,9 @@ check('settings: Antigravity has a card only once its CLI is found, named for th
         await tick();
         await tick();
         const card = view.host.querySelector<HTMLElement>('.acct[data-vendor="gemini"]');
-        equal(!!card, found, found ? 'a found agy has a card' : 'no card without agy');
-        if (card) {
-          equal(card.querySelector('h3')!.textContent, en['setup.antigravity'], 'named Antigravity, not after one of its models');
-          ok(card.textContent!.includes(en['setup.antigravityPlan']), 'the card names the plan it runs on');
-        }
+        ok(card, found ? 'a found agy has a card' : 'without agy the card is there too, as for the other two');
+        equal(card.querySelector('h3')!.textContent, en['setup.antigravity'], 'named Antigravity, not after one of its models');
+        ok(card.textContent!.includes(en['setup.antigravityPlan']), 'the card names the plan it runs on');
       } finally { view.stop(); }
     }
   } finally { api.setupCheck = was; }
@@ -1123,7 +1121,7 @@ check('settings: one card per AI with a capitalised plan, one status word, the r
   try {
     await tick();
     await tick();
-    equal(view.host.querySelectorAll('.acct').length, 2, 'one card for each AI');
+    equal(view.host.querySelectorAll('.acct').length, 3, 'one card for each AI, Antigravity too');
     ok(view.host.textContent!.includes(en['usage.apiValue']), 'the visible estimate explains that it is not a bill');
     const card = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"]')!;
     ok(card.textContent!.includes('Plan: Max'), 'the plan is capitalised');
