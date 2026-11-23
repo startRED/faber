@@ -93,7 +93,8 @@ header and its plan are in [conversation.md](conversation.md); the work log abov
   [service protocol](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server/src/bespoke_event_handling.rs#L1235-L1250).
   A health reply or another service protocol message gives the end notice another five seconds. Unstructured output and
   notifications replayed internally by Faber cannot satisfy the check. [App-server protocol](https://learn.chatgpt.com/docs/app-server#protocol)
-  The Stop check protects approvals and questions in other conversations. The one-reply tool checks protect all pending requests.
+  The Stop check protects approvals and questions in other conversations. Silence-triggered checks wait while any
+  conversation on the service has a pending approval or question, then start a fresh quiet window.
   A service that responds stays open. If it stays silent and the affected writers can be confirmed stopped, the reply
   says Faber stopped the unresponsive service and kept its history. If writers are still unconfirmed, the reply says
   so and stays open instead of claiming that it stopped.

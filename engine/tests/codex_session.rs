@@ -2052,6 +2052,11 @@ async fn an_open_connector_tool_does_not_cancel_a_peers_pending_approval() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn two_silent_replies_do_not_cancel_a_third_pending_approval() {
+    service_health(true, HealthTrigger::Connector, HealthPeer::ThirdWaitingForApproval).await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_failed_probe_with_a_running_native_command_requires_writer_confirmation() {
     service_health(false, HealthTrigger::NativeCommand, HealthPeer::Absent).await;
 }
@@ -2546,6 +2551,7 @@ enum HealthPeer {
     Stopping,
     WaitingForApproval,
     WaitingForQuestion,
+    ThirdWaitingForApproval,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2583,7 +2589,11 @@ async fn service_health(responsive: bool, trigger: HealthTrigger, peer: HealthPe
     let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
     let mut sessions = Vec::new();
     let mut config_id = None;
-    let ids: &[_] = if peer == HealthPeer::Absent { &["a"] } else { &["a", "b"] };
+    let ids: &[_] = match peer {
+        HealthPeer::Absent => &["a"],
+        HealthPeer::ThirdWaitingForApproval => &["a", "b", "c"],
+        _ => &["a", "b"],
+    };
     for &id in ids {
         let tx = tx.clone();
         let mut thread = mode_thread(Permissions::Ask, Default::default());
@@ -2615,10 +2625,11 @@ async fn service_health(responsive: bool, trigger: HealthTrigger, peer: HealthPe
         }
     }
 
+    let pending_peer = ids.last().copied().unwrap();
     let person = match peer {
-        HealthPeer::WaitingForApproval => Some((
+        HealthPeer::WaitingForApproval | HealthPeer::ThirdWaitingForApproval => Some((
             json!({"id":"peer-request","method":"item/commandExecution/requestApproval","params":{
-                "threadId":"b","turnId":"b","itemId":"peer-command","command":"echo ok","cwd":"."
+                "threadId":pending_peer,"turnId":pending_peer,"itemId":"peer-command","command":"echo ok","cwd":"."
             }}),
             json!({"decision":"decline"}),
         )),
@@ -2633,7 +2644,7 @@ async fn service_health(responsive: bool, trigger: HealthTrigger, peer: HealthPe
     if let Some((request, _)) = &person {
         support::emit(&mut output, request.clone()).await;
         tokio::time::timeout(Duration::from_secs(30), async {
-            while !matches!(events.recv().await, Some(("b", EngineEvent::Permission { request_id, .. })) if request_id == "peer-request") {}
+            while !matches!(events.recv().await, Some((id, EngineEvent::Permission { request_id, .. })) if id == pending_peer && request_id == "peer-request") {}
         })
         .await
         .expect("the peer must be waiting for the person");
@@ -2685,7 +2696,7 @@ async fn service_health(responsive: bool, trigger: HealthTrigger, peer: HealthPe
         )
         .await;
         while !matches!(events.recv().await, Some(("a", EngineEvent::Tool { id, .. })) if id == "one-tool") {}
-        if peer == HealthPeer::Working {
+        if matches!(peer, HealthPeer::Working | HealthPeer::ThirdWaitingForApproval) {
             tokio::time::advance(Duration::from_secs(600)).await;
         } else {
             let mut early_probe = String::new();
@@ -2707,9 +2718,19 @@ async fn service_health(responsive: bool, trigger: HealthTrigger, peer: HealthPe
             tokio::time::timeout(Duration::from_secs(11), tokio::io::AsyncBufReadExt::read_line(&mut input, &mut probe)).await.is_err(),
             "a request pending with the person should keep the peer alive: {probe}"
         );
-        assert_eq!(sessions[1].answer("peer-request", false).await, Ok(Delivery::Delivered));
+        assert_eq!(sessions.last().unwrap().answer("peer-request", false).await, Ok(Delivery::Delivered));
         assert_eq!(contained_message(&mut input).await, json!({"id":"peer-request","result":result}));
         assert!(server.is_alive());
+        if peer == HealthPeer::ThirdWaitingForApproval {
+            assert!(
+                tokio::time::timeout(Duration::from_secs(599), tokio::io::AsyncBufReadExt::read_line(&mut input, &mut probe))
+                    .await
+                    .is_err(),
+                "answering the approval should start a fresh quiet window: {probe}"
+            );
+            tokio::time::advance(Duration::from_secs(2)).await;
+            support::expect_method(&mut input, "thread/loaded/list").await;
+        }
         return;
     }
     if peer == HealthPeer::WorkingAfterStop {

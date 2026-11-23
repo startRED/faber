@@ -150,7 +150,7 @@ an external wake or a person sending a message. The original two messages and th
 The conversation command reported the same blocker, and the screen's status formatter rendered it with the saved note
 and the Brazilian Portuguese instruction to connect a subscription. No model request ran.
 
-- [389](../tasks/389-recover-shared-service.md): two active replies sharing a silent service now trigger a bounded
+- Two active replies sharing a silent service now trigger a bounded
   local probe. With one active reply, a Stop for a known turn also qualifies when its completion notice is missing after
   five seconds, even if the service acknowledged the interrupt or sent a status update. A native MCP tool still open after
   15 minutes of silence or a native command still open after 30 minutes of silence qualifies as well. The one-reply checks

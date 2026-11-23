@@ -2338,19 +2338,18 @@ async fn serve(
         });
         let first = active.next();
         let shared_work = ready && active.next().is_some();
-        let quiet_for = if shared_work {
-            Some(Duration::from_secs_f64(crate::stuck::QUIET))
-        } else if ready
-            && let Some(t) = first.filter(|t| t.turn.is_some() && !t.state.probe_tools.is_empty())
-            && threads.values().all(|t| t.approvals.is_empty() && t.questions.is_empty())
-        {
-            Some(if t.state.probe_tools.values().any(|kind| *kind == ProbeTool::Command) {
-                Duration::from_secs_f64(crate::stuck::QUIET_COMMAND)
-            } else {
-                MCP_HEALTH_QUIET
-            })
-        } else {
+        let quiet_for = if !ready || threads.values().any(|t| !t.approvals.is_empty() || !t.questions.is_empty()) {
             None
+        } else if shared_work {
+            Some(Duration::from_secs_f64(crate::stuck::QUIET))
+        } else {
+            first.filter(|t| t.turn.is_some() && !t.state.probe_tools.is_empty()).map(|t| {
+                if t.state.probe_tools.values().any(|kind| *kind == ProbeTool::Command) {
+                    Duration::from_secs_f64(crate::stuck::QUIET_COMMAND)
+                } else {
+                    MCP_HEALTH_QUIET
+                }
+            })
         };
         let quiet_deadline = if let Some(quiet_for) = quiet_for {
             let since = *active_since.get_or_insert_with(tokio::time::Instant::now);
