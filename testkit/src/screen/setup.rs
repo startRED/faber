@@ -17,8 +17,8 @@ pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "setup: picked actions remain visible at 720x480", run: picked_actions_visible },
         Scenario {
-            name: "setup: without agy, Antigravity installs from its official source and signs in, in French at 720 px",
-            run: antigravity_installs,
+            name: "setup: Antigravity is offered only once agy is found, and signs in, in French at 720 px",
+            run: antigravity_when_found,
         },
         Scenario { name: "C5.1: installed signed-in Claude connects without reinstalling and answers the first question", run: c5_1 },
         Scenario { name: "C5.2: missing ChatGPT installs from loopback, signs in and answers without reopening", run: c5_2 },
@@ -65,55 +65,45 @@ fn picked_actions_visible(ctx: &mut Ctx) -> Result {
     ctx.close(app.id)
 }
 
-/// Without `agy`, Antigravity is offered like the other two: Install fetches its manifest and the program it names from the
-/// loopback release, places it in its installer's folder (which the sandbox's PATH does not hold), runs its setup, and the
-/// card offers Sign in. French is the step's longest language, and 720 px its narrowest window.
-fn antigravity_installs(ctx: &mut Ctx) -> Result {
+/// Antigravity's choice appears only once `agy` is found: here in the folder its installer uses, which the sandbox's PATH does
+/// not hold. French is the step's longest language, and 720 px its narrowest window.
+fn antigravity_when_found(ctx: &mut Ctx) -> Result {
     ctx.write_settings(&serde_json::json!({ "language": "fr" }))?;
-    ctx.serve_release()?;
     let mut app = ctx.launch(claude_installed(ctx))?;
     wait_for_guide(&mut app)?;
-    let size = |width: u32, height: u32| serde_json::json!({ "width": width, "height": height, "deviceScaleFactor": 1, "mobile": false });
-    app.page.cdp.call("Emulation.setDeviceMetricsOverride", size(720, 480))?;
-    let pick = guide(&mut app)?.role("button", &app.page.text_of("setup.antigravity")?).exact();
+    let name = app.page.text_of("setup.antigravity")?;
+    let pick = guide(&mut app)?.role("button", &name).exact();
+    let claude = guide(&mut app)?.role("button", &app.page.text_of("setup.claude")?).exact();
+    app.page.wait_visible(&claude)?;
+    // The check of a missing CLI answers at once; this leaves it time to have shown a choice it should not.
+    pause(2.0);
+    same(app.page.count(&pick)?, 0, "without agy there is no Antigravity choice")?;
+    ctx.close(app.id)?;
+
+    let bin = if cfg!(windows) { ctx.sb.profile.join("AppData/Local/agy/bin") } else { ctx.sb.profile.join(".local/bin") };
+    std::fs::create_dir_all(&bin).map_err(|e| e.to_string())?;
+    std::fs::copy(&ctx.paths.fake_cli, bin.join(if cfg!(windows) { "agy.exe" } else { "agy" })).map_err(|e| e.to_string())?;
+    let mut app = ctx.launch(claude_installed(ctx))?;
+    wait_for_guide(&mut app)?;
+    app.page.cdp.call(
+        "Emulation.setDeviceMetricsOverride",
+        serde_json::json!({ "width": 720, "height": 480, "deviceScaleFactor": 1, "mobile": false }),
+    )?;
+    let pick = guide(&mut app)?.role("button", &name).exact();
     app.page.wait_visible(&pick)?;
     app.page.click(&pick)?;
-    let absent = app.page.text_of("setup.notInstalled")?;
-    app.page.wait_visible(&card("gemini").text(&absent).exact())?;
-    let plan = app.page.text_of("setup.antigravityPlan")?;
-    app.page.wait_visible(&card("gemini").text(&plan).exact())?;
-    if !cfg!(windows) {
-        // Like the other two, Faber installs only on Windows; elsewhere the card sends to the official page.
-        let page = card("gemini").role("button", &app.page.text_of("setup.officialPage")?).exact();
-        app.page.wait_visible(&page)?;
-        return ctx.close(app.id);
-    }
-    let install = card("gemini").role("button", &app.page.text_of("setup.install")?).exact();
-    app.page.wait_visible(&install)?;
-    let fits = "(() => { const b = document.querySelector('.setup-card[data-vendor=\"gemini\"] .setup-card-actions button').getBoundingClientRect(), f = document.querySelector('.first-foot').getBoundingClientRect(), box = document.querySelector('.firstrun'); return b.bottom <= f.top && b.right <= innerWidth && box.scrollWidth <= box.clientWidth; })()";
-    app.page.wait_for("Antigravity's Install visible above the footer, nothing wider than the window", fits)?;
-    ctx.shot(&mut app, "setup-antigravity-install-fr-720")?;
-    // 720 px is the narrowest the window can be (electron/main.ts), so that and a wide window are the two to see.
-    app.page.cdp.call("Emulation.setDeviceMetricsOverride", size(1280, 800))?;
-    ctx.shot(&mut app, "setup-antigravity-install-fr-1280")?;
-    app.page.cdp.call("Emulation.setDeviceMetricsOverride", size(720, 480))?;
-    app.page.click(&install)?;
-
     let sign_in = card("gemini").role("button", &app.page.text_of("setup.signIn")?).exact();
     app.page.wait_visible(&sign_in)?;
-    // Install fades out as Sign in fades in; the picture is of the card once both have finished.
-    app.page.wait_for("the card's animations to finish", "document.getAnimations().every(a => a.playState !== 'running')")?;
-    pause(0.3);
-    let installed = std::fs::read(ctx.sb.profile.join("AppData/Local/agy/bin/agy.exe")).map_err(|e| format!("the installed agy: {e}"))?;
-    ensure(installed == ctx.payload, || "the served program must be the installed agy.exe".to_string())?;
-    let requests = ctx.server.as_ref().map(|s| s.requests()).unwrap_or_default();
-    ensure(requests.iter().any(|r| r.starts_with("/manifests/windows_")), || format!("the manifest should have been read: {requests:?}"))?;
-    ensure(requests.iter().any(|r| r == crate::server::AGY_PROGRAM), || format!("the program should have been downloaded: {requests:?}"))?;
-    let lines: Vec<String> = ctx.records()?.iter().map(|c| c.line()).collect();
-    ensure(lines.iter().any(|l| l == "install"), || format!("agy.exe install should have run, as the official installer does: {lines:?}"))?;
+    let plan = app.page.text_of("setup.antigravityPlan")?;
+    app.page.wait_visible(&card("gemini").text(&plan).exact())?;
+    let fits = "(() => { const b = document.querySelector('.setup-card[data-vendor=\"gemini\"] .setup-card-actions button').getBoundingClientRect(), f = document.querySelector('.first-foot').getBoundingClientRect(), box = document.querySelector('.firstrun'); return b.bottom <= f.top && b.right <= innerWidth && box.scrollWidth <= box.clientWidth; })()";
     app.page.wait_for("Antigravity's sign-in visible above the footer, nothing wider than the window", fits)?;
     ctx.shot(&mut app, "setup-antigravity-fr-720")?;
-    app.page.cdp.call("Emulation.setDeviceMetricsOverride", size(1280, 800))?;
+    // 720 px is the narrowest the window can be (electron/main.ts), so that and a wide window are the two to see.
+    app.page.cdp.call(
+        "Emulation.setDeviceMetricsOverride",
+        serde_json::json!({ "width": 1280, "height": 800, "deviceScaleFactor": 1, "mobile": false }),
+    )?;
     ctx.shot(&mut app, "setup-antigravity-fr-1280")?;
     ensure(ctx.sb.data.join("agy-check").is_dir(), || "the sign-in check runs in a scratch folder inside Faber's data".into())?;
     app.page.click(&sign_in)?;

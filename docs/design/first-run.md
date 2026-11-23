@@ -9,16 +9,13 @@ How the first-run steps and the tutorial look and behave. The Settings screen is
   already saved). Opened later, from the no-AI state or from
   Settings, the same cards have no stepper and only a Close button. They save `setup` and nothing else, so reconnecting an
   account never restarts the first run or the tutorial.
-- Antigravity is a third choice, after Codex, always. Its CLI (`agy`) is found on PATH or in its installer's folder
-  (`%LOCALAPPDATA%\agy\bin` on Windows). Without it, its card is the other two's: Not installed with Install, the same
-  steps while installing, and Try again beside the official page (antigravity.google/docs/cli/install) after a failure;
-  outside Windows only the official page, as for the other two. Install does what Antigravity's own installer does, without
-  PowerShell: the manifest of the platform, the program it names checked against its SHA-512, `agy.exe` placed in that
-  folder, then `agy.exe install`, hidden and ended after 60 s ([the source](../dev/antigravity-install.md)). Its card says the plan under its name ("Google AI Pro or Ultra. The free plan works too, with a smaller weekly
+- Antigravity is a third choice, after Codex, only once its CLI (`agy`) is found on PATH or in its installer's folder
+  (`%LOCALAPPDATA%\agy\bin` on Windows): Faber does not install it yet, so a newcomer without it sees the same choices as
+  before. Its card says the plan under its name ("Google AI Pro or Ultra. The free plan works too, with a smaller weekly
   limit.", from antigravity.google/docs/plans, 2026-11-22) and offers Sign in, which runs `agy acp --login` in a terminal the
   person sees. Whether it is signed in comes from Antigravity's ACP server: `agy acp`, a handshake, then one new session in
   `<data>/agy-check`, read for a session (signed in) or "Authentication required" (signed out); no prompt is sent, and the
-  process ends with the answer or after 20 s. The cards ask once when it is picked (a session only when `agy` is found) and again only on
+  process ends with the answer or after 20 s. The cards ask once when they open (only when `agy` is found) and again only on
   Check again, never on window focus as for the other two. Each ask leaves one empty conversation in the CLI's own list,
   under that folder; Faber keeps only the verdict. Connected Antigravity cannot answer yet: it is not one of the AIs Faber
   lists or starts (R531).
