@@ -159,6 +159,10 @@ pub enum Billing {
     Unknown,
 }
 
+/// How long Antigravity stays out after its CLI said the quota ran out without naming a reset: it has no reading that could
+/// show room again, so it is tried again after this (`docs/product/quota-pacing.md`, "Antigravity").
+pub const AGY_BACKOFF: f64 = 3600.0;
+
 /// Whether the CLI itself said the vendor cannot answer.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum Reach {

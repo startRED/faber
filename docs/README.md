@@ -34,6 +34,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [product/recovery.md](product/recovery.md) | Desktop-shell migration, draft import, rollback files and engine restart limits |
 | [product/distribution.md](product/distribution.md) | License, provider terms, distribution |
 | [product/quota-pacing.md](product/quota-pacing.md) | Auto's quota pacing, quota readings and their measurements |
+| [product/cache-router.md](product/cache-router.md) | The prompt cache and the routers, measured on the real CLIs |
 | [product/parity.md](product/parity.md) | What Claude Code, Codex, claude.ai and ChatGPT have that Faber still lacks, how each gap closes, and what is never closed |
 | [design/app-control.md](design/app-control.md) | Named app targets, stable refs, hidden screens and preserved agent permissions |
 | [design/README.md](design/README.md) | Before any screen change: the design in short, rules for every screen, the first frame, the screen cards |

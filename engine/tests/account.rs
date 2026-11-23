@@ -549,3 +549,146 @@ async fn antigravity_sign_in_state_is_the_verdict_of_a_new_session_and_nothing_e
     }
     assert_eq!(faber_engine::account::login_args(Vendor::Gemini), &["acp", "--login"]);
 }
+
+/// The answer to `session/new` in an Antigravity account recording.
+fn recorded_session(name: &str) -> Value {
+    let path = format!("{}/../tests/fixtures/agy/{name}.jsonl", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{path}: {e}"))
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .filter(|v| v["dir"] == "stdout")
+        .map(|v| serde_json::from_str::<Value>(v["msg"].as_str().unwrap()).unwrap())
+        .find(|m| m["id"] == 2)
+        .unwrap_or_else(|| panic!("{name}: no answer to session/new"))
+}
+
+/// An engine with no CLI, on a clock the test moves (Unix seconds): nothing here may start a process.
+fn antigravity_engine(dir: &crate::support::DataFolder, start: f64) -> (Engine, Arc<Mutex<f64>>) {
+    let (engine, _rx) = engine(dir, BTreeMap::new(), Arc::new(|_, _, _| panic!("Antigravity's limits start no process")));
+    let clock = Arc::new(Mutex::new(start));
+    let read = clock.clone();
+    engine.set_time_source(Arc::new(move || *read.lock().unwrap()));
+    (engine, clock)
+}
+
+fn antigravity_usage(engine: &Engine) -> Option<faber_engine::usage::VendorUsage> {
+    engine.quota_view().1.into_iter().find(|u| u.vendor == Vendor::Gemini)
+}
+
+#[tokio::test]
+async fn antigravity_recorded_tier_confirms_subscription_billing_and_an_unknown_tier_does_not() {
+    let cli = Cli { command: r"C:\Users\Example User\AppData\Local\agy\bin\agy.exe".into(), prefix: vec![] };
+    let (spawn, calls, _) = acp_spawner("acct-signed-in", false);
+    let (status, plan) = faber_engine::account::antigravity_account(
+        &cli,
+        &spawn,
+        std::path::Path::new(r"C:\Faber data\agy-check"),
+        Duration::from_millis(300),
+    )
+    .await;
+    assert_eq!(calls.lock().unwrap().len(), 1, "the plan comes with the sign-in check: no second process");
+    let dir = crate::support::DataFolder::new();
+    let (engine, _clock) = antigravity_engine(&dir, 2_000_000_000.0);
+    assert!(antigravity_usage(&engine).is_none(), "no limits are shown before the account check found it");
+    engine.note_antigravity_account(status, plan);
+    let ledger = engine.ledger();
+    assert_eq!(ledger.gemini.billing, faber_engine::budget::Billing::Subscription);
+    assert_eq!(ledger.gemini.plan.as_deref(), Some("Google AI Pro"));
+    let u = antigravity_usage(&engine).expect("a connected Antigravity has its limits shown");
+    assert_eq!((u.plan.as_deref(), u.state, u.billing_unknown, u.windows.len()), (Some("Google AI Pro"), "unknown", false, 0));
+    assert!(!engine.vendors().contains(&Vendor::Gemini), "nothing lists or starts it yet (R531)");
+
+    // A tier Faber does not know (the free plan, an API key, a new one) or no tier at all stays unconfirmed: Auto keeps away.
+    let mut session = recorded_session("acct-signed-in")["result"].clone();
+    session["_meta"]["antigravity"]["tier"] = json!({ "name": "Free", "id": "free-tier" });
+    let unknown = faber_engine::signals::antigravity_plan(&session);
+    assert_eq!(unknown.billing, Some(faber_engine::budget::Billing::Unknown));
+    engine.note_antigravity_account(faber_engine::account::AccountStatus::SignedIn, Some(unknown));
+    assert_eq!(engine.ledger().gemini.billing, faber_engine::budget::Billing::Unknown);
+    let u = antigravity_usage(&engine).unwrap();
+    assert!(u.billing_unknown && u.plan.as_deref() == Some("Free"), "{u:?}");
+    session["_meta"]["antigravity"]["tier"] = json!({ "id": "g1-pro-tier" });
+    engine
+        .note_antigravity_account(faber_engine::account::AccountStatus::SignedIn, Some(faber_engine::signals::antigravity_plan(&session)));
+    assert_eq!(antigravity_usage(&engine).unwrap().plan, None, "a tier with no name keeps no plan from an earlier one");
+    session["_meta"]["antigravity"].as_object_mut().unwrap().remove("tier");
+    assert_eq!(faber_engine::signals::antigravity_plan(&session).billing, Some(faber_engine::budget::Billing::Unknown));
+
+    engine.note_antigravity_account(faber_engine::account::AccountStatus::SignedOut, None);
+    assert!(antigravity_usage(&engine).is_none(), "signed out, it is no longer connected");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn antigravity_quota_answer_says_no_reading_with_faber_own_spend() {
+    let now = 2_000_000_000.0;
+    let day = (now / 86_400.0_f64).floor() as i64;
+    let dir = crate::support::DataFolder::new();
+    std::fs::write(dir.path().join("budget.json"), json!({ "gemini": { "own_spend": { day.to_string(): 1.25 } } }).to_string()).unwrap();
+    let (engine, _clock) = antigravity_engine(&dir, now);
+    engine.note_antigravity_account(
+        faber_engine::account::AccountStatus::SignedIn,
+        Some(faber_engine::signals::antigravity_plan(&recorded_session("acct-signed-in")["result"])),
+    );
+    let text = faber_engine::toolbox::quota(&engine.quota_view().1, now);
+    assert!(
+        text.contains(
+            "Antigravity (subscription, plan Google AI Pro): no confirmed reading.\n  unknown: no reading yet.\n  Faber's own spend on it today: US$1.25 at API prices."
+        ),
+        "{text}"
+    );
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn antigravity_out_of_quota_is_out_until_the_reset_or_the_back_off_and_comes_back_after() {
+    let start = 2_000_000_000.0;
+    let dir = crate::support::DataFolder::new();
+    let (engine, clock) = antigravity_engine(&dir, start);
+    engine.note_antigravity_account(
+        faber_engine::account::AccountStatus::SignedIn,
+        Some(faber_engine::signals::antigravity_plan(&recorded_session("acct-signed-in")["result"])),
+    );
+    let at = |t: f64| {
+        *clock.lock().unwrap() = t;
+        antigravity_usage(&engine).unwrap().state
+    };
+    assert_eq!(at(start), "unknown", "connected with no reading: usable, never 'out' by a number it does not have");
+    engine.note_antigravity_out(Some(start + 600.0));
+    assert_eq!(at(start + 599.0), "out");
+    assert_eq!(at(start + 601.0), "unknown", "back once the reset the error named has passed");
+
+    let t = start + 1_000.0;
+    *clock.lock().unwrap() = t;
+    engine.note_antigravity_out(None);
+    assert_eq!(at(t + faber_engine::budget::AGY_BACKOFF - 1.0), "out", "no reset named: out for the back-off");
+    assert_eq!(at(t + faber_engine::budget::AGY_BACKOFF + 1.0), "unknown");
+
+    let t = start + 10_000.0;
+    *clock.lock().unwrap() = t;
+    engine.note_antigravity_out(Some(t - 5.0));
+    assert_eq!(at(t + 60.0), "out", "a reset already past is no reset: the back-off holds");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn antigravity_pace_is_neutral_without_a_reading() {
+    let now = 2_000_000_000.0;
+    let dir = crate::support::DataFolder::new();
+    let (engine, _clock) = antigravity_engine(&dir, now);
+    engine.note_antigravity_account(
+        faber_engine::account::AccountStatus::SignedIn,
+        Some(faber_engine::signals::antigravity_plan(&recorded_session("acct-signed-in")["result"])),
+    );
+    let ledger = engine.ledger();
+    let (snap, shape) = (ledger.gemini.snap(now), ledger.gemini.shape());
+    assert!(snap.windows.is_empty());
+    // The weight of an AI with room: neither preferred (below 1) nor avoided (above 1) by a reading it does not have.
+    assert_eq!(snap.vendor_m(&shape, 0, now), 1.0);
+    assert_eq!(snap.profile_m(Some("gemini"), &shape, 0, now), 1.0);
+    assert_eq!(snap.state(&shape, 0, now), faber_engine::budget::State::Normal);
+    assert!(snap.usable(None, now) && !snap.exhausted(now));
+    assert!(faber_engine::budget::gate(&snap, None, faber_engine::budget::Purpose::UserTurn { by_hand: false }, false, now).is_ok());
+    engine.shutdown();
+}

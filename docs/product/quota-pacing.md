@@ -120,6 +120,28 @@ Codex’s week); other windows stay as read, so admission on them can run slight
 left. Being ahead of the line is said as "being used fast this week" and never as running out, in the answer’s note and in
 Settings alike.
 
+### Antigravity
+
+Recorded on agy 1.5.14 (2026-11-22/23, [antigravity-cli.md](../dev/antigravity-cli.md) items 8 and 12 of "Over ACP").
+
+Known: the plan. The answer to `session/new` carries `_meta.antigravity.tier` (name and id) with no model call, and the account
+check that already opens one session for the sign-in state keeps it, so no second process runs. Tier `g1-pro-tier` (Google AI
+Pro, recorded) and `g1-ultra-tier` (Google AI Ultra, assumed, not recorded) confirm billing as a subscription; any other tier
+(the free plan, an API key, one not seen yet) or none leaves it unconfirmed, and Auto refuses unconfirmed billing as for the
+other two. Settings shows the tier's name as the plan. Billing is rechecked each run: until the accounts cards check again (or a
+later driver's own session reports the tier), it is unconfirmed.
+
+Not known: any quota number. No zero-token reading exists in the CLI or over ACP (`usage_update` is the context window only),
+and Faber never starts a model turn only to measure. Antigravity therefore has "no confirmed reading": the `quota` tool says
+"no reading yet" with Faber's own spend on it, and Settings' whole-account bars show the no-reading state.
+
+Pace without a reading, ready for when Antigravity can run (it cannot yet: nothing lists, starts or routes it, R531): the quota
+gate passes it when connected with confirmed subscription billing, with the neutral weight of an AI that has room (never
+preferred or avoided by pace), and only Faber's own spend counts. Its driver, still to come, will report the CLI's
+out-of-quota error through `Engine::note_antigravity_out`, which marks it out until the reset the error names, or for one hour
+(`AGY_BACKOFF`) when it names none or one already past; while out the gate refuses it and Settings shows "out". One hour
+because no reading can show room sooner, and a retry costs at most one refused turn.
+
 ### Quota lag, measured
 
 Measured on 15/10/2026 with a 3-minute poller over 90 minutes (both zero-token sources) plus one deliberate Codex run; the
@@ -163,48 +185,9 @@ acceptance limit; the historical results above do not describe the 2026-11-10 pr
 The 2026-11-10 smoke passed: 0.000 versus 1.000 exhausted hours, about 0.041% versus 1.024% dropped tasks,
 and mean quality 76.82 versus 76.41 (pacing on versus off). The updated 200-seed run has not been repeated.
 
-### Cache and router, measured on 13/10/2026
+### Cache and router
 
-`engine/examples/cache_probe.rs` ran against the real CLIs on a Claude Max subscription (Sonnet 5.5) and a ChatGPT
-subscription (GPT-6 Luna). Every question carries about 3,800 new tokens, so a second turn that reads the whole earlier
-prefix still shows about 72%: the new question is written, not read. The table now has a `1h written` column.
-
-| Scenario | Second turn: read / written | Reading |
-| :--- | :--- | :--- |
-| Claude, three turns in one process | 10,876 / 4,296 | the baseline: the whole prefix is read |
-| Claude, resume at once, same effort | 10,876 / 4,299 | a restart with `--resume` loses nothing |
-| Claude, medium, then resume at high (twice) | 10,876 / 4,296 and 4,295 | **an effort change keeps the cache** |
-| Claude, resume after 240 s and 360 s | 10,876 / 4,295 and 4,298 | the 120 s idle close costs nothing |
-| Claude, resume after 3,700 s | 0 / 15,171 | the cache lives one hour, then everything is written again |
-| Codex, three turns on one thread | read 43%, 34%, 86% | Codex's own cache varies a lot between turns |
-| Codex, low then medium on one thread (twice) | read 19% and 34% | no loss beyond that variance |
-| Codex, a turn after 6 min and after 35 min | read 84% both | still warm after half an hour |
-
-On a subscription, Claude writes every cache entry with the one-hour lifetime, so closing an idle process after 120 s
-and resuming it inside the hour is free, and so is a change of effort through `--resume`. Changing effort before the
-next message therefore needs no deferral to a natural break. A change of model still starts a new cache.
-
-The result of every Claude turn names which bucket its cache writes went into (`usage.cache_creation.ephemeral_1h_input_tokens` and
-`ephemeral_5m_input_tokens`). Faber keeps "warm until" on the reply (`Message::cache_warm_until`: an hour for the 1-hour bucket, five
-minutes for the 5-minute one, nothing when neither is named) and the latest reply shows it in the tooltip of its cost, hidden when
-unknown or cold. The lifetime counts from the start of the last request (its assistant message start in the stream, less a 5 s margin),
-not from the result; a turn whose start was not seen shows nothing. It is display only: Auto does not route by it, because a change of model starts a new cache anyway. Codex names no
-lifetime, so it shows nothing.
-
-`engine/examples/route_eval.rs` sends 30 hand-labelled requests (kind, difficulty and the new `check`) to each router,
-one fresh session each, the way Auto asks:
-
-| Router | Valid JSON | Kind | Difficulty | Check | Median / slowest |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| GPT-6 Luna, medium | 100% | 93% | 70% | 87% | 3.3 s / 9.1 s |
-| GPT-6 Luna, low | 100% | 90% | 70% | 83% | 3.3 s / 4.5 s |
-| Haiku 5.5, medium | 100% | 100% | 70% | 73% | 9.6 s / 28.7 s |
-| Haiku 5.5, low | 100% | 100% | 70% | 77% | 9.5 s / 19.7 s |
-
-Low effort made neither router faster at the median and Luna slightly less accurate, so the routers stay at medium.
-The labels are one reader's, so a disagreement is a question, not a proven mistake. By the labels, the requests the
-routers called `blind` against the label were easy, of a kind the raise ignores, or already hard; the raise only moves
-medium code, math and research.
+Measured on 13/10/2026: [cache-router.md](cache-router.md#cache-and-router-measured-on-13102026).
 
 ### Measurement still requiring the owner
 

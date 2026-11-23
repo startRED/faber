@@ -86,7 +86,7 @@ name. Auto aims to pick a model that does the task well, without waste and quick
 - The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
   glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or
   research gets the hard bar, as math always did, because the model's own checking matters most where nobody else can
-  check (done, `engine-core/src/route.rs`; measured in [quota-pacing.md](quota-pacing.md#cache-and-router-measured-on-13102026)).
+  check (done, `engine-core/src/route.rs`; measured in [quota-pacing.md](cache-router.md#cache-and-router-measured-on-13102026)).
 - Code that changed with nothing checking it first offers the makers' first step: the same model checks its own work
   ("Check the work", R565; Faber's verify counts as a check). An answer whose last check failed, or one still unchecked
   right after that offer, offers one step up. Below high, raise the same model one effort first. From high onward, compare that row (if present) with the next stronger model
@@ -141,7 +141,7 @@ phase.
 3. **Keep the conversation's model, tools and system prompt stable; Auto sets each message's effort inside that model.**
    The prompt cache is the biggest saving. A model change always starts a new cache; changing tools or the system prompt
    invalidates everything after it. Changing effort kept Claude's cache through `--resume` and cost Codex nothing measurable
-   (13/10/2026, [quota-pacing.md](quota-pacing.md#cache-and-router-measured-on-13102026)). Facts that change travel as text
+   (13/10/2026, [quota-pacing.md](cache-router.md#cache-and-router-measured-on-13102026)). Facts that change travel as text
    in the next message. Auto reuses a finished draft verdict without waiting; no verdict keeps the previous effort.
    It chooses the cheapest row of the held model that clears the same level, scope and project bars, or that model's strongest
    row. It raises immediately; lowering needs confidence of at least 0.7 and a non-blind check. Claude's lowering also needs

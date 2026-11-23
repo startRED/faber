@@ -12,7 +12,9 @@ export type Outlook = { kind: 'out' | 'billed' | 'low' | 'fast'; when?: number }
 
 const billed = (u: VendorUsage) => u.billedPerUse || u.billingUnknown;
 
-export function keepGoingOutlook(usage: readonly VendorUsage[]): Outlook | undefined {
+export function keepGoingOutlook(all: readonly VendorUsage[]): Outlook | undefined {
+  // Antigravity's limits are shown before it can run, so keep going cannot move to it yet.
+  const usage = all.filter((u) => u.vendor !== 'gemini');
   if (!usage.length) return undefined;
   const usable = usage.filter((u) => !billed(u) && u.state !== 'out');
   if (!usable.length) {

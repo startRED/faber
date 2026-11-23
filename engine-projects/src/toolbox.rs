@@ -285,6 +285,7 @@ pub fn quota(vendors: &[VendorUsage], now: f64) -> String {
                 w.elapsed * 100.0
             ));
         }
+        out.push(format!("  Faber's own spend on it today: US${:.2} at API prices.", v.own_spend_usd));
         if v.relearning {
             out.push("  Learning this account's pace again, so the pace is rough.".into());
         } else if v.learning {

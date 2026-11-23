@@ -1,5 +1,6 @@
 //! Small account views for the screen: the account's quota and Faber's own money have separate labels and fields.
 use super::*;
+use crate::account::AccountStatus;
 use crate::budget::{Snap, State, elapsed};
 
 impl Core {
@@ -19,8 +20,12 @@ impl Core {
     pub(super) fn usage(&self) -> Vec<VendorUsage> {
         let now = self.secs();
         let day = ((now + self.utc_offset as f64) / 86_400.0).floor() as i64;
+        // Antigravity is not one of the CLIs the engine runs yet (R531), but once its account check found it signed in its
+        // limits are shown: plan and billing, no reading, Faber's own spend.
+        let connected = self.ledger.gemini.plan_seen_at.is_some().then_some(Vendor::Gemini);
         self.vendors()
             .into_iter()
+            .chain(connected.filter(|g| !self.opts.clis.contains_key(g)))
             .map(|vendor| {
                 let v = self.ledger.of(vendor);
                 let mut snap = self.snap(vendor, now);
@@ -84,5 +89,48 @@ impl Core {
     }
     pub(super) fn emit_usage(&self) {
         (self.emit)(AppEvent::Usage { vendors: self.usage() });
+    }
+}
+
+impl Engine {
+    /// What Antigravity's account check (or later its driver's own `session/new`) found: signed in, with the plan its tier
+    /// names (`signals::antigravity_plan`), makes it connected, with subscription billing only for a tier Faber recognises;
+    /// signed out makes it not connected; an unsure check refreshes nothing. No process is started here.
+    pub fn note_antigravity_account(&self, status: AccountStatus, plan: Option<Signals>) {
+        self.with(|c| c.antigravity_checked(status, plan))
+    }
+    /// A turn of Antigravity ended with its CLI's out-of-quota error: out until the reset the error names, or for
+    /// `AGY_BACKOFF` when it names none or one already past. Antigravity has no reading that could show room sooner.
+    pub fn note_antigravity_out(&self, resets_at: Option<f64>) {
+        self.with(|c| {
+            let now = c.secs();
+            let until = resets_at.filter(|t| t.is_finite() && *t > now).unwrap_or(now + crate::budget::AGY_BACKOFF);
+            c.apply_signals(Vendor::Gemini, Signals { reach: Some(Reach::Out(Some(until))), ..Signals::default() });
+        })
+    }
+}
+
+impl Core {
+    fn antigravity_checked(&mut self, status: AccountStatus, plan: Option<Signals>) {
+        let now = self.secs();
+        let v = self.ledger.of_mut(Vendor::Gemini);
+        match (status, plan) {
+            (AccountStatus::SignedIn, Some(s)) => {
+                // Marks it connected (`plan_seen_at`) even when the tier names no plan, which then reads "plan unknown": a name
+                // kept from an earlier tier would show a plan this account may not have.
+                v.plan_detected(s.plan.clone(), now);
+                if s.plan.is_none() {
+                    v.plan = None;
+                    v.plan_missing();
+                }
+                self.apply_signals(Vendor::Gemini, Signals { plan: None, ..s });
+            }
+            (AccountStatus::SignedOut, _) => {
+                v.plan_seen_at = None;
+                self.apply_signals(Vendor::Gemini, Signals { billing: Some(Billing::Unknown), ..Signals::default() });
+            }
+            _ => v.plan_failed(),
+        }
+        self.save_ledger(true);
     }
 }

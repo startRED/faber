@@ -85,18 +85,20 @@ async fn run_args(cli: &Cli, args: Vec<String>, spawn: &Spawner, cwd: &Path, tim
 /// does not answer within `timeout` is `Unknown`, and is killed when the check ends.
 pub async fn check(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> AccountStatus {
     if vendor == Vendor::Gemini {
-        return acp_check(cli, spawn, cwd, timeout).await;
+        return antigravity_account(cli, spawn, cwd, timeout).await.0;
     }
     let Some(Ran { out, err, code, .. }) = run(vendor, cli, spawn, cwd, timeout).await else { return AccountStatus::Unknown };
     if vendor == Vendor::Claude { verdict(vendor, &out, code) } else { verdict(vendor, &format!("{out}\n{err}"), code) }
 }
 
-/// Asks Antigravity's ACP server for a session in `cwd` and reads only the verdict of that answer. The server is told who is
-/// asking, then asked for a session, and nothing else: no prompt is ever sent. It ends when the check ends (the process is
-/// killed with its handles), after the answer, `timeout`, or more output than the bound.
-async fn acp_check(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> AccountStatus {
+/// Asks Antigravity's ACP server for a session in `cwd` and reads only the verdict of that answer, with the plan the same answer
+/// names when signed in (`signals::antigravity_plan`; None otherwise). The server is told who is asking, then asked for a
+/// session, and nothing else: no prompt is ever sent. It ends when the check ends (the process is killed with its handles),
+/// after the answer, `timeout`, or more output than the bound.
+pub async fn antigravity_account(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> (AccountStatus, Option<Signals>) {
+    let unknown = (AccountStatus::Unknown, None);
     let args: Vec<String> = cli.prefix.iter().cloned().chain(status_args(Vendor::Gemini).iter().map(|a| a.to_string())).collect();
-    let Ok(p) = crate::proc::spawn_background(spawn, &cli.command, &args, cwd) else { return AccountStatus::Unknown };
+    let Ok(p) = crate::proc::spawn_background(spawn, &cli.command, &args, cwd) else { return unknown };
     // Held to the end of the check: dropping them ends the process.
     let (_child, _contained, mut stdin) = (p.child, p.contained, p.stdin);
     if let Some(err) = p.stderr {
@@ -116,18 +118,19 @@ async fn acp_check(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) ->
             let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
             if v["id"] == 1 {
                 if v.get("result").is_none() {
-                    return Some(AccountStatus::Unknown);
+                    return Some((AccountStatus::Unknown, None));
                 }
                 let session = json!({ "cwd": cwd.to_string_lossy(), "mcpServers": [] });
                 stdin.write_all(request(2, "session/new", session).as_bytes()).await.ok()?;
                 stdin.flush().await.ok()?;
             } else if let Some(status) = acp_session_verdict(&v) {
-                return Some(status);
+                let plan = (status == AccountStatus::SignedIn).then(|| crate::signals::antigravity_plan(&v["result"]));
+                return Some((status, plan));
             }
         }
         None
     };
-    tokio::time::timeout(timeout, run).await.ok().flatten().unwrap_or(AccountStatus::Unknown)
+    tokio::time::timeout(timeout, run).await.ok().flatten().unwrap_or(unknown)
 }
 
 /// The verdict of the server's answer to `session/new` (id 2); None for any other line. Only a session id counts as signed in,

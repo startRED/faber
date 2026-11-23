@@ -66,7 +66,7 @@ check('keep going: Faber\'s own message takes no row, and a stop says why on the
   }
 });
 
-const usage = (vendor: 'claude' | 'codex', state: VendorUsage['state'], more: Partial<VendorUsage> = {}): VendorUsage => ({
+const usage = (vendor: VendorUsage['vendor'], state: VendorUsage['state'], more: Partial<VendorUsage> = {}): VendorUsage => ({
   vendor, state, learning: false, relearning: false, foreignUse: false, overageOn: false, billedPerUse: false, billingUnknown: false,
   askForPlan: false, paidPossible: false, ownSpendUsd: 0, unmetered: 0, counting: false, windows: [], ...more,
 });
@@ -82,6 +82,7 @@ check('keep going: poor quota is read across every AI, and one AI with room mean
   deepEqual(keepGoingOutlook([usage('claude', 'out')]), { kind: 'out', when: undefined });
   deepEqual(keepGoingOutlook([usage('claude', 'out', { billedPerUse: true }), usage('codex', 'unknown', { billingUnknown: true })]), { kind: 'billed' });
   deepEqual(keepGoingOutlook([usage('claude', 'out'), usage('codex', 'ok', { billedPerUse: true })]), { kind: 'out', when: undefined }, 'an AI billed per use is never the way out');
+  deepEqual(keepGoingOutlook([usage('claude', 'out'), usage('codex', 'out'), usage('gemini', 'unknown')]), { kind: 'out', when: undefined }, 'Antigravity cannot run yet, so it is no way out');
 });
 
 check('keep going: with poor quota the line asks before it turns on, and while it is on it stays in view', async () => {

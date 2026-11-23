@@ -84,8 +84,10 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   soon as those two requests settle, even if the model list is still waiting; a reply received before the deadline is kept
   if another request fails or never answers.
 - Antigravity has a card in Accounts and limits only once its CLI (`agy`) is found. It is named "Antigravity" (Gemini is
-  one of its models), says the plan it runs on in one line and shows whether it is connected; it has no limits or spend
-  rows yet, since it does not answer yet (R531). Its sign-in state is asked as on the first run (see first-run.md).
+  one of its models), says the plan it runs on in one line and shows whether it is connected. Once its check finds it signed
+  in, the card also shows the plan its tier names, the no-reading state (no bars: no quota number exists) and Faber's own
+  spend, as the other cards do without a reading ([quota-pacing.md](../product/quota-pacing.md#antigravity)); it still
+  does not answer (R531). Its sign-in state is asked as on the first run (see first-run.md).
 - Accounts and limits has one card per AI (the former Connected accounts and Usage limits, one section): its mark, name,
   the plan with its first letter capital, and one status word in a pill that is amber only when a window is really near
   its limit (C002; fast use is said calmly). Then one row per quota window the vendor has reported (name, used share, a

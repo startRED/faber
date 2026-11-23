@@ -97,14 +97,20 @@ pub(crate) async fn check(h: &Host, vendor: String) -> Res<CheckResult> {
     };
     if v == Vendor::Gemini {
         let Some(cli) = find_agy() else {
+            // Gone since the last check: no longer connected, so its limits and billing are not shown or trusted.
+            h.engine.note_antigravity_account(AccountStatus::SignedOut, None);
             return Ok(CheckResult { vendor: v, installed: false, account: AccountStatus::Unknown, can_install: false });
         };
         // The check opens an empty session, which the CLI lists under this folder: it stays inside Faber's data folder.
         let scratch = h.data_dir.join("agy-check");
-        let account = match std::fs::create_dir_all(&scratch) {
-            Ok(()) => faber_engine::account::check(v, &cli, &faber_engine::proc::real_spawner(), &scratch, SIGN_IN_TIMEOUT).await,
-            Err(_) => AccountStatus::Unknown,
+        let (account, plan) = match std::fs::create_dir_all(&scratch) {
+            Ok(()) => {
+                faber_engine::account::antigravity_account(&cli, &faber_engine::proc::real_spawner(), &scratch, SIGN_IN_TIMEOUT).await
+            }
+            Err(_) => (AccountStatus::Unknown, None),
         };
+        // The plan comes with the same answer, so the limits learn it without a second process.
+        h.engine.note_antigravity_account(account, plan);
         return Ok(CheckResult { vendor: v, installed: true, account, can_install: false });
     }
     let clis = detect_clis();

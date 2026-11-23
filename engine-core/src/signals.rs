@@ -93,6 +93,21 @@ pub fn codex_account(msg: &Value) -> Signals {
     Signals { plan: plan.map(String::from), billing: Some(billing), ..Signals::default() }
 }
 
+/// Antigravity tiers known to be a paid Google AI subscription. Any other id (the free plan, an API key, a tier not seen yet)
+/// leaves the billing unconfirmed, so Auto keeps away from it.
+const AGY_SUBSCRIPTIONS: [&str; 2] = ["g1-pro-tier", "g1-ultra-tier"];
+
+/// Antigravity's answer to `session/new` (or `session/load`, `session/resume`): its `_meta.antigravity.tier` names the
+/// account's plan with no model call (`docs/dev/antigravity-cli.md`, "Over ACP" item 12). Only the tier is read. A session
+/// with no tier, or one Faber does not know, says the billing is not confirmed.
+pub fn antigravity_plan(session: &Value) -> Signals {
+    let tier = &session["_meta"]["antigravity"]["tier"];
+    let plan = tier["name"].as_str().map(str::trim).filter(|n| !n.is_empty()).map(|n| n.chars().take(40).collect());
+    let known = tier["id"].as_str().is_some_and(|id| AGY_SUBSCRIPTIONS.contains(&id));
+    let billing = if known { Billing::Subscription } else { Billing::Unknown };
+    Signals { plan, billing: Some(billing), ..Signals::default() }
+}
+
 /// What `claude auth status` printed, reduced to the plan and the billing: everything else in the output is dropped
 /// unread.
 pub fn claude_plan(output: &str) -> Signals {

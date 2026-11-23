@@ -241,7 +241,7 @@ export function AccountsSection(props: { vendors: Vendor[]; quotas: Quotas; usag
         </button>
       </div>
       <For each={VENDORS.filter((v) => { const c = checks()[v]; return v !== 'gemini' || (c !== undefined && c !== 'failed' && c.installed); })}>
-        {(v) => <Card vendor={v} check={checks()[v]} shown={props.vendors.includes(v)} quotas={props.quotas} usage={props.usage} now={props.now} />}
+        {(v) => <Card vendor={v} check={checks()[v]} shown={props.vendors.includes(v) || !!props.usage?.some((u) => u.vendor === v)} quotas={props.quotas} usage={props.usage} now={props.now} />}
       </For>
       <ForgetLearned />
     </>
