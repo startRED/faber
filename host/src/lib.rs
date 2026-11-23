@@ -679,6 +679,13 @@ pub fn start(options: StartOptions, shell: Arc<dyn Shell>) -> std::io::Result<Ar
         host.engine.set_browser(browser);
     }
     host.engine.watch_accounts();
+    // The first-run cards check their own account. Returning users get one background check for the installed Antigravity CLI.
+    if clis.contains_key(&Vendor::Gemini) && host.engine.settings().setup.is_some() {
+        let account_host = host.clone();
+        host.runtime.spawn(async move {
+            let _ = setup::check(&account_host, Vendor::Gemini.name().into()).await;
+        });
+    }
     host.engine.watch_archive();
     host.engine.detect_claude_flags();
     let (settling, log_dir) = (host.engine.clone(), data_dir.clone());

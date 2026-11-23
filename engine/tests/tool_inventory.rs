@@ -29,7 +29,9 @@ fn tool_inventory_lists_each_vendor_and_source_without_reading_skill_bodies() {
     std::fs::write(home.path().join(".codex/auth.json"), "must never leave this file").unwrap();
 
     let lists = inventory(data.path(), Some(home.path()), Some(project.path()));
-    assert_eq!(lists.len(), 2, "discovery works even before connecting either CLI");
+    assert_eq!(lists.len(), 3, "discovery works before connecting any CLI");
+    assert_eq!(lists[2].vendor, Vendor::Gemini);
+    assert!(lists[2].rows.is_empty());
     assert_eq!(lists[0].vendor, Vendor::Claude);
     assert_eq!(names(&lists[0], "user"), ["personal-writing"]);
     assert_eq!(names(&lists[0], "project"), ["project-writing"]);
@@ -111,7 +113,7 @@ async fn tool_inventory_times_out_a_blocked_reader_and_retries_do_not_add_worker
     started.await.unwrap();
     let lists = reading.await.unwrap().unwrap();
     assert!(start.elapsed() < Duration::from_secs(4), "the two-second deadline does not wait for the blocked disk");
-    assert_eq!(lists.len(), 2);
+    assert_eq!(lists.len(), 3);
     assert!(lists.iter().all(|l| l.rows.is_empty() && l.issues.len() == 4 && l.issues.iter().all(|i| i.reason == "unavailable")));
     for _ in 0..3 {
         let reads = calls.clone();

@@ -124,6 +124,28 @@ fn antigravity_installs(ctx: &mut Ctx) -> Result {
         app.page.click(&again)?;
     }
     connected(&mut app, "gemini")?;
+    finish(&mut app)?;
+    super::pass_look(&mut app.page)?;
+    super::skip_tour(&mut app.page)?;
+    ready_to_chat(&mut app)?;
+    let model_group = css(".model-menu .model-group.gemini").has_text("Antigravity");
+    app.page.click(&css(".composer .model-chip"))?;
+    app.page.wait_visible(&model_group)?;
+    app.page.wait_for(
+        "the Antigravity mark in the model menu",
+        "document.querySelector('.model-menu .model-group.gemini .mk.gemini')?.getBoundingClientRect().width > 0",
+    )?;
+    ctx.shot(&mut app, "composer-antigravity-fr-desktop")?;
+    app.page.press("Escape")?;
+    app.page.cdp.call("Emulation.setDeviceMetricsOverride", size(390, 844))?;
+    app.page.click(&css(".composer .model-chip"))?;
+    app.page.wait_visible(&model_group)?;
+    ctx.shot(&mut app, "composer-antigravity-fr-phone")?;
+    ctx.close(app.id)?;
+    let mut app = ctx.launch(claude_installed(ctx))?;
+    ready_to_chat(&mut app)?;
+    app.page.click(&css(".composer .model-chip"))?;
+    app.page.wait_visible(&model_group)?;
     ctx.close(app.id)
 }
 

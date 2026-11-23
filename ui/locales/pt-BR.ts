@@ -1721,6 +1721,7 @@ export const ptBR: Messages = {
   'error.compact.busy': 'Dá para compactar quando a IA terminar.',
   'error.messageGone': 'Essa mensagem não está mais nesta conversa.',
   'error.notConnected': 'Essa assinatura não está conectada.',
+  'error.antigravity.permissions': 'O Antigravity funciona em Perguntar e Acesso total. Escolha um em Permissões.',
   'error.look.nearAmber': 'Esse tom fica perto do âmbar de “precisa de você”. Escolha outro.',
   'error.look.nearClaude': 'Esse tom fica perto do coral do Claude. Escolha outro.',
   'error.look.nearCodex': 'Esse tom fica perto do violeta do Codex. Escolha outro.',

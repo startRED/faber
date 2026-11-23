@@ -11,14 +11,14 @@ use std::sync::Arc;
 pub enum Vendor {
     Claude,
     Codex,
-    /// Antigravity, through its `agy` CLI (task 055); the stored id stays `gemini`. Known, but nothing discovers, starts or routes it yet.
+    /// Antigravity, through its `agy` CLI; the stored id stays `gemini`.
     Gemini,
 }
 
 impl Vendor {
     pub const ALL: [Vendor; 3] = [Vendor::Claude, Vendor::Codex, Vendor::Gemini];
-    /// The vendors Faber discovers, lists and starts today; Antigravity joins once its CLI is discovered (the tasks after 055).
-    pub const RUNNABLE: [Vendor; 2] = [Vendor::Claude, Vendor::Codex];
+    /// The vendors Faber can discover and start. Account availability is checked separately.
+    pub const RUNNABLE: [Vendor; 3] = Self::ALL;
 
     pub fn name(self) -> &'static str {
         match self {
@@ -2010,6 +2010,10 @@ pub enum Permissions {
 }
 
 impl Permissions {
+    pub fn supports_antigravity(self) -> bool {
+        matches!(self, Self::Ask | Self::FullAccess)
+    }
+
     /// The modes that keep the person in the loop (everything the person can choose except full access): the CLI starts in
     /// its restricted setup, and the person's hooks stay off unless the switch is on.
     pub fn guarded(self) -> bool {

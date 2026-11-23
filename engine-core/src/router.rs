@@ -123,7 +123,7 @@ pub fn pick_model(choice: &Choice, available: &[Vendor], codex_recommended: Opti
     if available.contains(&Vendor::Codex) {
         return Some(pick(Vendor::Codex, None, "reason.autoOnly"));
     }
-    None
+    available.contains(&Vendor::Gemini).then(|| pick(Vendor::Gemini, None, "reason.autoOnly"))
 }
 
 #[cfg(test)]

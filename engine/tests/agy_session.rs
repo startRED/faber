@@ -1,9 +1,12 @@
 use crate::support::{self, DataFolder};
 use faber_engine::account::AccountStatus;
+use faber_engine::budget::{Billing, Reach};
 use faber_engine::cli::Cli;
+use faber_engine::events::EngineEvent;
 use faber_engine::model::{Area, Permissions, Settings, Status, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::router::Choice;
+use faber_engine::signals::Signals;
 use faber_engine::{Engine, EngineOptions, SendRequest};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -11,6 +14,10 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader, DuplexStream};
 
 fn boot(dir: &DataFolder, permissions: Permissions, spawn: Spawner) -> Engine {
+    boot_with_router(dir, permissions, spawn, false)
+}
+
+fn boot_with_router(dir: &DataFolder, permissions: Permissions, spawn: Spawner, fake_router: bool) -> Engine {
     let engine = Engine::new(
         EngineOptions {
             data_dir: dir.path().into(),
@@ -23,7 +30,15 @@ fn boot(dir: &DataFolder, permissions: Permissions, spawn: Spawner) -> Engine {
             max_warm: 3,
             idle: Duration::from_secs(60),
             runtime: tokio::runtime::Handle::current(),
-            ask: None,
+            ask: if fake_router {
+                Some(Arc::new(|_| {
+                    Box::pin(async {
+                        Some(r#"{"kind":"chat","difficulty":"easy","check":"glance","scope":"tight","confidence":0.95}"#.into())
+                    })
+                }))
+            } else {
+                None
+            },
         },
         Arc::new(|_| {}),
     )
@@ -224,7 +239,103 @@ async fn agy_launch_and_recorded_text() {
     let message = recorded("plain", Permissions::Ask, None).await;
     assert_eq!(message.status, Some(Status::Done));
     assert_eq!(message.text.trim(), "pong");
-    assert_eq!(Vendor::RUNNABLE.len(), 2);
+    assert_eq!(message.vendor, Some(Vendor::Gemini));
+}
+
+fn three_for_auto(dir: &DataFolder, spawn: Spawner) -> Engine {
+    let engine = boot_with_router(dir, Permissions::Ask, spawn, true);
+    engine.set_time_source(Arc::new(|| 2_000_000_000.0));
+    engine.replace_clis(Vendor::ALL.map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })).into());
+    engine.set_codex_models(vec!["gpt-6.1-sol".into()], None);
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        engine.note_account_events(
+            vendor,
+            vec![EngineEvent::Signals(Signals {
+                billing: Some(Billing::Subscription),
+                reach: Some(Reach::Out(Some(2_000_003_600.0))),
+                ..Signals::default()
+            })],
+        );
+    }
+    engine
+}
+
+fn send_auto(engine: &Engine, text: &str) -> Result<String, String> {
+    engine.send(SendRequest {
+        conversation_id: None,
+        area: Area::Chat,
+        project_id: None,
+        text: text.into(),
+        images: vec![],
+        files: vec![],
+        choice: Choice { vendor: "auto".into(), model: None, effort: None },
+    })
+}
+
+#[tokio::test]
+async fn auto_routes_a_chat_to_antigravity_with_three_accounts_connected() {
+    auto_routes_to_antigravity(false).await;
+    auto_routes_to_antigravity(true).await;
+}
+
+async fn auto_routes_to_antigravity(only_antigravity: bool) {
+    let dir = DataFolder::new();
+    let (spawn, input, output) = support::controlled();
+    let engine = three_for_auto(
+        &dir,
+        Arc::new(move |bin, args, cwd| {
+            assert_eq!(bin, "gemini");
+            spawn(bin, args, cwd)
+        }),
+    );
+    if only_antigravity {
+        engine.replace_clis([(Vendor::Gemini, Cli { command: "gemini".into(), prefix: vec![] })].into());
+        assert_eq!(engine.state().vendors, [Vendor::Gemini]);
+    } else {
+        assert_eq!(engine.state().vendors, Vendor::ALL);
+    }
+    let recording = entries("plain");
+    let id = send_auto(&engine, prompt_text(&recording)).unwrap();
+    let mut wire = (input, output);
+    handshake(&mut wire, &recording, None, response(&recording, 2), false).await;
+    family_and_effort(&mut wire, "gemini-4-hydrogen", "low").await;
+    default_mode(&mut wire).await;
+    replay_turn(&mut wire, &recording, None).await;
+    let reply = settled(&engine, &id).await;
+    assert_eq!(reply.status, Some(Status::Done));
+    assert_eq!(reply.vendor, Some(Vendor::Gemini));
+    assert_eq!(reply.text.trim(), "pong");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn auto_does_not_launch_antigravity_when_signed_out_or_out_of_quota() {
+    for signed_out in [true, false] {
+        let dir = DataFolder::new();
+        let (spawn, started) = support::pipes();
+        let engine = three_for_auto(
+            &dir,
+            Arc::new(move |bin, args, cwd| {
+                assert_eq!(bin, "claude", "Auto must choose an AI with room");
+                spawn(bin, args, cwd)
+            }),
+        );
+        engine.note_account_events(Vendor::Claude, vec![EngineEvent::Signals(Signals { reach: Some(Reach::Clear), ..Signals::default() })]);
+        if signed_out {
+            engine.note_antigravity_account(AccountStatus::SignedOut, None);
+        } else {
+            engine.note_antigravity_out(None);
+        }
+        let id = send_auto(&engine, "Ask a simple question").unwrap();
+        let mut child = support::next_pipe(&started).await;
+        child.say(json!({"type":"system","subtype":"init","session_id":"fallback","model":"haiku"})).await;
+        child.say(json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Claude answered"}}})).await;
+        child.say(json!({"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{}})).await;
+        let reply = settled(&engine, &id).await;
+        assert_eq!(reply.status, Some(Status::Done));
+        assert_eq!(reply.vendor, Some(Vendor::Claude));
+        engine.shutdown();
+    }
 }
 
 #[tokio::test]
@@ -268,7 +379,7 @@ async fn claude_starts_an_antigravity_child_in_a_project_with_three_connected_ai
     let recording = entries("plain");
     lead.say(json!({"type":"control_request","request_id":"start-child","request":{"subtype":"mcp_message","server_name":"faber",
         "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":{
-            "title":"Check the result","brief":prompt_text(&recording),"ai":"antigravity"
+            "title":"Check the result","brief":prompt_text(&recording),"ai":"antigravity","model":"gemini-4-hydrogen"
         },"_meta":{"claudecode/toolUseId":"child"}}}}}))
         .await;
     support::until("the lead received its child conversation", || {

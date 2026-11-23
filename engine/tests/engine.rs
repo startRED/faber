@@ -2283,7 +2283,7 @@ async fn research_requires_a_question_and_enabled_web_search_without_starting_a_
 
 #[tokio::test]
 async fn research_send_now_keeps_its_own_turn_and_invalid_queued_requests_are_refused() {
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         for chosen in [vendor.name(), "auto"] {
             let dir = support::DataFolder::new();
             let f = fake(fixture(vendor.name(), "steer"));
@@ -2639,7 +2639,7 @@ async fn r106_orphaned_chat_scratch_keeps_untracked_files_and_saved_conversation
 
 #[tokio::test]
 async fn private_chat_reopens_legacy_files_outside_the_protected_data_folder() {
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         let owned = tempfile::tempdir().unwrap();
         // Canonical like the engine's own paths: the runner's temp folder is a short 8.3 name.
         let root = owned.path().canonicalize().unwrap();
@@ -2776,7 +2776,7 @@ async fn r121_full_access_leaves_the_persons_hooks_on_and_ask_keeps_them_off_unt
 
 #[tokio::test]
 async fn manual_effort_and_the_missing_effort_default_reach_both_drivers_and_are_saved() {
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         for effort in [None, Some(Effort::Low), Some(Effort::Medium), Some(Effort::High), Some(Effort::Xhigh)] {
             let dir = support::DataFolder::new();
             let f = fake(fixture(vendor.name(), "chat"));
@@ -4074,21 +4074,14 @@ async fn a_queued_message_that_cannot_be_dispatched_stays_queued() {
     second.shutdown();
 }
 
-/// Antigravity is known (task 055) but nothing discovers, routes or starts it yet.
+/// Persisted vendor IDs and old ledgers remain compatible.
 #[tokio::test]
-async fn gemini_is_known_but_never_chosen_or_started() {
+async fn gemini_id_and_old_ledger_remain_compatible_when_disconnected() {
     assert_eq!(Vendor::ALL.len(), 3);
     assert_eq!(serde_json::to_value(Vendor::Gemini).unwrap(), json!("gemini"));
     assert_eq!(serde_json::from_value::<Vendor>(json!("gemini")).unwrap(), Vendor::Gemini);
     let old: faber_engine::ledger::Ledger = serde_json::from_value(json!({ "claude": {}, "codex": {} })).unwrap();
     assert!(old.gemini.readings.is_empty(), "a ledger written before Antigravity opens with it empty");
-    for vendor in Vendor::ALL {
-        assert_ne!(faber_engine::helper::other(vendor), Vendor::Gemini, "a helper never comes from Antigravity");
-        for name in ["auto", vendor.name()] {
-            let pick = pick_model(&choice(name, None), &Vendor::RUNNABLE, None);
-            assert!(pick.is_none_or(|p| p.vendor != Vendor::Gemini), "{name} picked Antigravity");
-        }
-    }
     let dir = support::DataFolder::new();
     let (engine, _rx) = engine(&dir, Vendor::Claude, fake(fixture("claude", "chat")).spawn);
     assert_eq!(engine.send(ask(Area::Chat, SKY, choice("gemini", None))), Err("error.noSubscription".into()));
@@ -6923,7 +6916,7 @@ async fn reply_style_reaches_each_cli_in_chat_and_projects() {
     let short = "Keep replies short and direct, without leaving out necessary facts or warnings.";
     let explained = "Explain replies with enough detail and examples to make the reasoning easy to follow.";
     let own = "Responda com exemplos de jogos.\nSem enrolar.";
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         for area in [Area::Chat, Area::Project] {
             for (style, words, verbosity) in [
                 (ReplyStyle::Default, "", None),
@@ -7125,7 +7118,7 @@ fn reply_style_migration_keeps_the_recovery_epoch_after_restart() {
 #[tokio::test]
 async fn reply_style_changes_on_resume_without_changing_the_conversations_name() {
     use faber_engine::model::ReplyStyle;
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         let dir = support::DataFolder::new();
         let f = fake(fixture(vendor.name(), "chat"));
         let (first, mut rx) = engine(&dir, vendor, f.spawn.clone());
@@ -7594,7 +7587,7 @@ async fn reply_style_in_the_same_engine_reopens_claude_and_keeps_peer_turns() {
 
 #[tokio::test]
 async fn rule_2_a_choice_that_names_no_model_or_effort_still_starts_each_cli_on_a_full_model_id_and_an_effort() {
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         let dir = support::DataFolder::new();
         let f = fake(fixture(vendor.name(), "chat"));
         let (engine, mut rx) = engine(&dir, vendor, f.spawn.clone());

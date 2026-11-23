@@ -628,6 +628,12 @@ async fn a_driver_panic_removes_only_its_run_from_overlapping_chat_and_project_w
         });
         let dir = crate::support::DataFolder::new();
         let (engine, mut rx) = engine(&dir, &[vendor], spawn, None);
+        engine.note_antigravity_account(
+            faber_engine::account::AccountStatus::SignedIn,
+            Some(faber_engine::signals::antigravity_plan(&serde_json::json!({
+                "_meta":{"antigravity":{"tier":{"name":"Google AI Pro","id":"g1-pro-tier"}}}
+            }))),
+        );
         let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
         let chat = engine.send(request(Area::Chat, None, SKY, vendor.name())).unwrap();
         let work = engine.send(request(Area::Project, Some(&project.id), SKY, vendor.name())).unwrap();

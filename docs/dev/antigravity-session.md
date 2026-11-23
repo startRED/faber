@@ -1,8 +1,9 @@
 # Antigravity: the session driver
 
 How Faber's engine runs an Antigravity conversation over the CLI's ACP server. The facts it rests on are recorded in
-[antigravity-cli.md](antigravity-cli.md#over-acp) and [antigravity-folders.md](antigravity-folders.md). Nothing can pick
-Antigravity yet: `Vendor::RUNNABLE` holds the other two.
+[antigravity-cli.md](antigravity-cli.md#over-acp) and [antigravity-folders.md](antigravity-folders.md). A signed-in account
+can answer in Chat and Projects or run a delegated project conversation. Auto also requires a confirmed subscription
+tier, available quota, and a supported permission mode.
 
 ## Start, stop, resume
 

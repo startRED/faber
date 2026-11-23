@@ -47,7 +47,7 @@ fn fences(markdown: &str) -> Vec<(String, String)> {
 
 #[tokio::test]
 async fn conversation_export_keeps_all_piece_content_and_current_choices_after_reopening_for_both_clis() {
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         let mut state = CodexTurnState::default();
         let events = support::fixture(vendor.name(), "visual-pieces")
             .into_iter()

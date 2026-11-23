@@ -1722,6 +1722,7 @@ export const en = {
   'error.compact.busy': 'You can compact once the AI is done.',
   'error.messageGone': 'That message is no longer in this conversation.',
   'error.notConnected': 'That subscription is not connected.',
+  'error.antigravity.permissions': 'Antigravity supports Ask and Full access. Choose one in Permissions.',
   'error.look.nearAmber': 'That color is too close to the amber that means "needs you". Pick another.',
   'error.look.nearClaude': 'That color is too close to the coral that marks Claude. Pick another.',
   'error.look.nearCodex': 'That color is too close to the violet that marks Codex. Pick another.',

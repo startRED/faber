@@ -16,7 +16,7 @@ async fn dispatched_cli_turn_captures_file_versions_in_the_checked_plain_working
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         for area in [Area::Chat, Area::Project] {
             let data = support::DataFolder::new();
             let folder = support::work_folder();
@@ -202,7 +202,7 @@ fn both_cli_fixtures_capture_only_written_bounded_visual_files_and_closed_mermai
     std::fs::write(root.join("large.htm"), "x".repeat(FILE_BYTES + 1)).unwrap();
     std::fs::write(dir.path().join("outside.html"), "outside").unwrap();
     std::fs::write(root.join("private.txt"), "unrelated").unwrap();
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         let message = fixture(vendor, &root);
         assert_eq!(
             message.visual_files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
@@ -266,7 +266,7 @@ fn reply_titles_cannot_collide_with_file_identity_in_either_order() {
 
 #[test]
 fn file_versions_reopen_from_saved_bytes_after_replacement_and_deletion_without_project_reads() {
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         let dir = support::canonical_tempdir().unwrap();
         let root = dir.path();
         std::fs::write(root.join("page.html"), "<p>First</p>").unwrap();

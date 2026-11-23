@@ -1,10 +1,10 @@
 # Models and CLIs
 
-Why only Claude Code and Codex, how Auto routes between them, and the rules for driving their CLIs.
+How Auto routes between Claude Code, Codex and Antigravity, and the rules for driving their CLIs.
 
-## Only Claude Code and Codex
+## Connected providers
 
-Faber works with Claude only, Codex only, or both. It supports no other vendor.
+Connect Claude, Codex or Antigravity, alone or together. Antigravity runs in Chat and Projects in Ask and Full access.
 
 - **Use a subscription.** An optional API key goes through the CLI's login, where Faber never sees it.
 - **First run.** The user connects what they have. Faber finds or installs each official CLI and opens its own sign-in,
@@ -25,7 +25,7 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   request alone and says what kind of task it is, how hard, and whether its scope is tight or open. It never sees the candidates.
 - A fixed table then picks the model, tuned for quality first: each model's profile has general intelligence and
   agentic coding scores, seconds per task, and cost per task priced by the quota left on its subscription right now, so
-  a nearly spent subscription hands its work to the other one (done, `engine-core/src/route.rs`).
+  a nearly spent subscription hands work to one with room (`engine-core/src/route.rs`).
 - Measured on 10/10/2026 with the real router on 22 requests, run twice: 81 of 88 picks right, half the routes under
   2.8 s and nine in ten under 3.9 s. An earlier design that let the router choose among anonymous, shuffled profiles
   got 76 of 88, spent more and was slower: the router judges requests well, the table weighs price against quality.

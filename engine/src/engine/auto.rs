@@ -96,8 +96,27 @@ fn covers(guessed: &str, sent: &str) -> bool {
 }
 
 impl Core {
+    /// Antigravity must be ready for an unattended turn before any Auto path can carry it forward.
+    pub(super) fn auto_antigravity_ready(&self) -> bool {
+        self.opts.clis.contains_key(&Vendor::Gemini)
+            && self.store.settings().permissions().supports_antigravity()
+            && self.allows(Vendor::Gemini, None, Purpose::UserTurn { by_hand: false }, false).is_ok()
+    }
+
+    fn routing_vendors(&self, only: Option<Vendor>) -> Vec<Vendor> {
+        self.vendors()
+            .into_iter()
+            .filter(|v| only.is_none_or(|o| o == *v) && (*v != Vendor::Gemini || self.auto_antigravity_ready()))
+            .collect()
+    }
+
+    pub(super) fn fallback_model(&self, choice: &Choice) -> Option<Pick> {
+        let vendors = if choice.vendor == "auto" { self.routing_vendors(None) } else { self.vendors() };
+        pick_model(choice, &vendors, self.codex_recommended.as_deref())
+    }
+
     fn route_profiles(&self, only: Option<Vendor>) -> Vec<Profile> {
-        let vendors: Vec<_> = self.vendors().into_iter().filter(|v| only.is_none_or(|o| o == *v)).collect();
+        let vendors = self.routing_vendors(only);
         candidates(&vendors, &self.codex_models)
             .into_iter()
             .filter(|p| self.allows(p.vendor, family_of(p.model), Purpose::UserTurn { by_hand: false }, false).is_ok())
@@ -110,7 +129,8 @@ impl Core {
         if c.messages.is_empty() {
             return Some(None);
         }
-        let before = same_as_before(c, self.live.get(id)).filter(|p| self.opts.clis.contains_key(&p.vendor))?;
+        let before = same_as_before(c, self.live.get(id))
+            .filter(|p| self.opts.clis.contains_key(&p.vendor) && (p.vendor != Vendor::Gemini || self.auto_antigravity_ready()))?;
         (c.choice.as_ref().is_some_and(|c| c.vendor == "auto")
             && !before.reason.starts_with("reason.moved")
             && before.reason != "reason.chosen")
@@ -244,7 +264,7 @@ impl Core {
         eligible: impl Fn(&Profile) -> bool,
     ) -> Option<Routed> {
         let now = self.secs();
-        let vendors: Vec<Vendor> = self.vendors().into_iter().filter(|v| only.is_none_or(|o| o == *v)).collect();
+        let vendors = self.routing_vendors(only);
         let gated: Vec<(Profile, Result<(), Why>)> = candidates(&vendors, &self.codex_models)
             .into_iter()
             .filter(|p| eligible(p))
@@ -1544,14 +1564,16 @@ mod tests {
         assert_eq!(allowed(), Err(Why::Billing));
         engine.note_antigravity_account(AccountStatus::SignedIn, Some(plan("g1-pro-tier")));
         assert_eq!(allowed(), Ok(()), "the tier suffices without a quota reading");
-        engine.with(|c| assert!(c.route_profiles(Some(vendor)).is_empty(), "a confirmed account still needs a runnable vendor"));
+        engine.with(|c| assert!(!c.route_profiles(Some(vendor)).is_empty(), "the signed-in subscription enters Auto"));
 
         engine.note_antigravity_out(None);
         assert_eq!(allowed(), Err(Why::Exhausted));
+        engine.with(|c| assert!(c.route_profiles(Some(vendor)).is_empty()));
         engine.set_time_source(Arc::new(move || now + crate::budget::AGY_BACKOFF + 1.0));
         assert_eq!(allowed(), Ok(()));
         engine.note_antigravity_account(AccountStatus::SignedOut, None);
         assert_eq!(allowed(), Err(Why::Billing));
+        engine.with(|c| assert!(c.route_profiles(Some(vendor)).is_empty()));
         engine.shutdown();
     }
 

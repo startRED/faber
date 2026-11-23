@@ -135,7 +135,7 @@ Not known: any quota number. No zero-token reading exists in the CLI or over ACP
 and Faber never starts a model turn only to measure. Antigravity therefore has "no confirmed reading": the `quota` tool says
 "no reading yet" with Faber's own spend on it, and Settings' whole-account bars show the no-reading state.
 
-Pace without a reading, ready for when Antigravity can run (it cannot yet: nothing lists, starts or routes it, R531): the quota
+Pace without a reading: the quota
 gate passes it when connected with confirmed subscription billing, with the neutral weight of an AI that has room (never
 preferred or avoided by pace), and only Faber's own spend counts. Its driver, still to come, will report the CLI's
 out-of-quota error through `Engine::note_antigravity_out`, which marks it out until the reset the error names, or for one hour

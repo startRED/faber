@@ -20,8 +20,7 @@ impl Core {
     pub(super) fn usage(&self) -> Vec<VendorUsage> {
         let now = self.secs();
         let day = ((now + self.utc_offset as f64) / 86_400.0).floor() as i64;
-        // Antigravity is not one of the CLIs the engine runs yet (R531), but once its account check found it signed in its
-        // limits are shown: plan and billing, no reading, Faber's own spend.
+        // The account view can show a confirmed Antigravity tier before a CLI refresh. It has no quota reading.
         let connected = self.ledger.gemini.plan_seen_at.is_some().then_some(Vendor::Gemini);
         self.vendors()
             .into_iter()

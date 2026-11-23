@@ -56,17 +56,11 @@ pub fn detect_clis_with(env: &dyn Fn(&str) -> Option<String>) -> BTreeMap<Vendor
         .filter_map(|v| {
             let cli = match env(&format!("FABER_CLI_{}", v.name().to_uppercase())) {
                 Some(json) => serde_json::from_str(&json).ok(),
-                None => find_cli_candidate(v.name(), env),
+                None => find_cli_candidate(if v == Vendor::Gemini { "agy" } else { v.name() }, env),
             };
             cli.map(|c| (v, c))
         })
         .collect()
-}
-
-/// Antigravity's `agy`. It is found and signed in to here only: until its driver exists it is not one of the CLIs the engine
-/// lists or starts (R531), so it never joins `detect_clis`.
-fn find_agy() -> Option<Cli> {
-    find_cli_candidate("agy", &|k| std::env::var(k).ok())
 }
 
 fn find_cli_candidate(name: &str, env: &dyn Fn(&str) -> Option<String>) -> Option<Cli> {
@@ -105,9 +99,16 @@ pub(crate) async fn check(h: &Host, vendor: String) -> Res<CheckResult> {
         return Err("error.setup.check".into());
     };
     if v == Vendor::Gemini {
-        let Some(cli) = find_agy() else {
+        let was_connected = h.engine.vendors().contains(&v);
+        let clis = detect_clis();
+        let cli = clis.get(&v).cloned();
+        h.engine.replace_clis(clis);
+        let Some(cli) = cli else {
             // Gone since the last check: no longer connected, so its limits and billing are not shown or trusted.
             h.engine.note_antigravity_account(AccountStatus::SignedOut, None);
+            if was_connected {
+                h.announce(&AppEvent::List);
+            }
             return Ok(CheckResult { vendor: v, installed: false, account: AccountStatus::Unknown, can_install: cfg!(windows) });
         };
         // The check opens an empty session, which the CLI lists under this folder: it stays inside Faber's data folder.
@@ -120,6 +121,9 @@ pub(crate) async fn check(h: &Host, vendor: String) -> Res<CheckResult> {
         };
         // The plan comes with the same answer, so the limits learn it without a second process.
         h.engine.note_antigravity_account(account, plan);
+        if was_connected != h.engine.vendors().contains(&v) {
+            h.announce(&AppEvent::List);
+        }
         return Ok(CheckResult { vendor: v, installed: true, account, can_install: cfg!(windows) });
     }
     let clis = detect_clis();
@@ -149,7 +153,7 @@ pub(crate) async fn sign_in(vendor: String) -> Res<()> {
     let Some(v) = parse_vendor(&vendor) else {
         return Err("error.setup.signIn".into());
     };
-    let cli = if v == Vendor::Gemini { find_agy() } else { detect_clis().remove(&v) };
+    let cli = detect_clis().remove(&v);
     let Some(cli) = cli else {
         return Err("error.setup.signIn".into());
     };

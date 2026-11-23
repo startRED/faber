@@ -23,12 +23,13 @@ fn antigravity_profiles_match_the_recorded_model_efforts() {
 }
 
 #[test]
-fn auto_profiles_exclude_antigravity_even_if_the_caller_lists_it_as_connected() {
-    assert!(!Vendor::RUNNABLE.contains(&Vendor::Gemini));
+fn auto_profiles_include_all_three_connected_providers() {
+    assert_eq!(Vendor::RUNNABLE, Vendor::ALL);
     let profiles = candidates(&[Vendor::Claude, Vendor::Codex, Vendor::Gemini], &["gpt-6.1-sol".into()]);
     assert!(profiles.iter().any(|p| p.vendor == Vendor::Claude));
     assert!(profiles.iter().any(|p| p.vendor == Vendor::Codex));
-    assert!(profiles.iter().all(|p| p.vendor != Vendor::Gemini));
+    assert!(profiles.iter().any(|p| p.vendor == Vendor::Gemini));
+    assert!(candidates(&BOTH, &["gpt-6.1-sol".into()]).iter().all(|p| p.vendor != Vendor::Gemini));
 }
 
 #[test]

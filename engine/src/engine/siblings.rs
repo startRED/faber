@@ -560,7 +560,7 @@ impl Core {
         let mut choice = match ai {
             Ai::Same => parent.choice.clone().ok_or("this conversation has no model chosen")?,
             Ai::Auto => Choice { vendor: "auto".into(), model: None, effort: None },
-            Ai::Named(vendor) if self.opts.clis.contains_key(&vendor) => {
+            Ai::Named(vendor) if self.vendors().contains(&vendor) => {
                 Choice { vendor: vendor.name().into(), model: None, effort: Some(crate::router::Effort::Medium) }
             }
             Ai::Named(_) => return Err("that AI is not connected on this computer; choose another, or leave ai out"),
@@ -578,7 +578,7 @@ impl Core {
             if let Some(model) = &model {
                 let vendor = Vendor::RUNNABLE
                     .into_iter()
-                    .find(|v| self.opts.clis.contains_key(v) && self.runs_model(*v, model))
+                    .find(|v| self.vendors().contains(v) && self.runs_model(*v, model))
                     .ok_or("unknown model; choose a model of a connected AI")?;
                 choice.vendor = vendor.name().into();
             } else if let Some(effort) = effort.take() {
@@ -692,12 +692,13 @@ impl Core {
         }
     }
 
-    /// Whether `model` is one `vendor` runs: a row of Auto's table for Claude, a model the account lists for ChatGPT.
+    /// Whether `model` is one `vendor` runs: a row of Auto's table or a model the Codex account lists.
     fn runs_model(&self, vendor: Vendor, model: &str) -> bool {
         match vendor {
-            Vendor::Claude => crate::route::PROFILES.iter().any(|p| p.vendor == vendor && p.model == crate::router::pinned(vendor, model)),
+            Vendor::Claude | Vendor::Gemini => {
+                crate::route::PROFILES.iter().any(|p| p.vendor == vendor && p.model == crate::router::pinned(vendor, model))
+            }
             Vendor::Codex => self.codex_models.iter().any(|m| m == model),
-            Vendor::Gemini => false,
         }
     }
 
@@ -1401,9 +1402,13 @@ impl Core {
             };
             if let Some(vendor) = vendor {
                 let valid: Vec<String> = match vendor {
-                    Vendor::Claude => crate::route::PROFILES.iter().filter(|p| p.vendor == vendor).map(|p| p.model.to_string()).collect(),
+                    Vendor::Claude | Vendor::Gemini => {
+                        let mut models: Vec<_> =
+                            crate::route::PROFILES.iter().filter(|p| p.vendor == vendor).map(|p| p.model.to_string()).collect();
+                        models.dedup();
+                        models
+                    }
                     Vendor::Codex => self.codex_models.clone(),
-                    Vendor::Gemini => Vec::new(),
                 };
                 if !valid.iter().any(|m| m == crate::router::pinned(vendor, model)) {
                     return Err(format!("unknown model; valid models are: {}", valid.join(", ")));

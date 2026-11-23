@@ -67,8 +67,9 @@ impl Options {
         let args: Vec<String> = std::env::args().skip(1).collect();
         let workflow_pair = args.iter().any(|a| a == "--workflow-pair");
         let value = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
-        let vendor =
-            |name: &str| Vendor::RUNNABLE.into_iter().find(|v| v.name() == name).ok_or_else(|| format!("{name} is claude or codex"));
+        let vendor = |name: &str| {
+            [Vendor::Claude, Vendor::Codex].into_iter().find(|v| v.name() == name).ok_or_else(|| format!("{name} is claude or codex"))
+        };
         let plain = vendor(&value("--plain").unwrap_or_else(|| "claude".into()))?;
         let vendors = value("--vendors").unwrap_or_else(|| plain.name().into()).split(',').map(vendor).collect::<Result<Vec<_>, _>>()?;
         let number = |name: &str, default: f64| -> Result<f64, Failure> {
@@ -728,7 +729,7 @@ mod judge_tests {
 
     #[test]
     fn fake_judge_outputs_keep_verdicts_blind_and_count_both_vendors() {
-        for vendor in Vendor::RUNNABLE {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
             let profile = strongest_judge(vendor);
             assert!(
                 faber_engine::route::PROFILES.iter().filter(|p| p.vendor == vendor).all(|p| (p.iq, p.agent) <= (profile.iq, profile.agent))
@@ -944,7 +945,8 @@ async fn main() -> Result<(), Failure> {
         return Ok(());
     }
     let node = find_cli("node").ok_or("node is not on the PATH (the fixtures and proofs are Node scripts)")?;
-    let judges: BTreeMap<_, _> = Vendor::RUNNABLE.into_iter().filter_map(|v| find_cli(v.name()).map(|cli| (v, cli))).collect();
+    let judges: BTreeMap<_, _> =
+        [Vendor::Claude, Vendor::Codex].into_iter().filter_map(|v| find_cli(v.name()).map(|cli| (v, cli))).collect();
     if judges.is_empty() {
         return Err("no judge CLI is installed".into());
     }

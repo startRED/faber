@@ -354,7 +354,7 @@ async fn settings_relaunch_routes_a_delayed_background_start_to_its_retired_owne
 
 #[tokio::test]
 async fn settings_relaunch_keeps_background_commands_running_until_they_end() {
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         for permissions in [false, true] {
             let dir = support::DataFolder::new();
             let (spawn, made) = pipes();

@@ -1563,6 +1563,7 @@ export const fr: Messages = {
   'error.compact.busy': 'Vous pourrez compacter quand l’IA aura fini.',
   'error.messageGone': 'Ce message ne fait plus partie de cette conversation.',
   'error.notConnected': 'Cet abonnement n’est pas connecté.',
+  'error.antigravity.permissions': 'Antigravity fonctionne en mode Demander ou Accès total. Choisissez-en un dans les autorisations.',
   'error.look.nearAmber': 'Cette teinte est trop proche de l’ambre qui signifie « on a besoin de vous ». Choisissez-en une autre.',
   'error.look.nearClaude': 'Cette teinte est trop proche du corail qui désigne Claude. Choisissez-en une autre.',
   'error.look.nearCodex': 'Cette teinte est trop proche du violet qui désigne Codex. Choisissez-en une autre.',

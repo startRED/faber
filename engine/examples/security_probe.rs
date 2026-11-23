@@ -96,7 +96,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         real(bin, &args, cwd)
     });
-    for vendor in Vendor::RUNNABLE {
+    // The probe checks the guarded launch modes shared by these two drivers.
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         if args.get(3).is_some_and(|name| name != vendor.name()) {
             continue;
         }

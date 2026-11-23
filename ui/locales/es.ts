@@ -1724,6 +1724,7 @@ export const es: Messages = {
   'error.compact.busy': 'Puedes compactar cuando la IA termine.',
   'error.messageGone': 'Ese mensaje ya no está en esta conversación.',
   'error.notConnected': 'Esa suscripción no está conectada.',
+  'error.antigravity.permissions': 'Antigravity admite Preguntar y Acceso total. Elige uno en Permisos.',
   'error.look.nearAmber': 'Ese tono es demasiado parecido al ámbar de «te necesita». Elige otro.',
   'error.look.nearClaude': 'Ese tono es demasiado parecido al coral que identifica a Claude. Elige otro.',
   'error.look.nearCodex': 'Ese tono es demasiado parecido al violeta que identifica a Codex. Elige otro.',

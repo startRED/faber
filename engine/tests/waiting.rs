@@ -112,7 +112,7 @@ async fn moved_attachment_handover(long: bool) {
 
 #[tokio::test]
 async fn move_chat_to_project_quota_wait_keeps_history_and_attachment_locations_for_each_cli() {
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         for reopened in [false, true] {
             let dir = support::DataFolder::new();
             dir.initialize_chat();

@@ -1563,6 +1563,7 @@ export const de: Messages = {
   'error.compact.busy': 'Verdichten geht, sobald die KI fertig ist.',
   'error.messageGone': 'Diese Nachricht gehört nicht mehr zu dieser Unterhaltung.',
   'error.notConnected': 'Dieses Abo ist nicht verbunden.',
+  'error.antigravity.permissions': 'Antigravity unterstützt Nachfragen und Vollzugriff. Wähle einen Modus unter Berechtigungen.',
   'error.look.nearAmber': 'Dieser Farbton liegt zu nah am Bernstein für „braucht dich“. Wähle einen anderen.',
   'error.look.nearClaude': 'Dieser Farbton liegt zu nah am Korallenton, der für Claude steht. Wähle einen anderen.',
   'error.look.nearCodex': 'Dieser Farbton liegt zu nah am Violett, das für Codex steht. Wähle einen anderen.',

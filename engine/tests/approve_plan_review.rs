@@ -199,7 +199,7 @@ async fn r160_review_full_access_approval_relaunches_projects_with_the_full_tool
 
 #[tokio::test]
 async fn r160_review_both_clis_start_the_same_quiet_approved_turn_in_every_non_plan_mode() {
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         for mode in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Auto, Permissions::FullAccess] {
             let dir = crate::support::DataFolder::new();
             let first = fake(fixture(vendor.name(), "approve-plan"));
@@ -346,7 +346,7 @@ async fn r160_review_claude_approval_queues_immediately_and_stop_removes_the_app
 
 #[tokio::test]
 async fn r160_review_ask_before_plan_is_the_approval_default_even_for_the_first_conversation() {
-    for vendor in Vendor::RUNNABLE {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
         let dir = crate::support::DataFolder::new();
         let engine = engine(&dir, vendor, fake(fixture(vendor.name(), "approve-plan")).spawn);
         engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();

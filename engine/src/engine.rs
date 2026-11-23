@@ -1093,7 +1093,7 @@ impl Engine {
         for (vendor, cli, spawn, cwd, windows) in jobs {
             match vendor {
                 Vendor::Claude => claude_quota = self.check_claude_plan(timeout).await,
-                // Not yet: no CLI is discovered for it, so no job is made.
+                // Antigravity has no quota read. Setup checks its sign-in and tier without prompting a model.
                 Vendor::Gemini => {}
                 Vendor::Codex => {
                     let events = read_codex_limits(&cli.command, &cwd, windows, spawner(&spawn, &cli), timeout).await;
@@ -4873,7 +4873,7 @@ impl Core {
             self.requeue(id, item);
             return Err("error.update.activeOperations".into());
         }
-        let Some(fallback) = pick_model(&item.choice, &self.vendors(), self.codex_recommended.as_deref()) else {
+        let Some(fallback) = self.fallback_model(&item.choice) else {
             self.requeue(id, item);
             return Err("error.noSubscription".into());
         };
@@ -4886,6 +4886,7 @@ impl Core {
         // A turn Faber sends by itself (`by_itself.rs`) is never one the person picked: an AI billed per use is not spent on.
         let by_hand = !auto && item.wake.as_ref().is_none_or(|w| w.why == "wake.approvedPlan");
         let route = if auto { self.next_route(id) } else { None };
+        let keep_antigravity = auto && self.auto_antigravity_ready();
         let point = self.rewind_steer(&item.id);
         let c = self.convs.get_mut(id).expect("checked above");
         let previous = (
@@ -4905,9 +4906,9 @@ impl Core {
         let pick = match &route {
             Some(Some(before)) => before.clone(),
             Some(None) => fallback.clone(),
-            None if auto => {
-                same_as_before(c, self.live.get(id)).filter(|p| self.opts.clis.contains_key(&p.vendor)).unwrap_or_else(|| fallback.clone())
-            }
+            None if auto => same_as_before(c, self.live.get(id))
+                .filter(|p| self.opts.clis.contains_key(&p.vendor) && (p.vendor != Vendor::Gemini || keep_antigravity))
+                .unwrap_or_else(|| fallback.clone()),
             None => fallback.clone(),
         };
         let data_dir = self.opts.data_dir.clone();
@@ -5449,6 +5450,9 @@ impl Core {
         let cli = self.opts.clis.get(&pick.vendor).cloned();
         let settings = self.store.settings();
         let (permissions, tuning) = (settings.permissions(), settings.tuning());
+        if pick.vendor == Vendor::Gemini && !permissions.supports_antigravity() {
+            return Err("error.antigravity.permissions".into());
+        }
         let research = self.convs.get(conv).and_then(|c| research::phase(&c.messages, permissions));
         let flags = match &cli {
             Some(cli) if pick.vendor == Vendor::Claude => self.claude_flags_for(cli),
@@ -5729,7 +5733,7 @@ impl Core {
         let guide = kits::LiveGuide::start(
             project_tools.guide.note(),
             mode,
-            pick.vendor == Vendor::Claude || resumed,
+            pick.vendor != Vendor::Codex || resumed,
             self.convs.get(conv).and_then(|c| c.session_kits.get(&pick.vendor)),
             resume.as_ref(),
             self.convs.get(conv).and_then(|c| c.session_guide_digests.get(&pick.vendor)),
@@ -6056,7 +6060,7 @@ impl Core {
         if req.area == Area::Project {
             self.check_project_folder(req.project_id.as_deref())?;
         }
-        let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
+        let fallback = self.fallback_model(&req.choice).ok_or("error.noSubscription")?;
         let fallback = self.unjudged(req.area, &fallback);
         if existing.as_ref().is_some_and(|id| self.rewind_blocked(id)) {
             return Err("error.rewind.busy".into());
@@ -6105,6 +6109,7 @@ impl Core {
         let at = now();
         let auto = req.choice.vendor == "auto";
         let route = if auto { self.next_route(&id) } else { None };
+        let keep_antigravity = auto && self.auto_antigravity_ready();
         let c = self.convs.get_mut(&id).ok_or("error.conversationGone")?;
         let previous = (c.messages.len(), c.title.clone(), c.choice.clone(), c.updated_at, c.stopped, c.copy.clone(), c.waiting_on.clone());
         let reopened = archive::reopen(c);
@@ -6113,9 +6118,9 @@ impl Core {
         let pick = match &route {
             Some(Some(before)) => before.clone(),
             Some(None) => fallback.clone(),
-            None if auto => {
-                same_as_before(c, self.live.get(&id)).filter(|p| self.opts.clis.contains_key(&p.vendor)).unwrap_or_else(|| fallback.clone())
-            }
+            None if auto => same_as_before(c, self.live.get(&id))
+                .filter(|p| self.opts.clis.contains_key(&p.vendor) && (p.vendor != Vendor::Gemini || keep_antigravity))
+                .unwrap_or_else(|| fallback.clone()),
             None => fallback.clone(),
         };
         if c.title.is_empty() {
@@ -6436,7 +6441,7 @@ impl Core {
         if self.installing || !self.project_warm_allowed(&req) {
             return;
         }
-        let Some(fallback) = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()) else { return };
+        let Some(fallback) = self.fallback_model(&req.choice) else { return };
         let id = self.draft_for(&req);
         // A compaction runs without a turn; replacing its process would end it unheard.
         if self.live.get(&id).is_some_and(|l| l.turn.is_some()) || self.compacting(&id) || self.compacts.contains_key(&id) {
@@ -6445,7 +6450,9 @@ impl Core {
         let pick = match (req.choice.vendor == "auto", self.convs.get(&id)) {
             // The route decides who answers a first message; until then only the router's own process gets ready.
             (true, Some(c)) if c.messages.is_empty() => return self.warm_router(),
-            (true, Some(c)) => same_as_before(c, self.live.get(&id)).filter(|p| self.opts.clis.contains_key(&p.vendor)).unwrap_or(fallback),
+            (true, Some(c)) => same_as_before(c, self.live.get(&id))
+                .filter(|p| self.opts.clis.contains_key(&p.vendor) && (p.vendor != Vendor::Gemini || self.auto_antigravity_ready()))
+                .unwrap_or(fallback),
             _ => fallback,
         };
         self.warm_launch(&id, &pick);
