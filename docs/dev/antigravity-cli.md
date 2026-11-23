@@ -155,17 +155,9 @@ answers `sessionId`, `models` (23 ids such as `gemini-3.8-flash-low`; `currentMo
    `high`, and `xhigh` where offered) separately, which answers the whole `configOptions` list. `session/new` ignores a model,
    a mode or config options in its parameters, so a session always starts on `gemini-4-neon-high`: set the model before the
    first prompt.
-9. **Protecting a folder** (`acp-canary-ask`, `acp-canary-indirect`, `acp-canary-strict`, `acp-canary-rule2`,
-   `acp-canary-rule-noskip`, `acp-canary-fs`). It cannot be done from the client. With harmless files in a folder outside the
-   working folder, in `default` mode and an isolated profile, `read_file` read one and `write_file` wrote one with no
-   permission request; the same through a junction to that folder and when the path came from a file in the working folder.
-   `toolPermission: "strict"` in `settings.json` made a write inside the working folder ask (the request carries the diff),
-   yet the outside read and write still ran unasked. `permissions.deny` and `permissions.ask` rules (`read_file(<path>)`,
-   `write_file(<path>)`, `command(...)`, `mcp(...)`, in `settings.json` and in `config/config.json`, with and without
-   `--dangerously-skip-permissions`) changed nothing in six tries. agy ignores the client's `fs` and `terminal` capabilities:
-   it never sends `fs/*` or `terminal/*` requests, so the client never sees a file access before it happens. Only a command
-   and an MCP tool can be refused, and only in `default` and `accept-edits`. Not tried: `--sandbox`, and rules in any other
-   place.
+9. **Protecting a folder**: [antigravity-folders.md](antigravity-folders.md). In the recorded runs (one
+   each), in `default` mode a native read or write outside the working folder and the child's temp folder asked first and
+   was refused; inside either, none asked; `auto` read outside unasked; `--sandbox` and cancelling did not stop an access.
 10. **MCP servers** (`acp-mcp-stdio`). `session/new` takes `mcpServers: [{name, command, args, env: []}]`. The server is
     started at once, its tool is named `mcp_<server>_<tool>`, a call asks for permission in `default` mode, and its result
     reached the model. Only stdio was tried; `env` with values and the HTTP form were not.
@@ -200,3 +192,6 @@ or a setting ends the reply (`reason.fail.rejected` for -32602); one to opening 
 (1,244,459 by the CLI's own total); three overwritten ones add about 35,000. All ran on `gemini-3.8-flash-low` except two that
 ran on the default `gemini-4-neon-high` before the model was set (the first plain reply, redone, and the prompt after the
 load in `acp-resume`). The runs outside an isolated profile left their conversations in the owner's real profile.
+
+The eight `acp-guard-*` recordings took about 22 more model calls on `gemini-3.8-flash-low`, each in an isolated profile.
+Their fourteen kept prompts read 179,600 input tokens, 80,866 of them from cache, and wrote 4,484 output tokens.
