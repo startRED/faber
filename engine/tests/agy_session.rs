@@ -338,6 +338,38 @@ async fn agy_quota_marks_account() {
 }
 
 #[tokio::test]
+async fn agy_tools_offered_in_full_access_only() {
+    let plain = entries("plain");
+    for (permissions, offered) in [(Permissions::FullAccess, true), (Permissions::Ask, false)] {
+        let dir = DataFolder::new();
+        let (spawn, mut input, mut output) = support::controlled();
+        let server = faber_engine::tools::Launch {
+            name: "faber-measure".into(),
+            command: "C:/node/node.exe".into(),
+            args: vec!["run.js".into()],
+            env: [("NO_STATS".to_string(), "1".to_string())].into(),
+        };
+        let options = faber_engine::agy::session::AgyOptions {
+            bin: "fake-agy".into(),
+            cwd: dir.path().into(),
+            data: dir.path().into(),
+            model: None,
+            effort: "medium".into(),
+            resume: None,
+            permissions,
+            spawn,
+        };
+        let session = faber_engine::agy::session::start(options, &[server], Arc::new(|_| {})).unwrap();
+        support::expect_method(&mut input, "initialize").await;
+        support::emit(&mut output, response(&plain, 1)).await;
+        let open = support::expect_method(&mut input, "session/new").await;
+        let launch = json!({"name":"faber-measure","command":"C:/node/node.exe","args":["run.js"],"env":[{"name":"NO_STATS","value":"1"}]});
+        assert_eq!(open["params"]["mcpServers"], if offered { json!([launch]) } else { json!([]) }, "{permissions:?}");
+        drop(session);
+    }
+}
+
+#[tokio::test]
 async fn agy_declines_a_question_it_cannot_show() {
     let dir = DataFolder::new();
     let (engine, mut wire) = start(&dir, Permissions::Ask);

@@ -187,17 +187,4 @@ conversations in the owner's profile. The eight isolated guard recordings took a
 
 ## The session driver
 
-`start_conversation_agy` calls `agy::session::start` with the resolved executable. One owned process per live conversation
-runs `agy acp --gemini-dir <data>/antigravity/profile` with client name `faber`. Each process gets a new temp folder under `<data>/antigravity/tmp`, removed when its end is confirmed. The child does not inherit `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `GCLOUD_PROJECT`, `GOOGLE_CLOUD_QUOTA_PROJECT`, `GOOGLE_OAUTH_ACCESS_TOKEN` or `CLOUDSDK_AUTH_ACCESS_TOKEN` (removed by name, never read). Stop ends the process if `session/cancel` is not answered in time. Idle close ends the process tree. The next
-turn uses `session/resume` (an unknown id is an error there, not an empty session) and checks the id it answers.
-
-Ask and Full access both use `default` so outside file reads still ask the host. The host answers ordinary approvals
-in Full access and shows the agent's questions in both modes. Other permission modes return `error.notConnected`.
-A file request shows its resolved path (junctions followed); an unresolvable one is refused.
-
-An empty model leaves the CLI default. A listed model id uses `session/set_model`. Otherwise the driver sets `model` and
-then `thought_level` with `session/set_config_option`. Resume does the same. The out-of-quota recogniser
-looks for `RESOURCE_EXHAUSTED` in an error answer. This is a guess exercised by a synthetic fixture because no real
-quota error was recorded; it marks the account out and the reply ends with `error.quotaOut`. The session cannot block access to a protected folder inside the working folder, inside its own temp
-folder, within an approved command's or MCP tool's reach, behind a junction changed after the request was judged, or
-named by a tool whose input carries no `file_path` (`PROTECTED_FOLDER_LIMIT`). See the [folder experiments](antigravity-folders.md).
+How Faber runs a conversation on this server is in [antigravity-session.md](antigravity-session.md).

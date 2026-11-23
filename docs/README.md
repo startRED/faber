@@ -79,6 +79,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [dev/plan-boundary-qualification.md](dev/plan-boundary-qualification.md) | Task 500 approval-layer size admission, recorded coverage and ungated observations |
 | [dev/antigravity-cli.md](dev/antigravity-cli.md) | How the Antigravity CLI behaves, recorded: output events, approval, resume, isolation, MCP, quota |
 | [dev/antigravity-folders.md](dev/antigravity-folders.md) | What the Antigravity CLI lets Faber refuse before it happens, and what stays unprotected |
+| [dev/antigravity-session.md](dev/antigravity-session.md) | How Faber runs an Antigravity conversation: start, modes, stop, resume, tools and what it cannot do |
 | [dev/antigravity-install.md](dev/antigravity-install.md) | How Antigravity installs its CLI, read from its own installer, and how Faber does the same |
 | [dev/build-folders.md](dev/build-folders.md) | Build-cache cleanup, disk budget and preserving exact proof artifacts |
 | [dev/fair-bench.md](dev/fair-bench.md) | The fair benchmark against TL-ADE: the meter, the suite and real-work tiers, the notes |

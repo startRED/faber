@@ -5763,6 +5763,7 @@ impl Core {
                     permissions,
                     spawn,
                 },
+                &project_tools.servers,
                 sink,
             )?,
             Vendor::Claude => start_conversation_claude_native(

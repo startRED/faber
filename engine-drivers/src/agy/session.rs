@@ -104,6 +104,8 @@ pub fn start(opts: AgyOptions, servers: &[Launch], on_event: crate::claude::Even
     if !matches!(opts.permissions, Permissions::Ask | Permissions::FullAccess) {
         return Err("error.notConnected".into());
     }
+    // A tool server runs outside any guard, so only Full access gets one (R195), as with the other drivers.
+    let servers = if opts.permissions == Permissions::FullAccess { servers } else { &[] };
     let cwd = opts.cwd.to_str().ok_or("error.driverStopped")?;
     let folder = open_folder(&opts.data, "antigravity").map_err(|_| "error.driverStopped")?;
     let profile = open_folder(&folder, "profile").map_err(|_| "error.driverStopped")?;

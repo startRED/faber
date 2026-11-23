@@ -3,6 +3,7 @@ use super::*;
 pub(super) fn start_conversation_agy(
     identity: Arc<crate::proc::ConversationIdentity>,
     opts: crate::agy::session::AgyOptions,
+    servers: &[crate::tools::Launch],
     sink: EventSink,
 ) -> Result<Session, String> {
     let on_exit = identity.clone();
@@ -13,7 +14,7 @@ pub(super) fn start_conversation_agy(
         sink(event);
     });
     let sink = identity.token.as_ref().map_or_else(|| sink.clone(), |token| crate::codex::redact_sink(sink.clone(), token.clone()));
-    let session = crate::proc::as_conversation(&identity, || crate::agy::session::start(opts, &[], sink))?;
+    let session = crate::proc::as_conversation(&identity, || crate::agy::session::start(opts, servers, sink))?;
     Ok(session.with_identity(identity))
 }
 
