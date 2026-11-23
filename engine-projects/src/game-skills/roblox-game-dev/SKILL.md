@@ -86,9 +86,10 @@ collision in a disposable place and render a preview. Verify and record license 
 
 1. Inspect the workspace for the place, manifest, scripts and test commands, and use the existing setup. For a new game use
    the connected local Studio place if intended for this work, otherwise Rojo files.
-2. With Studio MCP, list instances and select by ID, local file and mode before mutating. Discover tools on that version,
-   load Roblox-provided skills, inspect scripts first and persist changes in Edit mode. Back up an existing place first
-   and leave other open instances alone.
+2. With Studio MCP, pick the target by ID, file and mode. Before acting, call `list_roblox_skills` and load the guide
+   for the task with `get_roblox_skill` (or `skill` when exposed). Choose a matching enabled Catalog skill or tool;
+   use `roblox-dev-skill` for broader Luau and Studio reference. If disconnected, use files and official docs.
+   Back up before editing, inspect scripts first, and persist changes in Edit mode.
 3. With Rojo, keep mapped scripts in source files; live sync overwrites mapped items, so edit through the owner. Pin tools via
    Rokit. `rojo build -o Game.rbxl` makes a local place. If Rojo is missing, prepare the source and name the prerequisite.
    If a place uses Studio's [Script Sync](https://create.roblox.com/docs/ai/coding-harness), keep its folders and do not

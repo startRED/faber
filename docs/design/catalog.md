@@ -18,7 +18,7 @@ delivery and recovery.
 
 Search is the main action; the quiet Select all shown button follows the results, leaving the search row to finding tools. Search is focused with the shared Ctrl+F (Command+F on macOS) from `ui/keys.ts`, also named in the
 shortcut sheet. All, Skills, Tool servers and Installed are native pressed buttons; Plugins joins them only when the
-catalog lists a plugin, so while it ships none no pill leads to an empty list. The catalog has 114 skills, four
+catalog lists a plugin, so while it ships none no pill leads to an empty list. The catalog has 115 skills, four
 servers and zero plugins; the twenty rejected candidates have no placeholder cards. Good start offers debugging, simple code and interface design, plus general everyday skills.
 Its ten recommended-tier entries include the original debugging, test-driven development, ponytail and interface
 design entry points; area-specific tools and ponytail-debt stay under their job groups. Its picks move to the front before paging, so

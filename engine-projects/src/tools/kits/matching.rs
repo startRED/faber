@@ -61,6 +61,7 @@ pub(super) fn item_capability(id: &str) -> &'static str {
         "chrome-devtools" => "Measure and diagnose browser rendering and performance",
         "playwright-mcp" => "Automate browser testing in an isolated headless Chrome",
         "context7" => "Look up current library documentation without an account",
+        "roblox-dev-skill" => "Develop Roblox games with Luau and the built-in Studio tools",
         "sequential-thinking" => "Work through complex problems step by step in memory",
         _ => "Catalog instructions for this capability",
     }
@@ -929,6 +930,7 @@ mod tests {
                 vec!["minecraft-server-admin", "godot-gdscript", "unity-csharp-scripting"],
             ),
             ("Design a save system for my game", "game-save-systems", vec!["game-audio-design", "game-level-design", "game-card-design"]),
+            ("Corrija a interface no Roblox Studio", "roblox-dev-skill", vec!["roblox-datastores", "roblox-networking"]),
         ] {
             let jobs = labels(request, None).0;
             let stacks = stack_labels(request, None);

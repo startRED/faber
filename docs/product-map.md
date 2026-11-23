@@ -573,7 +573,7 @@ The guide also includes `media-craft` and `media-proof` (see [Media craftsmanshi
 
 The first-party `workflow-proof` skill suggests evidence for software, Roblox Studio, Blender transfers, interfaces and thumbnails, based on the [adaptive workflow research](research/adaptive-workflow-pilots.md). For shell checks it asks agents to confirm the expected output or test count and capture the native exit code. For thumbnails it checks the exported image, its format and small previews. It tells agents to keep evidence they need later outside build caches. Sessions can open it when relevant. The text fallback carries none of its instructions.
 
-The first-party `roblox-game-dev` skill covers [concept, production, 3D art, playtest and launch](product/roblox.md), using Studio or project files.
+The first-party `roblox-game-dev` skill covers [concept, production, 3D art, playtest and launch](product/roblox.md), using Studio or project files. It routes Studio work to the matching official MCP skill and supplements it with enabled Catalog skills.
 
 Faber repairs its first-party guide and skills at launch. The guide follows the screen language; the skills remain in English.
 

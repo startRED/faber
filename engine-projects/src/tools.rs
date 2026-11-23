@@ -1605,6 +1605,22 @@ mod tests {
     }
 
     #[test]
+    fn the_roblox_guide_installs_from_the_archive_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let files = &[
+            ("SKILL.md", b"---\nname: roblox-dev-skill\ndescription: >\n  Roblox development guide.\n---\nRead the reference.".as_slice()),
+            ("references/studio.md", b"Studio skills.".as_slice()),
+        ];
+        let zip = archive(tmp.path(), files);
+        let mut pinned = find("roblox-dev-skill").expect("the Roblox guide is listed").clone();
+        assert!(pinned.path.is_empty());
+        pinned.digest = digest_of(&zip, &pinned.path).unwrap();
+        let store = Store::with_catalog(&tmp.path().join("data"), vec![pinned.clone()]);
+        store.install_from(&pinned, &zip).unwrap();
+        assert!(store.dir(&pinned).join("references/studio.md").is_file());
+    }
+
+    #[test]
     fn a_skill_installs_from_its_folder_only_when_its_digest_matches() {
         let tmp = tempfile::tempdir().unwrap();
         let zip = archive(tmp.path(), SKILL);
