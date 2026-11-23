@@ -883,6 +883,9 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
 }
 
 fn main() {
+    if let Some(code) = faber_engine::agy::stdio_mode() {
+        std::process::exit(code);
+    }
     STARTED.get_or_init(std::time::Instant::now);
     if let Some(code) = faber_engine::proc::guard_mode() {
         std::process::exit(code);

@@ -100,7 +100,10 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
   pull request #93: checks running.") link to the page, and "Stop following" sits beside them while it is open. It turns
   amber when it fails, conflicts or needs the person. When checks fail, Faber's own message is the loop
   mark on the next reply, its tooltip naming the pull request and its failed checks.
-- When the project card lists checks, the agent can run them with the verify tool, shown in the work log. When no checks are declared, it checks the result directly instead. The conclusion block is removed from both streaming text and the saved answer; a rejected block makes no box and its reason goes to the one closing reminder. Ending a reply starts no
+- Verify runs declared project checks and shows them in the work log. Agents check other results directly.
+  [Antigravity uses the same tools and permissions](../dev/antigravity-session.md#tools).
+  The conclusion block is hidden during streaming and omitted from the saved text. A rejected block makes no box;
+  the closing reminder explains why. Ending a reply starts no
   automatic checks, file-change scan or correction turn (R534). Older histories keep their check rows and fix-wake
   tooltips. Permissions and reply-style changes preserve scheduled compaction and its exact continuation. After any compaction (the
   CLI's own, the agent's, Keep going's or Compact now) the next message the agent gets starts with the person's first

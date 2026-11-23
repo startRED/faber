@@ -392,6 +392,39 @@ mod tests {
         assert!(replies.iter().any(|reply| reply["id"] == 92 && reply["result"]["stopReason"] == "end_turn"));
     }
 
+    #[test]
+    fn agy_session_fake_replays_a_faber_tool_permission() {
+        use faber_engine::agy::{AcpReader, initialize, prompt, session_new, set_mode, set_model};
+        let capture = fixtures().join("agy/acp-mcp-stdio.jsonl");
+        let recorded = std::fs::read_to_string(capture).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let recording = dir.path().join("acp-faber-tools.jsonl");
+        std::fs::write(&recording, recorded.replace("mcp_probe_echo_marker", "mcp_faber_status")).unwrap();
+        let servers =
+            [faber_engine::tools::Launch { name: "faber".into(), command: "fake-faber".into(), args: vec![], env: Default::default() }];
+        let open = session_new(2, "<work>", &servers);
+        let input = [
+            initialize(1, "0"),
+            open.clone(),
+            set_model(3, "session", "gemini-3.8-flash-low"),
+            set_mode(90, "session", "default"),
+            prompt(4, "session", "Call mcp_faber_status."),
+            json!({"jsonrpc":"2.0","id":"1","result":{"outcome":{"outcome":"selected","optionId":"allow"}}}),
+        ]
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+        let (code, output, _) = drive(recording, None, &["acp", "--gemini-dir", "fake"], &input);
+        assert_eq!(code.unwrap(), 0);
+        let mut reader = AcpReader::new();
+        reader.sent(&open);
+        let events: Vec<_> = output.lines().flat_map(|line| reader.read(line)).collect();
+        assert!(events.iter().any(|event| matches!(event,
+            faber_engine::events::EngineEvent::Permission { tool, .. } if tool == "mcp__faber__status"
+        )));
+    }
+
     // Exercise every existing recording in memory: setup-command support must not change the replay protocol.
     #[test]
     fn existing_recordings_still_replay_unchanged() {

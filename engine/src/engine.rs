@@ -3250,6 +3250,17 @@ impl Core {
         if !current {
             return;
         }
+        if matches!(event, EngineEvent::Reason(crate::agy::session::BRIDGE_CLOSED)) {
+            if let Some(l) = self.live.get_mut(conv).filter(|l| l.vendor == Vendor::Gemini) {
+                l.retiring = true;
+                if l.turn.is_none()
+                    && let Some(l) = self.retire(conv)
+                {
+                    l.session.close();
+                }
+            }
+            return;
+        }
         if self.native_fork_event(conv, &event) {
             return;
         }
@@ -4001,7 +4012,9 @@ impl Core {
                     }
                     return;
                 }
-                if ended && let Some(l) = self.retire(conv) {
+                if (ended || vendor == Vendor::Gemini && self.live.get(conv).is_some_and(|l| l.retiring))
+                    && let Some(l) = self.retire(conv)
+                {
                     l.session.close();
                 }
                 self.finish(conv, turn_id);
@@ -5761,6 +5774,26 @@ impl Core {
                     effort: pick.effort.clone(),
                     resume,
                     permissions,
+                    builtin: if area == Area::Project {
+                        std::env::current_exe().ok().map(|command| {
+                            (
+                                command,
+                                crate::helper::Tools {
+                                    helper: helper == crate::helper::Helper::Offers,
+                                    browse,
+                                    conversation: conversations,
+                                    verify,
+                                    map: verify,
+                                    progress,
+                                    // The team tool belongs to Faber helpers. Antigravity is not a helper target yet.
+                                    ..Default::default()
+                                },
+                            )
+                        })
+                    } else {
+                        None
+                    },
+                    leads,
                     spawn,
                 },
                 &project_tools.servers,

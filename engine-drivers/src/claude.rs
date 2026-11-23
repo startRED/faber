@@ -686,17 +686,7 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
             words
                 .chain(context)
                 .chain(items(&msg["message"]["content"]).filter(|c| c["type"] == "tool_use").map(|c| {
-                    let name = match c["name"].as_str() {
-                        Some(crate::helper::CLAUDE_NAME) => crate::helper::TOOL.to_string(),
-                        Some(crate::review::CLAUDE_NAME) => crate::review::TOOL.to_string(),
-                        Some(crate::browser::CLAUDE_NAME) => crate::browser::TOOL.to_string(),
-                        Some(crate::sibling::CLAUDE_NAME) => crate::sibling::TOOL.to_string(),
-                        Some(crate::verify::CLAUDE_NAME) => crate::verify::TOOL.to_string(),
-                        Some(crate::map::CLAUDE_NAME) => crate::map::TOOL.to_string(),
-                        Some(name) if let Some(tool) = crate::progress::claude_tool(name) => tool.to_string(),
-                        Some(name) if let Some(tool) = crate::toolbox::claude_tool(name) => tool.to_string(),
-                        _ => s(&c["name"]),
-                    };
+                    let name = c["name"].as_str().and_then(crate::helper::tool_label).map_or_else(|| s(&c["name"]), str::to_owned);
                     EngineEvent::Tool { id: s(&c["id"]), name, input: c["input"].clone(), parent: parent.clone() }
                 }))
                 .collect()
@@ -1208,17 +1198,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                                     crate::helper::Mcp::Call { tool, id, rpc, input } => {
                                         // Both answers come back as a `HelperReply` for the call's id.
                                         helpers.insert(id.clone(), (s(&msg["request_id"]), rpc));
-                                        on_event(match tool {
-                                            crate::helper::TEAM_NAME => EngineEvent::TeamCall { id, input },
-                                            crate::review::NAME => EngineEvent::ReviewCall { id, input },
-                                            crate::browser::NAME => EngineEvent::BrowseCall { id, input },
-                                            crate::sibling::NAME => EngineEvent::ConversationCall { id, input },
-                                            crate::verify::NAME => EngineEvent::VerifyCall { id, input },
-                                            crate::map::NAME => EngineEvent::MapCall { id, input },
-                                            name if let Some(tool) = crate::progress::tool_of(name) => EngineEvent::ProgressCall { id, tool, input },
-                                            name if let Some(tool) = crate::toolbox::tool_of(name) => EngineEvent::ToolboxCall { id, tool, input },
-                                            _ => EngineEvent::HelperCall { id, input },
-                                        });
+                                        on_event(crate::helper::tool_event(tool, id, input));
                                     }
                                 }
                                 continue;

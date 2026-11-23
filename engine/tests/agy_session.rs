@@ -357,6 +357,8 @@ async fn agy_tools_offered_in_full_access_only() {
             effort: "medium".into(),
             resume: None,
             permissions,
+            builtin: None,
+            leads: false,
             spawn,
         };
         let session = faber_engine::agy::session::start(options, &[server], Arc::new(|_| {})).unwrap();
@@ -367,6 +369,108 @@ async fn agy_tools_offered_in_full_access_only() {
         assert_eq!(open["params"]["mcpServers"], if offered { json!([launch]) } else { json!([]) }, "{permissions:?}");
         drop(session);
     }
+}
+
+struct ProjectTools;
+
+impl faber_engine::browser::Browser for ProjectTools {
+    fn act(
+        &self,
+        _: String,
+        _: String,
+        _: faber_engine::browser::Request,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<faber_engine::browser::Page, String>> + Send>> {
+        panic!("listing tools does not open a browser");
+    }
+}
+
+impl faber_engine::verify::Runner for ProjectTools {
+    fn start(&self, _: &faber_engine::verify::Spec) -> std::io::Result<faber_engine::verify::Started> {
+        panic!("listing tools does not run project checks");
+    }
+}
+
+#[tokio::test]
+async fn agy_project_tools_follow_permissions_and_write_the_projects_plan() {
+    tokio::time::timeout(support::DEADLINE, async {
+        for permissions in [Permissions::Ask, Permissions::FullAccess] {
+            let dir = DataFolder::new();
+            let (engine, mut wire) = start(&dir, permissions);
+            engine.set_browser(Arc::new(ProjectTools));
+            engine.set_verifier(Arc::new(faber_engine::verify::Verifier::new(Arc::new(ProjectTools))));
+            let folder = tempfile::tempdir().unwrap();
+            let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+            let id = engine
+                .send(SendRequest {
+                    conversation_id: None,
+                    area: Area::Project,
+                    project_id: Some(project.id),
+                    text: "Make a plan".into(),
+                    images: vec![],
+                    files: vec![],
+                    choice: Choice { vendor: "gemini".into(), model: None, effort: None },
+                })
+                .unwrap();
+            let plain = entries("plain");
+            support::expect_method(&mut wire.0, "initialize").await;
+            support::emit(&mut wire.1, response(&plain, 1)).await;
+            let open = support::expect_method(&mut wire.0, "session/new").await;
+            let launch = &open["params"]["mcpServers"][0];
+            let name = launch["name"].as_str().unwrap();
+            let port = launch["args"][1].as_str().unwrap().parse::<u16>().unwrap();
+            let stream = tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).await.unwrap();
+            let (reader, mut writer) = stream.into_split();
+            let mut replies = BufReader::new(reader).lines();
+            use tokio::io::AsyncWriteExt;
+            writer.write_all(launch["env"][0]["value"].as_str().unwrap().as_bytes()).await.unwrap();
+            faber_engine::proc::write_line(&mut writer, &json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})).await.unwrap();
+            let listing: Value = serde_json::from_str(&replies.next_line().await.unwrap().unwrap()).unwrap();
+            let tools = listing["result"]["tools"].as_array().unwrap();
+            let has = |name: &str| tools.iter().any(|tool| tool["name"] == name);
+            assert!(["plan", "helper", "conversation"].into_iter().all(has));
+            for name in ["browse", "verify", "map"] {
+                assert_eq!(has(name), permissions == Permissions::FullAccess, "{name}");
+            }
+            let opened = response(&plain, 2);
+            support::emit(&mut wire.1, opened.clone()).await;
+            default_mode(&mut wire).await;
+            support::expect_method(&mut wire.0, "session/prompt").await;
+            let args = json!({"steps":[{"id":"inspect","text":"Inspect the project","state":"in_progress"}]});
+            support::emit(
+                &mut wire.1,
+                json!({
+                    "jsonrpc":"2.0","id":"approval","method":"session/request_permission",
+                    "params":{"sessionId":opened["result"]["sessionId"],
+                        "toolCall":{"toolCallId":"plan-step","name":format!("mcp_{name}_plan"),"kind":"other","rawInput":{"toolSummary":"Planning the project"}},
+                        "options":[{"optionId":"allow","kind":"allow_once"}]}
+                }),
+            )
+            .await;
+            let mut reply = String::new();
+            wire.0.read_line(&mut reply).await.unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&reply).unwrap()["result"]["outcome"]["optionId"], "allow");
+            faber_engine::proc::write_line(
+                &mut writer,
+                &json!({
+                    "jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"plan","arguments":args}
+                }),
+            )
+            .await
+            .unwrap();
+            let answered: Value = serde_json::from_str(&replies.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(answered["result"]["isError"], false, "{answered}");
+            let saved = engine.open(&id).unwrap();
+            assert_eq!(saved.plan.unwrap().steps[0].text, "Inspect the project");
+            let steps = saved.messages.last().unwrap().tools.as_ref().unwrap();
+            let plan_steps: Vec<_> = steps.iter().filter(|step| step.name == "Plan").collect();
+            assert_eq!(plan_steps.len(), 1);
+            assert!(plan_steps[0].id.ends_with(":plan-step"));
+            assert_eq!(plan_steps[0].input, args);
+            engine.shutdown();
+        }
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -397,7 +501,17 @@ async fn agy_refuses_credential_path_through_junction() {
     junction::create(&protected, &alias).unwrap();
     // The second round names no target of its own, only another argument that looks like one.
     // The third names a harmless path beside its real target, under a name and kind the reader does not know.
-    for (permissions, masked) in [(Permissions::Ask, 0), (Permissions::FullAccess, 0), (Permissions::Ask, 1), (Permissions::Ask, 2)] {
+    let mut cases = vec![
+        (Permissions::Ask, 0, &alias),
+        (Permissions::FullAccess, 0, &alias),
+        (Permissions::Ask, 1, &alias),
+        (Permissions::Ask, 2, &alias),
+    ];
+    let short = scratch.path().join("CODEX~1");
+    if short.canonicalize().ok() == Some(protected.canonicalize().unwrap()) {
+        cases.extend([(Permissions::Ask, 0, &short), (Permissions::FullAccess, 0, &short)]);
+    }
+    for (permissions, masked, source) in cases {
         let (engine, mut wire) = start(&dir, permissions);
         let recording = entries("guard-write-junction");
         let opened = response(&recording, 2);
@@ -412,7 +526,7 @@ async fn agy_refuses_credential_path_through_junction() {
             .find(|msg| msg["method"] == "session/request_permission" && msg["params"]["toolCall"]["kind"] == "read")
             .unwrap();
         request["params"]["sessionId"] = session;
-        let path = alias.join("auth.json");
+        let path = source.join("auth.json");
         request["params"]["toolCall"]["rawInput"]["Path"] = json!(path);
         request["params"]["toolCall"]["locations"] = json!([{"path":path}]);
         if masked > 0 {

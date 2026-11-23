@@ -205,7 +205,7 @@ pub fn mcp(message: &Value, tools: Tools) -> Mcp {
 }
 
 /// The offered tool a call names, if any.
-fn called(name: &Value, tools: Tools) -> Option<&'static str> {
+pub(crate) fn called(name: &Value, tools: Tools) -> Option<&'static str> {
     match name.as_str()? {
         TEAM_NAME if tools.team => Some(TEAM_NAME),
         NAME if tools.helper => Some(NAME),
@@ -224,6 +224,33 @@ fn called(name: &Value, tools: Tools) -> Option<&'static str> {
         crate::toolbox::CREATIVE if tools.progress => Some(crate::toolbox::CREATIVE),
         crate::toolbox::OFFER_BIGGER if tools.progress => Some(crate::toolbox::OFFER_BIGGER),
         _ => None,
+    }
+}
+
+pub(crate) fn tool_event(tool: &str, id: String, input: Value) -> crate::events::EngineEvent {
+    use crate::events::EngineEvent;
+    match tool {
+        TEAM_NAME => EngineEvent::TeamCall { id, input },
+        crate::review::NAME => EngineEvent::ReviewCall { id, input },
+        crate::browser::NAME => EngineEvent::BrowseCall { id, input },
+        crate::sibling::NAME => EngineEvent::ConversationCall { id, input },
+        crate::verify::NAME => EngineEvent::VerifyCall { id, input },
+        crate::map::NAME => EngineEvent::MapCall { id, input },
+        name if let Some(tool) = crate::progress::tool_of(name) => EngineEvent::ProgressCall { id, tool, input },
+        name if let Some(tool) = crate::toolbox::tool_of(name) => EngineEvent::ToolboxCall { id, tool, input },
+        _ => EngineEvent::HelperCall { id, input },
+    }
+}
+
+pub(crate) fn tool_label(name: &str) -> Option<&'static str> {
+    match name.strip_prefix("mcp__faber__")? {
+        NAME => Some(TOOL),
+        crate::review::NAME => Some(crate::review::TOOL),
+        crate::browser::NAME => Some(crate::browser::TOOL),
+        crate::sibling::NAME => Some(crate::sibling::TOOL),
+        crate::verify::NAME => Some(crate::verify::TOOL),
+        crate::map::NAME => Some(crate::map::TOOL),
+        tool => crate::progress::tool_of(tool).or_else(|| crate::toolbox::tool_of(tool)),
     }
 }
 
@@ -246,7 +273,6 @@ pub fn other(vendor: Vendor) -> Vendor {
     match vendor {
         Vendor::Claude => Vendor::Codex,
         Vendor::Codex => Vendor::Claude,
-        // Not yet: nothing runs on Antigravity, so its helper would be Claude's.
         Vendor::Gemini => Vendor::Claude,
     }
 }

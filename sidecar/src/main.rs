@@ -50,6 +50,9 @@ mod updates;
 const FINISH: std::time::Duration = std::time::Duration::from_secs(1);
 
 fn main() -> ExitCode {
+    if let Some(code) = faber_engine::agy::stdio_mode() {
+        return ExitCode::from(u8::try_from(code).unwrap_or(1));
+    }
     #[cfg(windows)]
     {
         let args: Vec<_> = std::env::args_os().skip(1).collect();

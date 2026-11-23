@@ -2,7 +2,11 @@
 //! says, one JSON-RPC message per line, into the reply events the engine already knows, and the messages a driver writes to
 //! it. No process here: the session driver feeds `AcpReader` every line it reads and every message it writes.
 
+mod bridge;
 pub mod session;
+mod stdio;
+
+pub use stdio::stdio_mode;
 
 use crate::events::{EngineEvent, TOOL_OUTPUT_CHARS};
 use crate::tools::Launch;

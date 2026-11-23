@@ -28,8 +28,20 @@ the other two CLIs get, Chat's already cut to its reviewed set by the store) in 
 `session/resume`; every other mode gets none, because a server runs outside any guard (R195). The reader names their
 calls `mcp__<server>__<tool>` as the screen already draws them.
 
-Faber's own tools (plan, conversation, helper, verify, browse, progress and the rest) do not reach an Antigravity
-conversation. The other two get them inside their own process link: an in-process server for one, dynamic tools for the
-other. ACP's `session/new` only takes servers the CLI launches itself, and Faber has no such server for these tools:
-`faber mcp` serves the app's command table, not a conversation's tools. They need a small standard-input server that
-calls back into the engine for one conversation, with that conversation's permissions; it is not built.
+Projects get Faber's own server in both Ask and Full access. It uses Claude's MCP definitions and the engine's existing
+conversation tool handlers. Browse, verify and map still require Full access and the corresponding host capabilities.
+Faber answers ACP's extra permission request for its own available tools during a prompt. Permission requests for other
+servers still follow the catalog policy. Each launch picks a fresh server name so a project-configured server cannot
+inherit its approval. Antigravity uses that name in `mcp_<server>_<tool>`. The work log uses the same names and
+links as Claude, and the final answer uses the same conclusion block as the other drivers.
+
+The ACP launch starts the engine host in a private stdio mode, before app startup. An IPv4 loopback listener belongs to one
+live driver. A new random secret goes only into that MCP child's launch environment. The first authenticated
+connection consumes the secret and closes the listener. Each call reaches the fixed conversation through its existing
+event sink. Calls outside a live prompt are refused. Ending the driver drops the connection before process teardown,
+and starting or resuming in a new process creates a new endpoint and secret. Faber keeps the secret in memory and out
+of its diagnostics. The relay opens no window or shell and exposes no app command table.
+If the relay disconnects, the current answer can finish and the next turn starts with a fresh relay.
+
+There is one relay process while the tool server is live, and none when idle without an Antigravity process. The
+engine shares its existing runtime, with bounded message queues, a socket and no added background thread or polling.

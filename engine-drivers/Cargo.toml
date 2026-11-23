@@ -13,7 +13,7 @@ faber-engine-projects = { path = "../engine-projects" }
 base64 = "0.23"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["raw_value"] }
-tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
