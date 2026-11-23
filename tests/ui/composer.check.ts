@@ -1,7 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { delegateEvents, render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import { PERMISSION_MODES, type Choice, type Summary, type PermissionMode } from '../../ui/api.ts';
+import { PERMISSION_MODES, type Choice, type Summary, type PermissionMode, type Vendor } from '../../ui/api.ts';
 import { Composer, type Draft, PermissionChip, StopAsk } from '../../ui/Composer.tsx';
 import { readAs } from '../../ui/attachments.ts';
 import { Sidebar } from '../../ui/Sidebar.tsx';
@@ -292,6 +292,33 @@ check('composer: one model and effort chip preserves the draft and warms the new
     equal(field.value, 'Keep this draft');
     field.value += '!'; field.dispatchEvent(new Event('input', { bubbles: true }));
     equal(warmed, 2, 'the next edit warms the new model');
+  } finally { dispose(); root.remove(); }
+});
+
+check('composer: Antigravity models appear only for a connected account', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const [vendors, setVendors] = createSignal<Vendor[]>(['claude', 'codex']);
+  const [choice, setChoice] = createSignal<Choice>({ vendor: 'auto' });
+  const dispose = render(() => createComponent(Composer, {
+    get vendors() { return vendors(); },
+    get options() { return modelOptions(vendors(), [{ id: 'gpt-6-luna', label: 'Luna', isDefault: true }]); },
+    get choice() { return choice(); },
+    busy: false, placeholder: '', onChoice: setChoice, onStop: () => {}, onWarm: () => {}, onPause: () => {}, onSend: () => {},
+  }), root);
+  try {
+    root.querySelector<HTMLButtonElement>('.model-chip')!.click();
+    await frames();
+    const group = () => root.querySelector('[role="group"][aria-label="Antigravity"]');
+    equal(group(), null);
+    setVendors(['claude', 'codex', 'gemini']);
+    await frames();
+    ok(group()?.querySelector('.mk.gemini'), 'the account group shows the Antigravity mark');
+    const choices = [...group()!.querySelectorAll<HTMLButtonElement>('.model-option')];
+    deepEqual(choices.map((button) => button.textContent), ['Gemini 4 Neon', 'Gemini 4 Argon', 'Gemini 4 Hydrogen', 'Gemini 3.8 Flash']);
+    choices[2]!.click();
+    deepEqual(choice(), { vendor: 'gemini', model: 'gemini-4-hydrogen', effort: 'medium' });
+    ok(root.querySelector('.model-chip .mk.gemini'), 'the chosen model shows the Antigravity mark');
   } finally { dispose(); root.remove(); }
 });
 

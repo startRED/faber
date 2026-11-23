@@ -345,6 +345,10 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
         "the synthetic chat subscription",
         "window.__TAURI_INTERNALS__.invoke('state').then(s=>s.usage?.some(u=>u.vendor==='claude' && !u.billingUnknown && !u.billedPerUse))",
     )?;
+    page.click(&css(".composer .model-chip"))?;
+    page.wait_visible(&css(".model-menu"))?;
+    same(page.count(&css(".model-menu .model-group.gemini"))?, 0, "a disconnected Antigravity account has no model group")?;
+    page.press("Escape")?;
     ask(page, QUESTION)?;
     let answer = page.named("article", "answer.label")?;
     page.wait_visible(&answer.clone().css(".actions"))?;

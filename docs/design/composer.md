@@ -33,8 +33,8 @@ above eight manual models, matches partial names without case sensitivity and se
 
 Picking another model resets effort to Medium; picking the same model preserves effort. Auto removes manual effort.
 Auto can choose low through xhigh from the measured rows of its held model; manual choices stay low, medium and high.
-Antigravity has benchmark profiles ready in Auto's table. It stays out of Auto's choices until it is runnable.
-Its account must also be signed in on a confirmed subscription tier and outside any quota backoff.
+Chat and Projects show four Gemini models under the Antigravity mark when connected. Auto requires Antigravity to
+be runnable and signed in on a confirmed subscription tier, outside quota backoff.
 The existing answer and helper rows name xhigh in every language; the stronger retry carries it through the choice
 contract and saves it like the other efforts. No control or picker layout changes.
 Auto's task guide names supplied-text chores, everyday documents/slides/spreadsheets and scoped code, and multi-part

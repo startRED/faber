@@ -7,7 +7,8 @@ export interface Option {
   current?: boolean;
 }
 
-const VENDOR_NAME: Record<Vendor, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Antigravity' };
+const VENDOR_NAME = { claude: 'Claude', codex: 'Codex' };
+const ANTIGRAVITY_MODELS = ['gemini-4-neon', 'gemini-4-argon', 'gemini-4-hydrogen', 'gemini-3.8-flash'] as const;
 // shortcut: Auto profile ids are mirrored here; share metadata when the account model list exposes profiles.
 const AUTO_MODELS = new Set(['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6.2-sol', 'gpt-6.2-astra']);
 
@@ -23,10 +24,13 @@ export function modelOptions(vendors: Vendor[], codexModels: ModelInfo[] = []): 
     // Each model by its own name, once the account lists them; Auto covers the moment before.
     for (const m of codexModels) options.push({ label: prettyModel(m.id), choice: { vendor: 'codex', model: m.id }, current: m.isDefault || AUTO_MODELS.has(m.id) });
   }
+  if (vendors.includes('gemini')) {
+    for (const model of ANTIGRAVITY_MODELS) options.push({ label: prettyModel(model), choice: { vendor: 'gemini', model }, current: true });
+  }
   return options;
 }
 
-export const vendorName = (vendor: Vendor) => VENDOR_NAME[vendor];
+export const vendorName = (vendor: Vendor) => vendor === 'gemini' ? t('setup.antigravity') : VENDOR_NAME[vendor];
 
 // "claude-sonnet-5-5" -> "Sonnet 5.5", "gpt-6-luna" -> "GPT-6 Luna", "sonnet" -> "Sonnet".
 export function prettyModel(model: string | undefined): string {
@@ -36,6 +40,8 @@ export function prettyModel(model: string | undefined): string {
   if (claude) return `${cap(claude[1]!)} ${claude[2]}.${claude[3]}`;
   const gpt = /^gpt-([\d.]+)(?:-(.+))?$/.exec(model);
   if (gpt) return `GPT-${gpt[1]}${gpt[2] ? ` ${gpt[2].split('-').map(cap).join(' ')}` : ''}`;
+  const gemini = /^gemini-([\d.]+)-(.+)$/.exec(model);
+  if (gemini) return `Gemini ${gemini[1]} ${gemini[2]!.split('-').map(cap).join(' ')}`;
   return cap(model);
 }
 
