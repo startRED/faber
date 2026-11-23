@@ -474,8 +474,16 @@ table! {
         step: Option<String>,
     ) -> String [Failure] {
         let by = agent_by(by)?;
-        let ai = faber_engine::sibling::Ai::parse(ai.as_deref().map(str::trim).filter(|s| !s.is_empty()).unwrap_or("same"))
-            .map_err(|error| refused(error.into()))?;
+        let ai = match ai.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            None | Some("same") => faber_engine::sibling::Ai::Same,
+            Some("auto") => faber_engine::sibling::Ai::Auto,
+            Some(name) => faber_engine::sibling::Ai::Named(
+                Vendor::ALL
+                    .into_iter()
+                    .find(|v| v.name() == name)
+                    .ok_or_else(|| refused("ai is not one of same, auto, claude or codex".into()))?,
+            ),
+        };
         let new = faber_engine::engine::NewSession { title, brief, ai, model, effort, work: None, keep_going: keep_going.unwrap_or(false), step };
         h.engine.session_start(&by, new).map_err(refused)
     }

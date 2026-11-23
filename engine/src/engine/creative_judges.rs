@@ -8,7 +8,7 @@ const PURPOSE: Purpose = Purpose::UserTurn { by_hand: false };
 
 fn select_profiles(candidates: &[crate::route::Profile], economy: bool) -> Option<[crate::route::Profile; 2]> {
     let first = Vendor::ALL.into_iter().find_map(|v| crate::helper::profile(candidates, v, economy))?;
-    let other_vendor = Vendor::ALL.into_iter().filter(|v| *v != first.vendor).find_map(|v| crate::helper::profile(candidates, v, economy));
+    let other_vendor = crate::helper::profile(candidates, crate::helper::other(first.vendor), economy);
     let second = other_vendor.or_else(|| {
         let distinct: Vec<_> = candidates.iter().copied().filter(|p| p.model != first.model).collect();
         crate::helper::profile(&distinct, first.vendor, economy)
@@ -65,8 +65,6 @@ impl Core {
         let available: Vec<_> = self.opts.clis.keys().copied().collect();
         let candidates: Vec<_> = crate::route::candidates(&available, &self.codex_models)
             .into_iter()
-            // Judges need isolated auxiliary sessions. Antigravity cannot start one yet.
-            .filter(|p| p.vendor != Vendor::Gemini)
             .filter(|p| self.allows(p.vendor, family_of(p.model), PURPOSE, false).is_ok())
             .collect();
         let Some(profiles) = select_profiles(&candidates, self.economy(conv)) else {
@@ -161,9 +159,7 @@ mod tests {
         let profiles = crate::route::PROFILES;
         let selected = select_profiles(&profiles, false).unwrap();
         assert_ne!(selected[0].vendor, selected[1].vendor);
-        let without_codex: Vec<_> = profiles.into_iter().filter(|p| p.vendor != Vendor::Codex).collect();
-        assert_eq!(select_profiles(&without_codex, false).unwrap().map(|p| p.vendor), [Vendor::Claude, Vendor::Gemini]);
-        for vendor in Vendor::ALL {
+        for vendor in Vendor::RUNNABLE {
             let only: Vec<_> = profiles.into_iter().filter(|p| p.vendor == vendor).collect();
             let selected = select_profiles(&only, false).unwrap();
             assert_eq!(selected[0].vendor, selected[1].vendor);

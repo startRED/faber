@@ -413,17 +413,6 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_steps_up_within_its_own_models() {
-        let current = pick(Vendor::Gemini, "gemini-4-hydrogen", "medium");
-        let raised = next_rung(&current, &PROFILES).unwrap();
-        assert_eq!(raised.vendor, Vendor::Gemini);
-        assert_eq!(raised.effort, "high");
-        let other_vendors: Vec<_> = PROFILES.into_iter().filter(|p| p.vendor != Vendor::Gemini).collect();
-        assert!(next_rung(&current, &other_vendors).is_none());
-        assert!(stronger_model(&current, &other_vendors).is_none());
-    }
-
-    #[test]
     fn more_effort_comes_before_a_stronger_model() {
         assert_eq!(rung(Vendor::Claude, "claude-sonnet-5-5", "medium"), to("claude-sonnet-5-5", "high"));
         assert_eq!(rung(Vendor::Claude, "claude-opus-5-5", "medium"), to("claude-opus-5-5", "high"));

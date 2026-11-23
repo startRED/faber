@@ -99,10 +99,8 @@ pub(super) struct Run {
 /// Who reviews (the owner's rule of 2026-11-13): the AI that did not write the change when it is connected and has quota,
 /// with a fresh session of the writer's own AI as R543's second reviewer in the skeptical role; with one AI, two fresh
 /// sessions of it, the second skeptical. Never the writer's own session.
-pub(super) fn reviewers(own: Vendor, mut alternates: impl Iterator<Item = Vendor>) -> [(Vendor, Role); 2] {
-    let first = alternates.next().unwrap_or(own);
-    let second = if own == Vendor::Gemini { alternates.next().unwrap_or(first) } else { own };
-    [(first, Role::Defects), (second, Role::Skeptic)]
+pub(super) fn reviewers(own: Vendor, other: Vendor, other_ready: bool) -> [(Vendor, Role); 2] {
+    [(if other_ready { other } else { own }, Role::Defects), (own, Role::Skeptic)]
 }
 
 fn instruction(next: Next) -> String {
@@ -169,8 +167,9 @@ impl Core {
         let asked = if asked.trim().is_empty() { request.to_string() } else { asked };
         let claim = request.to_string();
         let source = self.git.clone().zip(c.copy.clone().filter(|copy| !copy.root.is_empty()));
-        let alternates = Vendor::ALL.into_iter().filter(|v| *v != own && self.has_quota(*v));
-        let picked = reviewers(own, alternates);
+        let other = crate::helper::other(own);
+        let other_ready = self.opts.clis.contains_key(&other) && self.has_quota(other);
+        let picked = reviewers(own, other, other_ready);
         let mut pending = HashMap::new();
         let mut jobs = Vec::new();
         for (i, (vendor, role)) in picked.into_iter().enumerate() {
@@ -209,10 +208,6 @@ impl Core {
     /// Whether some model of `vendor` may run a helper now (quota and billing), checked before a reviewer is picked so a
     /// vendor out of quota is replaced instead of left out.
     fn has_quota(&self, vendor: Vendor) -> bool {
-        // A reviewer needs enforceable plan permissions, which the Antigravity session cannot provide yet.
-        if vendor == Vendor::Gemini {
-            return false;
-        }
         crate::route::candidates(&self.vendors(), &self.codex_models)
             .into_iter()
             .filter(|p| p.vendor == vendor)
@@ -416,18 +411,11 @@ mod tests {
 
     #[test]
     fn the_ai_that_did_not_write_reviews_first_and_a_fresh_skeptic_of_the_writers_ai_second() {
+        assert_eq!(reviewers(Vendor::Codex, Vendor::Claude, true), [(Vendor::Claude, Role::Defects), (Vendor::Codex, Role::Skeptic)]);
         assert_eq!(
-            reviewers(Vendor::Codex, [Vendor::Claude].into_iter()),
-            [(Vendor::Claude, Role::Defects), (Vendor::Codex, Role::Skeptic)]
-        );
-        assert_eq!(
-            reviewers(Vendor::Codex, std::iter::empty()),
+            reviewers(Vendor::Codex, Vendor::Claude, false),
             [(Vendor::Codex, Role::Defects), (Vendor::Codex, Role::Skeptic)],
             "the other AI missing or out of quota: two fresh sessions of the writer's AI, one skeptical"
-        );
-        assert_eq!(
-            reviewers(Vendor::Gemini, [Vendor::Claude, Vendor::Codex].into_iter()),
-            [(Vendor::Claude, Role::Defects), (Vendor::Codex, Role::Skeptic)]
         );
     }
 }

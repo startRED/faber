@@ -34,7 +34,7 @@ fn schema() -> Value {
             "action": { "type": "string", "enum": ["start", "read", "headers", "steps", "command_results", "workspace", "list", "ask", "stop", "resume", "wait", "archive", "context", "compact", "clear"], "description": "read: latest answer or numbered messages; headers: locate numbers by role without reading text; steps: list tools or inspect one recorded step; command_results: recent background command endings or running command metadata; workspace: current project's copy, Git conflicts and observed work, with no other arguments; list: unarchived conversations and folders, use nextOffset for more; if a file changed unexpectedly, ask the conversation working there; ask: identify yourself and read the reply later; wait: on ids or note; archive id: list first, only when asked; any owner, finished, not working, waiting, queued or pinned; recoverable by the person; archive without id: self only when done, verified and nothing awaits the person. context: token usage. compact: summarize, losing details; without next wait for the person. clear: discard summary, keep the person's requests word for word and next." },
             "title": { "type": "string", "description": "start: a few words naming the work; it becomes the conversation's title." },
             "brief": { "type": "string", "description": "start: self-contained goal, files and done criteria; no overlapping work. Returns id and reports when finished. keep_going gives ordered tasks and one final report." },
-            "ai": { "type": "string", "enum": ["same", "auto", "claude", "codex", "antigravity"], "description": "start: same by default or auto by task and quota; check quota, spread across available AIs, use the other AI for code review." },
+            "ai": { "type": "string", "enum": ["same", "auto", "claude", "codex"], "description": "start: same by default or auto by task and quota; check quota, spread across available AIs, use the other AI for code review." },
             "model": { "type": "string", "description": "start: a model; with auto its AI is found from it." },
             "effort": { "type": "string", "enum": ["low", "medium", "high"] },
             "kind": { "type": "string", "enum": crate::route::KINDS },
@@ -185,22 +185,6 @@ pub enum Ai {
     Auto,
     /// This AI at its default model.
     Named(Vendor),
-}
-
-impl Ai {
-    /// Parses the AI name used when starting a conversation.
-    pub fn parse(name: &str) -> Result<Self, &'static str> {
-        match name {
-            "same" => Ok(Self::Same),
-            "auto" => Ok(Self::Auto),
-            "antigravity" | "gemini" => Ok(Self::Named(Vendor::Gemini)),
-            name => Vendor::RUNNABLE
-                .into_iter()
-                .find(|v| v.name() == name)
-                .map(Self::Named)
-                .ok_or("ai is not one of same, auto, claude, codex or antigravity"),
-        }
-    }
 }
 
 /// The most conversations one read takes.
@@ -378,7 +362,13 @@ pub fn request(input: &Value) -> Result<Request, &'static str> {
         (Some(id), None) => Ok(Request::Read { id }),
         (None, Some(brief)) => {
             let title: String = text("title").unwrap_or_else(|| "A piece of work".into()).chars().take(60).collect();
-            let ai = Ai::parse(text("ai").as_deref().unwrap_or("same"))?;
+            let ai = match text("ai").as_deref() {
+                None | Some("same") => Ai::Same,
+                Some("auto") => Ai::Auto,
+                Some(name) => Ai::Named(
+                    Vendor::RUNNABLE.into_iter().find(|v| v.name() == name).ok_or("ai is not one of same, auto, claude or codex")?,
+                ),
+            };
             let model = if input.get("model").is_some() { Some(text("model").ok_or("model must be a nonempty name")?) } else { None };
             let effort =
                 if input.get("effort").is_some() { Some(text("effort").ok_or("effort must be low, medium or high")?) } else { None };
@@ -763,10 +753,7 @@ mod tests {
             work(json!({"brief":"x","kind":"research","difficulty":"huge","scope":"open"})),
             Some(Work { kind: "research", difficulty: "medium", scope: "open" })
         );
-        assert!(schema()["properties"]["ai"]["enum"].as_array().unwrap().contains(&json!("antigravity")));
-        assert!(matches!(on("antigravity"), Ok(Request::Start { ai: Ai::Named(Vendor::Gemini), .. })));
-        assert!(matches!(on("gemini"), Ok(Request::Start { ai: Ai::Named(Vendor::Gemini), .. })));
-        assert_eq!(on("unknown"), Err("ai is not one of same, auto, claude, codex or antigravity"));
+        assert_eq!(on("gemini"), Err("ai is not one of same, auto, claude or codex"));
         assert_eq!(request(&json!({"id":"abc"})), Ok(Request::Read { id: "abc".into() }));
         assert_eq!(
             request(&json!({"action":"read","ids":["a"," b "]})),
