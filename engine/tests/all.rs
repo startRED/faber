@@ -22,6 +22,8 @@ mod tool_inventory;
 
 #[path = "account.rs"]
 mod account;
+#[path = "agy_session.rs"]
+mod agy_session;
 #[path = "approve_plan_review.rs"]
 mod approve_plan_review;
 #[path = "auto.rs"]

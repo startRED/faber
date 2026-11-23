@@ -102,15 +102,17 @@ impl Engine {
     /// A turn of Antigravity ended with its CLI's out-of-quota error: out until the reset the error names, or for
     /// `AGY_BACKOFF` when it names none or one already past. Antigravity has no reading that could show room sooner.
     pub fn note_antigravity_out(&self, resets_at: Option<f64>) {
-        self.with(|c| {
-            let now = c.secs();
-            let until = resets_at.filter(|t| t.is_finite() && *t > now).unwrap_or(now + crate::budget::AGY_BACKOFF);
-            c.apply_signals(Vendor::Gemini, Signals { reach: Some(Reach::Out(Some(until))), ..Signals::default() });
-        })
+        self.with(|c| c.antigravity_out(resets_at))
     }
 }
 
 impl Core {
+    pub(super) fn antigravity_out(&mut self, resets_at: Option<f64>) {
+        let now = self.secs();
+        let until = resets_at.filter(|t| t.is_finite() && *t > now).unwrap_or(now + crate::budget::AGY_BACKOFF);
+        self.apply_signals(Vendor::Gemini, Signals { reach: Some(Reach::Out(Some(until))), ..Signals::default() });
+    }
+
     fn antigravity_checked(&mut self, status: AccountStatus, plan: Option<Signals>) {
         let now = self.secs();
         let v = self.ledger.of_mut(Vendor::Gemini);

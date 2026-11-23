@@ -2,6 +2,8 @@
 //! says, one JSON-RPC message per line, into the reply events the engine already knows, and the messages a driver writes to
 //! it. No process here: the session driver feeds `AcpReader` every line it reads and every message it writes.
 
+pub mod session;
+
 use crate::events::{EngineEvent, TOOL_OUTPUT_CHARS};
 use crate::tools::Launch;
 use serde_json::{Map, Value, json};
@@ -27,6 +29,12 @@ pub fn session_new(id: u64, cwd: &str, servers: &[Launch]) -> Value {
 /// `session/load`: the conversation comes back, replayed first (which the reader does not show again).
 pub fn session_load(id: u64, session: &str, cwd: &str, servers: &[Launch]) -> Value {
     request(id, "session/load", json!({ "sessionId": session, "cwd": cwd, "mcpServers": mcp_servers(servers) }))
+}
+
+/// `session/resume`: the conversation comes back without a replay, and an unknown id is an error (`session/load` would
+/// answer it with an empty session under that id).
+pub fn session_resume(id: u64, session: &str, cwd: &str, servers: &[Launch]) -> Value {
+    request(id, "session/resume", json!({ "sessionId": session, "cwd": cwd, "mcpServers": mcp_servers(servers) }))
 }
 
 /// `session/set_model` with a model id that holds the effort too (`gemini-3.8-flash-low`).
@@ -180,7 +188,7 @@ impl AcpReader {
             if msg["id"].is_null() {
                 return;
             }
-            if method == "session/new" || method == "session/load" {
+            if matches!(method, "session/new" | "session/load" | "session/resume") {
                 self.servers =
                     p["mcpServers"].as_array().into_iter().flatten().filter_map(|s| s["name"].as_str().map(String::from)).collect();
             }
@@ -296,7 +304,15 @@ impl AcpReader {
     }
 
     fn end_failed(&mut self, msg: &Value, message: String) -> Vec<EngineEvent> {
-        let kind = crate::failure::from_text(&message).or((msg["error"]["code"] == -32602).then_some(crate::failure::Failure::Rejected));
+        use crate::failure::Failure;
+        let exhausted = msg["error"].to_string().contains("RESOURCE_EXHAUSTED");
+        let kind = if exhausted {
+            Some(Failure::Limit)
+        } else {
+            crate::failure::from_text(&message)
+                .filter(|kind| !matches!(kind, Failure::Limit))
+                .or((msg["error"]["code"] == -32602).then_some(Failure::Rejected))
+        };
         let mut events = vec![EngineEvent::Reason(crate::failure::reason("reason.failed", kind))];
         events.extend(self.close_open());
         events.push(done(false, message, &Value::Null));
@@ -372,35 +388,49 @@ impl AcpReader {
     fn step(&self, u: &Value) -> (String, Value) {
         let name = u["name"].as_str().unwrap_or_default();
         let raw = &u["rawInput"];
-        let path = || raw["Path"].as_str().or_else(|| u["locations"][0]["path"].as_str()).map(String::from);
-        match (name, u["kind"].as_str().unwrap_or_default()) {
-            ("run_command", _) | (_, "execute") if raw["CommandLine"].is_string() => {
+        // A tool server's tool keeps its own name and arguments, whatever kind agy gives it.
+        if let Some((server, tool)) =
+            self.servers.iter().find_map(|s| name.strip_prefix("mcp_")?.strip_prefix(s.as_str())?.strip_prefix('_').map(|t| (s, t)))
+        {
+            return (format!("mcp__{server}__{tool}"), raw.clone());
+        }
+        let path = || raw["Path"].as_str().map(String::from);
+        let kind = u["kind"].as_str().unwrap_or_default();
+        let (name, mut input) = match (name, kind) {
+            ("run_command", _) | (_, "execute") if raw["CommandLine"].is_string() && !matches!(name, "read_file" | "write_file") => {
                 ("Bash".into(), json!({ "command": raw["CommandLine"] }))
             }
             ("write_file", _) | (_, "edit") => {
                 let diff = u["content"].as_array().into_iter().flatten().find(|c| c["type"] == "diff");
                 match (diff, path()) {
                     (Some(d), _) if d["oldText"].as_str().is_some_and(|t| !t.is_empty()) => {
-                        ("Edit".into(), json!({ "file_path": d["path"], "old_string": d["oldText"], "new_string": d["newText"] }))
+                        ("Edit".into(), json!({ "old_string": d["oldText"], "new_string": d["newText"] }))
                     }
-                    (Some(d), _) => ("Write".into(), json!({ "file_path": d["path"], "content": d["newText"] })),
-                    (None, Some(p)) if raw["Content"].is_string() => ("Write".into(), json!({ "file_path": p, "content": raw["Content"] })),
+                    (Some(d), _) => ("Write".into(), json!({ "content": d["newText"] })),
+                    (None, Some(_)) if raw["Content"].is_string() => ("Write".into(), json!({ "content": raw["Content"] })),
                     _ => (name_or(name, u), raw.clone()),
                 }
             }
-            ("read_file", _) | (_, "read") if path().is_some() => ("Read".into(), json!({ "file_path": path() })),
+            ("read_file", _) | (_, "read") if path().is_some() => ("Read".into(), json!({})),
             // shortcut: no search tool was recorded, so its input goes as agy names it; map its fields once one is.
             (_, "search") => ("Grep".into(), raw.clone()),
             ("ask_question", _) => ("AskUserQuestion".into(), question_input(raw)),
-            _ => match self
-                .servers
-                .iter()
-                .find_map(|s| name.strip_prefix("mcp_")?.strip_prefix(s.as_str())?.strip_prefix('_').map(|t| (s, t)))
-            {
-                Some((server, tool)) => (format!("mcp__{server}__{tool}"), raw.clone()),
-                None => (name_or(name, u), raw.clone()),
-            },
+            _ => (name_or(name, u), raw.clone()),
+        };
+        // `file_path` is where the tool's own argument says it goes and nothing else: never the diff's path, which is only
+        // what it shows, nor another argument of the model's. A file tool that names no path says so with an empty one,
+        // and the driver refuses its request.
+        let file = matches!(name.as_str(), "Read" | "Write" | "Edit" | "read_file" | "write_file") || matches!(kind, "read" | "edit");
+        if !input.is_object() && (file || path().is_some()) {
+            input = json!({});
         }
+        if let Some(input) = input.as_object_mut()
+            && (file || path().is_some() || input.contains_key("file_path"))
+        {
+            input.insert("file_path".into(), json!(path()));
+        }
+        // Only a tool server's tool may carry that prefix: the driver leaves such a tool's arguments alone.
+        (if name.starts_with("mcp__") { name.replacen("mcp__", "mcp_", 1) } else { name }, input)
     }
 
     fn permission(&mut self, msg: &Value) -> Vec<EngineEvent> {

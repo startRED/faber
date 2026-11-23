@@ -71,6 +71,7 @@ mod mcp_servers;
 mod memory_search;
 mod native_fork;
 pub use crate::rewind::{NativeFork, NativePoint};
+mod agy;
 mod move_chat;
 mod overload;
 mod parked;
@@ -3395,6 +3396,7 @@ impl Core {
                 return;
             }
             EngineEvent::Reason(key) => {
+                self.agy_reason(vendor, key);
                 if let Some(l) = self.live.get_mut(conv) {
                     l.ended = Some(key);
                 }
@@ -4070,7 +4072,7 @@ impl Core {
                     self.probe_claude_flags();
                 }
                 let limited = fatal && !rejected && recovery::plan_limit(&message);
-                let stopped = rejected && self.convs.get(conv).is_some_and(|c| c.stopped);
+                let stopped = (rejected || agy::interrupted(vendor, &message)) && self.convs.get(conv).is_some_and(|c| c.stopped);
                 if let Some(m) = self.turn(conv) {
                     m.error = (!stopped).then_some(message);
                     if fatal {
@@ -5749,8 +5751,20 @@ impl Core {
         let identity = crate::proc::ConversationIdentity::new(conv)?;
         self.rewind_session_started(conv, sid, cwd_used.clone());
         let session = match pick.vendor {
-            // Not yet: no CLI is discovered for it, so the lookup above already refused it.
-            Vendor::Gemini => return Err("error.notConnected".into()),
+            Vendor::Gemini => agy::start_conversation_agy(
+                identity,
+                crate::agy::session::AgyOptions {
+                    bin: cli.command.clone(),
+                    cwd,
+                    data: self.opts.data_dir.clone(),
+                    model,
+                    effort: pick.effort.clone(),
+                    resume,
+                    permissions,
+                    spawn,
+                },
+                sink,
+            )?,
             Vendor::Claude => start_conversation_claude_native(
                 identity,
                 ClaudeOptions {

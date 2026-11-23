@@ -121,11 +121,11 @@ answers `sessionId`, `models` (23 ids such as `gemini-3.8-flash-low`; `currentMo
    agy sends the request `session/request_permission` (its `id` is a string) with the `toolCall` and two options, `allow`
    (`allow_once`) and `deny` (`reject_once`); there is no "always" option. The answer is
    `{outcome: {outcome: "selected", optionId}}`. After `deny` the call is `failed` with empty output and the turn ends
-   `end_turn` with no reply text. In `default` and `accept-edits` a command and an MCP tool ask; reading and writing files do
-   not, inside or outside the working folder. In `auto` the command ran without asking (the mode's description says it still
-   asks for irreversible actions; none was tried), and with the flag `--dangerously-skip-permissions` nothing asks.
-   `session/set_mode {sessionId, modeId}` answers `{}` and a `current_mode_update`; an unknown mode is error -32602. So Faber's
-   Ask is `default`, and Don't ask is `--dangerously-skip-permissions` (or `auto`, which may still ask). `plan` was not tried.
+   `end_turn` with no reply text. In `default` and `accept-edits` a command and an MCP tool ask. The files that were read
+   and written without asking were in the working folder or the child's temp folder. Later runs confirmed that native
+   reads and writes outside both folders ask in `default` mode. In `auto` an outside read and the recorded command ran
+   without asking, while an outside write asked. See [folder experiments](antigravity-folders.md).
+   `session/set_mode {sessionId, modeId}` answers `{}` and a `current_mode_update`; an unknown mode is error -32602.
 4. **Questions** (`acp-question`, `acp-question-elicitation`, `acp-question-declined`). `ask_question` is a tool call with
    `rawInput.questions` (`question`, `options`, `is_multi_select`). To a client that declares
    `clientCapabilities.elicitation.form`, agy sends the request `elicitation/create` (`sessionId`, `toolCallId`,
@@ -174,24 +174,30 @@ answers `sessionId`, `models` (23 ids such as `gemini-3.8-flash-low`; `currentMo
 
 ### The reader
 
-`engine-drivers/src/agy.rs` reads these messages into the engine's events, with no process: the driver hands `AcpReader`
-each line agy prints (`read`) and each message it writes (`sent`), so an answer is read by the request it answers. A reply
-chunk is `Text` (after a step, `Break` first); a call is a `Tool` named as the screen draws Claude Code's (`Bash`, `Write`
-or `Edit` from the diff, `Read`, `Grep`, `AskUserQuestion`, `mcp__<server>__<tool>` split by the servers given to
-`session/new`; any other call keeps agy's name), ended by `ToolResult` with a command's own output and exit code, cut at
-`TOOL_OUTPUT_CHARS`, and `declined` after a reject. A permission request and a form question are `Permission` events whose
-`request_id` is agy's id; `answer_permission` and `answer_question` build the answer, `cancel_pending` cancels what waits
-after a stop. A session's answer, and a model `set_model` took, is `Started`. The prompt's answer is `Done` (input with
-its cache, output with its thinking); a stop other than `end_turn` adds its `reason.*` key. An error answer to the prompt
-or a setting ends the reply (`reason.fail.rejected` for -32602); one to opening a session, or "Session not found", is
-`error.sessionLost`. Updates during a `session/load` are the replay and are dropped. A call still open ends with its turn.
+`AcpReader::read` and `sent` pair messages and produce the engine's reply, tool and permission events. A rejection marks
+the tool declined. Prompt answers report usage and complete the turn. Errors and interrupted turns provide existing
+reason keys. The reader drops history replayed during `session/load` and closes unfinished tool calls at turn end.
 
 ### Cost of the ACP recording
 
-72 model calls. The 69 kept read 535,522 input tokens plus 705,004 cache reads and wrote 3,933 output and 45 thinking tokens
-(1,244,459 by the CLI's own total); three overwritten ones add about 35,000. All ran on `gemini-3.8-flash-low` except two that
-ran on the default `gemini-4-neon-high` before the model was set (the first plain reply, redone, and the prompt after the
-load in `acp-resume`). The runs outside an isolated profile left their conversations in the owner's real profile.
+72 model calls, 69 kept: 535,522 input tokens, 705,004 cache reads, 3,933 output and 45 thinking. Three overwritten
+calls add about 35,000. Two used the default Neon model and the rest used Flash Low. Unisolated runs kept their
+conversations in the owner's profile. The eight isolated guard recordings took about 22 calls on Flash Low. Their
+14 kept prompts used 179,600 input tokens (80,866 cached) and 4,484 output tokens.
 
-The eight `acp-guard-*` recordings took about 22 more model calls on `gemini-3.8-flash-low`, each in an isolated profile.
-Their fourteen kept prompts read 179,600 input tokens, 80,866 of them from cache, and wrote 4,484 output tokens.
+## The session driver
+
+`start_conversation_agy` calls `agy::session::start` with the resolved executable. One owned process per live conversation
+runs `agy acp --gemini-dir <data>/antigravity/profile` with client name `faber`. Each process gets a new temp folder under `<data>/antigravity/tmp`, removed when its end is confirmed. The child does not inherit `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `GCLOUD_PROJECT`, `GOOGLE_CLOUD_QUOTA_PROJECT`, `GOOGLE_OAUTH_ACCESS_TOKEN` or `CLOUDSDK_AUTH_ACCESS_TOKEN` (removed by name, never read). Stop ends the process if `session/cancel` is not answered in time. Idle close ends the process tree. The next
+turn uses `session/resume` (an unknown id is an error there, not an empty session) and checks the id it answers.
+
+Ask and Full access both use `default` so outside file reads still ask the host. The host answers ordinary approvals
+in Full access and shows the agent's questions in both modes. Other permission modes return `error.notConnected`.
+A file request shows its resolved path (junctions followed); an unresolvable one is refused.
+
+An empty model leaves the CLI default. A listed model id uses `session/set_model`. Otherwise the driver sets `model` and
+then `thought_level` with `session/set_config_option`. Resume does the same. The out-of-quota recogniser
+looks for `RESOURCE_EXHAUSTED` in an error answer. This is a guess exercised by a synthetic fixture because no real
+quota error was recorded; it marks the account out and the reply ends with `error.quotaOut`. The session cannot block access to a protected folder inside the working folder, inside its own temp
+folder, within an approved command's or MCP tool's reach, behind a junction changed after the request was judged, or
+named by a tool whose input carries no `file_path` (`PROTECTED_FOLDER_LIMIT`). See the [folder experiments](antigravity-folders.md).

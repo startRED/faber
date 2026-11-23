@@ -362,6 +362,24 @@ pub fn real_spawner() -> Spawner {
     })
 }
 
+type EnvChanges = Vec<(&'static str, Option<std::ffi::OsString>)>;
+
+thread_local! {
+    static SPAWN_ENV: std::cell::RefCell<EnvChanges> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Applies environment changes during a synchronous spawn without changing the parent's environment.
+pub fn with_env<T>(changes: EnvChanges, spawn: impl FnOnce() -> T) -> T {
+    struct Reset(EnvChanges);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            SPAWN_ENV.with(|env| env.replace(std::mem::take(&mut self.0)));
+        }
+    }
+    let _reset = Reset(SPAWN_ENV.with(|env| env.replace(changes)));
+    spawn()
+}
+
 pub fn marked(bin: &str, args: &[String], cwd: &Path) -> Command {
     let mut cmd = Command::new(bin);
     cmd.args(args)
@@ -389,6 +407,18 @@ pub fn marked(bin: &str, args: &[String], cwd: &Path) -> Command {
         }
         cmd.env("FABER_CLI", cli).env("PATH", path);
     }
+    SPAWN_ENV.with(|env| {
+        for (name, value) in env.borrow().iter() {
+            match value {
+                Some(value) => {
+                    cmd.env(name, value);
+                }
+                None => {
+                    cmd.env_remove(name);
+                }
+            }
+        }
+    });
     cmd
 }
 
@@ -1060,6 +1090,19 @@ mod lifecycle_tests {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn spawn_env_changes_apply_to_one_command_only() {
+        use std::ffi::OsStr;
+        let cmd = super::with_env(vec![("FABER_TEST_AGY_REMOVE", None), ("TEMP", Some("private-temp".into()))], || {
+            super::marked("unused", &[], std::path::Path::new("."))
+        });
+        let changes = cmd.as_std().get_envs().collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(changes.get(OsStr::new("FABER_TEST_AGY_REMOVE")), Some(&None));
+        assert_eq!(changes.get(OsStr::new("TEMP")), Some(&Some(OsStr::new("private-temp"))));
+        let next = super::marked("unused", &[], std::path::Path::new("."));
+        assert!(!next.as_std().get_envs().any(|(name, _)| name == "FABER_TEST_AGY_REMOVE" || name == "TEMP"));
+    }
     #[tokio::test(start_paused = true)]
     async fn stalled_input_write_has_a_finite_deadline() {
         let (mut writer, _reader) = tokio::io::duplex(1);

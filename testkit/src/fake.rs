@@ -93,6 +93,11 @@ impl Dispatch {
 
 pub fn run(env: &Env, args: &[String], stdin: &mut dyn BufRead, stdout: &mut dyn Write, stderr: &mut dyn Write) -> io::Result<i32> {
     if args.first().is_some_and(|a| a == "acp") {
+        if args.get(1).is_some_and(|arg| arg == "--gemini-dir")
+            && env.recording.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("acp-"))
+        {
+            return agy_session(&env.recording, stdin, stdout);
+        }
         return agy_acp(env.state_dir.as_deref(), args, stdin, stdout);
     }
     if env.recording.parent().and_then(Path::file_name).is_some_and(|name| name == "agy") {
@@ -256,6 +261,63 @@ fn agy_print(recording: &Path, stdout: &mut dyn Write, stderr: &mut dyn Write) -
     Ok(code)
 }
 
+/// Replays the first process of an ACP recording, adapting response ids to the live client.
+fn agy_session(path: &Path, stdin: &mut dyn BufRead, stdout: &mut dyn Write) -> io::Result<i32> {
+    let recording = std::fs::read_to_string(path)?;
+    let mut lines = recording.lines().map(|line| serde_json::from_str::<Value>(line).map_err(io::Error::other));
+    let mut input = stdin.lines();
+    let mut ids = std::collections::HashMap::new();
+    while let Some(entry) = lines.next().transpose()? {
+        match entry["dir"].as_str() {
+            Some("in") => {
+                let expected = &entry["msg"];
+                let Some(line) = input.next().transpose()? else { break };
+                let mut actual: Value = serde_json::from_str(&line).map_err(io::Error::other)?;
+                if actual["method"] == "session/set_mode" && expected["method"] != "session/set_mode" {
+                    writeln!(stdout, "{}", json!({"jsonrpc":"2.0","id":actual["id"],"result":{}}))?;
+                    stdout.flush()?;
+                    let Some(line) = input.next().transpose()? else { break };
+                    actual = serde_json::from_str(&line).map_err(io::Error::other)?;
+                }
+                if expected["method"] == "session/set_model" && actual["method"] != "session/set_model" {
+                    // The recording selected a model, and a client using the CLI default omits the exchange.
+                    let skipped = lines.next().transpose()?.ok_or_else(|| io::Error::other("missing model response"))?;
+                    if skipped["dir"] != "stdout" {
+                        return Err(io::Error::other("expected the recorded model response"));
+                    }
+                    let prompt = lines.next().transpose()?.ok_or_else(|| io::Error::other("missing recorded prompt"))?;
+                    if actual["method"] != prompt["msg"]["method"] || prompt["dir"] != "in" {
+                        return Err(io::Error::other("expected the recorded prompt"));
+                    }
+                    ids.insert(prompt["msg"]["id"].to_string(), actual["id"].clone());
+                } else {
+                    if actual["method"] != expected["method"]
+                        || (actual["method"].is_null() && (actual["id"] != expected["id"] || actual["result"] != expected["result"]))
+                    {
+                        return Err(io::Error::other("ACP request differs from the recording"));
+                    }
+                    if !expected["method"].is_null() && !expected["id"].is_null() {
+                        ids.insert(expected["id"].to_string(), actual["id"].clone());
+                    }
+                }
+            }
+            Some("stdout") => {
+                let mut msg: Value = serde_json::from_str(entry["msg"].as_str().unwrap_or_default()).map_err(io::Error::other)?;
+                if msg["method"].is_null()
+                    && let Some(id) = ids.get(&msg["id"].to_string())
+                {
+                    msg["id"] = id.clone();
+                }
+                writeln!(stdout, "{msg}")?;
+                stdout.flush()?;
+            }
+            Some("exit") => return Ok(entry["msg"].as_i64().and_then(|code| i32::try_from(code).ok()).unwrap_or(0)),
+            _ => {}
+        }
+    }
+    Ok(0)
+}
+
 /// Antigravity's ACP server as the account check meets it (`tests/fixtures/agy/acct-*.jsonl`): it answers the handshake,
 /// then a new session while the marker says signed in and "Authentication required" otherwise. `acp --login` sets the marker.
 fn agy_acp(state: Option<&Path>, args: &[String], stdin: &mut dyn BufRead, stdout: &mut dyn Write) -> io::Result<i32> {
@@ -309,6 +371,25 @@ mod tests {
 
     fn records(state: &Path) -> Vec<Value> {
         std::fs::read_to_string(state.join("commands.jsonl")).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+    }
+
+    #[test]
+    fn agy_session_fake_replays_with_the_drivers_ids_and_default_mode() {
+        let input = [
+            json!({"id":1,"method":"initialize"}),
+            json!({"id":2,"method":"session/new"}),
+            json!({"id":91,"method":"session/set_mode","params":{"modeId":"default"}}),
+            json!({"id":92,"method":"session/prompt"}),
+        ]
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+        let (code, out, _) = drive(fixtures().join("agy/acp-plain.jsonl"), None, &["acp", "--gemini-dir", "fake"], &input);
+        assert_eq!(code.unwrap(), 0);
+        let replies = out.lines().map(|line| serde_json::from_str::<Value>(line).unwrap()).collect::<Vec<_>>();
+        assert!(replies.iter().any(|reply| reply["id"] == 91 && reply["result"].is_object()));
+        assert!(replies.iter().any(|reply| reply["id"] == 92 && reply["result"]["stopReason"] == "end_turn"));
     }
 
     // Exercise every existing recording in memory: setup-command support must not change the replay protocol.
