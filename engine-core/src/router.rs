@@ -79,8 +79,7 @@ pub fn default_model(vendor: Vendor, recommended: Option<&str>, listed: &[String
             .or_else(|| table().next())
             .unwrap_or_default()
             .into(),
-        // Not yet: no model of it is known.
-        Vendor::Gemini => String::new(),
+        Vendor::Gemini => "gemini-4-hydrogen".into(),
     }
 }
 
@@ -133,6 +132,13 @@ mod tests {
 
     fn bare(vendor: Vendor) -> Pick {
         Pick { vendor, model: None, effort: String::new(), reason: String::new(), pace: None }
+    }
+
+    #[test]
+    fn an_antigravity_pick_resolves_to_a_supported_model() {
+        let pick = bare(Vendor::Gemini).resolved(None, &[]);
+        assert_eq!(pick.model.as_deref(), Some("gemini-4-hydrogen"));
+        assert!(crate::route::PROFILES.iter().any(|p| p.vendor == pick.vendor && Some(p.model) == pick.model.as_deref()));
     }
 
     #[test]

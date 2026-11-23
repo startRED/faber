@@ -110,6 +110,8 @@ fn mcp_servers_project_names_read_only_project_files_and_never_home_setup() {
         std::fs::create_dir(root.join(".codex")).unwrap();
         std::fs::write(root.join(".codex/config.toml"), "[mcp_servers.\"project.reader\"]\ncommand = 'private value'\n").unwrap();
         std::fs::write(root.join(".mcp.json"), r#"{"mcpServers":{"project-reader":{"env":{"TOKEN":"private value"}}}}"#).unwrap();
+        std::fs::create_dir(root.join(".agents")).unwrap();
+        std::fs::write(root.join(".agents/mcp_config.json"), r#"{"mcpServers":{"project-tools":{}}}"#).unwrap();
     }
     let reads = RefCell::new(vec![]);
     let read = |path: &std::path::Path| {
@@ -117,24 +119,26 @@ fn mcp_servers_project_names_read_only_project_files_and_never_home_setup() {
         assert!(path.starts_with(project.path().canonicalize().unwrap()), "a home file was read: {path:?}");
         std::fs::read_to_string(path).ok()
     };
-    for vendor in [Vendor::Claude, Vendor::Codex] {
+    for (vendor, name) in [(Vendor::Claude, "project-reader"), (Vendor::Codex, "project.reader"), (Vendor::Gemini, "project-tools")] {
         assert!(project_names_with(home.path(), vendor, Some(home.path()), &read).is_empty());
         let listed = project_names_with(project.path(), vendor, Some(home.path()), &read);
-        assert_eq!(listed, names(&[if vendor == Vendor::Claude { "project-reader" } else { "project.reader" }]));
+        assert_eq!(listed, names(&[name]));
     }
-    assert_eq!(reads.borrow().len(), 2, "only the two project files were read");
+    assert_eq!(reads.borrow().len(), 3, "only the project files were read");
     #[cfg(windows)]
     {
         let linked = support::work_folder();
         junction::create(home.path().join(".codex"), linked.path().join(".codex")).unwrap();
         assert!(project_names_with(linked.path(), Vendor::Codex, Some(home.path()), &read).is_empty());
-        assert_eq!(reads.borrow().len(), 2, "a junction to the person's setup is never read");
+        junction::create(home.path().join(".agents"), linked.path().join(".agents")).unwrap();
+        assert!(project_names_with(linked.path(), Vendor::Gemini, Some(home.path()), &read).is_empty());
+        assert_eq!(reads.borrow().len(), 3, "a junction to the person's setup is never read");
         let ancestor = support::work_folder();
         let nested_home = ancestor.path().join("person");
         std::fs::create_dir_all(nested_home.join(".codex")).unwrap();
         std::fs::write(nested_home.join(".codex/config.toml"), "[mcp_servers.private]\ncommand='never read'\n").unwrap();
         junction::create(nested_home.join(".codex"), ancestor.path().join(".codex")).unwrap();
         assert!(project_names_with(ancestor.path(), Vendor::Codex, Some(&nested_home), &read).is_empty());
-        assert_eq!(reads.borrow().len(), 2, "a project containing home must not follow a link to its CLI setup");
+        assert_eq!(reads.borrow().len(), 3, "a project containing home must not follow a link to its CLI setup");
     }
 }
