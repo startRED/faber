@@ -84,3 +84,105 @@ its history out of the person's own list. The recording runs left about twelve c
 
 About 36 model calls, all `gemini-3.8-flash-low` at low effort. The 29 whose output was kept read 127,314 input tokens (plus
 319,334 cache reads) and wrote 3,094 output and 2,005 thinking tokens: 130,408 in all, well under US$5.
+
+## Over ACP
+
+What `agy acp` 1.5.14 did on Windows 11 on 2026-11-23: the same CLI as a long-lived server that speaks the Agent Client Protocol,
+one JSON-RPC message per line on stdin and stdout. The recordings are `tests/fixtures/agy/acp-*.jsonl`. A line agy printed is
+`{"dir": "stdout", "msg": "<the JSON line as text>"}`, as in the `acct-*` files (`out` is kept for print-mode events); `in` is a
+message the client wrote; `exit` is the exit code, or `"killed"` when the recorder killed the process. A file with more than one
+`exit` holds several processes in a row. The flags a process was started with are not in the file; they are named below.
+Nothing came on stderr in any run, and closing stdin ends the process with exit 0.
+
+The client named itself `faber` and worked in an empty scratch folder on `gemini-3.8-flash-low`. Paths, ids and call ids were
+replaced as above; the owner's slash commands were dropped from `available_commands_update` (the 13 built-in ones stay) and
+the owner's other conversations from `session/list`. A reply chunk that held a path was re-split after the replacement.
+
+**Start.** `initialize` answers `protocolVersion: 1`, `agentInfo` ("Antigravity ACP Server", the version), `agentCapabilities`
+(`loadSession`; prompts with `image` and `embeddedContext`; sessions with `resume`, `close`, `load`, `list`,
+`additionalDirectories`; `auth.logout`; `_meta.antigravity` with `tier` and `systemPrompt.append`, the latter not tried) and
+four `authMethods` (`oauth-personal`, `oauth-business`, `gemini-api-key`, `agent-platform`). `session/new {cwd, mcpServers}`
+answers `sessionId`, `models` (23 ids such as `gemini-3.8-flash-low`; `currentModelId` is `gemini-4-neon-high`), `modes`
+(`default`, `accept-edits`, `auto`, `plan`), `configOptions` (`model` by family id such as `gemini-3.8-flash`, `thought_level`,
+`mode`) and `_meta.antigravity.tier`. Sign-in was never needed and `agy acp --login` was never run; signed out is not verified.
+
+1. **Plain reply** (`acp-plain`). `session/prompt {sessionId, prompt: [{type: "text", text}]}` streams `session/update`
+   notifications: `available_commands_update`, `usage_update` (`used`, `size`: the context window), `session_info_update`
+   (`title`) and `agent_message_chunk` (`content.text`). The turn ends with the request's result: `stopReason: "end_turn"` and
+   `usage` for that turn alone (`inputTokens`, `outputTokens`, `cachedReadTokens`, `cachedWriteTokens`, `thoughtTokens`,
+   `totalTokens`). No thinking text was seen at low effort.
+2. **Tools** (`acp-tools`). A `tool_call` update opens a call (`toolCallId`, `title`, `kind`, `status`, `locations`, `rawInput`,
+   and the tool's name) and `tool_call_update` moves it through `pending`, `in_progress` and `completed` or `failed`. Seen:
+   `read_file` (kind `read`, `Path`; no content comes back), `write_file` (kind `edit`, `Path` and `Content`; the update carries
+   `content: [{type: "diff", path, newText}]`, with no `oldText` for a new file), `run_command` (kind `execute`, `CommandLine`;
+   `rawOutput` has `output` with the exit code and the command's text, and `exit_code`), `mcp_<server>_<tool>` (no result in the
+   update) and `ask_question`. Unlike print mode, a changed file arrives with its new text.
+3. **Approval** (`acp-approval-allow`, `acp-approval-deny`, `acp-mode-accept-edits`, `acp-mode-auto`, `acp-skip-permissions`).
+   agy sends the request `session/request_permission` (its `id` is a string) with the `toolCall` and two options, `allow`
+   (`allow_once`) and `deny` (`reject_once`); there is no "always" option. The answer is
+   `{outcome: {outcome: "selected", optionId}}`. After `deny` the call is `failed` with empty output and the turn ends
+   `end_turn` with no reply text. In `default` and `accept-edits` a command and an MCP tool ask; reading and writing files do
+   not, inside or outside the working folder. In `auto` the command ran without asking (the mode's description says it still
+   asks for irreversible actions; none was tried), and with the flag `--dangerously-skip-permissions` nothing asks.
+   `session/set_mode {sessionId, modeId}` answers `{}` and a `current_mode_update`; an unknown mode is error -32602. So Faber's
+   Ask is `default`, and Don't ask is `--dangerously-skip-permissions` (or `auto`, which may still ask). `plan` was not tried.
+4. **Questions** (`acp-question`, `acp-question-elicitation`, `acp-question-declined`). `ask_question` is a tool call with
+   `rawInput.questions` (`question`, `options`, `is_multi_select`). To a client that declares
+   `clientCapabilities.elicitation.form`, agy sends the request `elicitation/create` (`sessionId`, `toolCallId`,
+   `mode: "form"`, `message`, and a `requestedSchema` with one choice field per question, `q1` with numbered options, plus
+   `q1_other` for free text). `{action: "accept", content: {q1: "2"}}` gave the model the second option; `{action: "decline"}`
+   completes the call and the model says the question was declined. Without the capability the call stays `pending`, the
+   question arrives as reply text, the turn ends, and the next `session/prompt` is taken as the answer. A multi-select
+   question and more than one question at a time were not tried.
+5. **Stop** (`acp-cancel`, `acp-cancel-pending`). The notification `session/cancel {sessionId}` during a running `ping` fails
+   the tool call and ends the prompt with `stopReason: "cancelled"`; the `ping` process was gone 3 s later, and the next prompt
+   in the same session worked. During a pending approval the client also answers it with `{outcome: {outcome: "cancelled"}}`;
+   the result is the same and the command never ran. A grandchild process was not tried.
+6. **Resume** (`acp-resume`, `acp-resume-unknown`). In a new process `session/load {sessionId, cwd, mcpServers}` replays the
+   conversation as `user_message_chunk` and `agent_message_chunk` updates and answers like `session/new`; the next prompt
+   remembered the earlier turn. `session/resume` does the same without the replay. Both put the model and the mode back to the
+   defaults, so a driver sets them again. An unknown id: `session/load` succeeds with an empty session under that id (no
+   error and no replay, so the answer alone does not tell), `session/resume` is error -32603 ("Failed to read session") and
+   `session/prompt` is -32602 ("Session not found"). `session/list {cwd}` returns the conversations of that folder with
+   titles, the owner's own included; `session/close` answers `{}`.
+7. **Failures** (`acp-killed`, `acp-model`). With agy killed in the middle of a command, the command's process was gone 3 s
+   later; loading that session in a new process replays the prompt and the tool call as `failed`, with no reply. An unknown
+   model is error -32602 ("Unknown model ID") and an effort the model lacks is -32602 ("Thinking level ... is not offered for
+   model ..."), both with no model call. Not verified: signed out, a spent quota, the network down.
+8. **Model and effort** (`acp-model`, `acp-new-params`). `session/set_model {sessionId, modelId}` with an id of
+   `models.availableModels` (model and effort in one, such as `gemini-3.8-flash-low`) answers `{}`; or
+   `session/set_config_option {sessionId, configId, value}` with `model` (the family id) and `thought_level` (`low`, `medium`,
+   `high`, and `xhigh` where offered) separately, which answers the whole `configOptions` list. `session/new` ignores a model,
+   a mode or config options in its parameters, so a session always starts on `gemini-4-neon-high`: set the model before the
+   first prompt.
+9. **Protecting a folder** (`acp-canary-ask`, `acp-canary-indirect`, `acp-canary-strict`, `acp-canary-rule2`,
+   `acp-canary-rule-noskip`, `acp-canary-fs`). It cannot be done from the client. With harmless files in a folder outside the
+   working folder, in `default` mode and an isolated profile, `read_file` read one and `write_file` wrote one with no
+   permission request; the same through a junction to that folder and when the path came from a file in the working folder.
+   `toolPermission: "strict"` in `settings.json` made a write inside the working folder ask (the request carries the diff),
+   yet the outside read and write still ran unasked. `permissions.deny` and `permissions.ask` rules (`read_file(<path>)`,
+   `write_file(<path>)`, `command(...)`, `mcp(...)`, in `settings.json` and in `config/config.json`, with and without
+   `--dangerously-skip-permissions`) changed nothing in six tries. agy ignores the client's `fs` and `terminal` capabilities:
+   it never sends `fs/*` or `terminal/*` requests, so the client never sees a file access before it happens. Only a command
+   and an MCP tool can be refused, and only in `default` and `accept-edits`. Not tried: `--sandbox`, and rules in any other
+   place.
+10. **MCP servers** (`acp-mcp-stdio`). `session/new` takes `mcpServers: [{name, command, args, env: []}]`. The server is
+    started at once, its tool is named `mcp_<server>_<tool>`, a call asks for permission in `default` mode, and its result
+    reached the model. Only stdio was tried; `env` with values and the HTTP form were not.
+11. **The owner's memory and skills** (`acp-iso-gemini-dir`, `acp-iso-app-data-dir`). They load by default: 39 slash commands
+    and about 11.6k input tokens on the first call. `agy acp --gemini-dir <an empty folder>` stays signed in and loads none of
+    it: the 13 built-in commands and about 8.7k tokens. Overriding `USERPROFILE` does the same, and
+    `--include-default-customizations=false` changed nothing (neither recording was kept). `--app-data-dir` refuses an
+    absolute path (`session/new` fails with -32603, "must not be absolute"; not in the recording); a relative name works as a
+    subfolder of the gemini folder (tried only together with `--gemini-dir`). In that folder the settings file is
+    `antigravity-cli/settings.json`.
+12. **Plan and quota** (`acp-new-params`, and every `session/new`). `_meta.antigravity.tier` in the answer to `session/new`,
+    `session/load` and `session/resume` holds the plan (`name`, `id`, `upgradeUri`) with no model call. No quota numbers
+    exist over ACP: `usage_update` is the context window only, and nine guessed method names are error -32601.
+
+### Cost of the ACP recording
+
+72 model calls. The 69 kept read 535,522 input tokens plus 705,004 cache reads and wrote 3,933 output and 45 thinking tokens
+(1,244,459 by the CLI's own total); three overwritten ones add about 35,000. All ran on `gemini-3.8-flash-low` except two that
+ran on the default `gemini-4-neon-high` before the model was set (the first plain reply, redone, and the prompt after the
+load in `acp-resume`). The runs outside an isolated profile left their conversations in the owner's real profile.
