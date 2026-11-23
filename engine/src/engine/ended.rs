@@ -119,8 +119,12 @@ const CONCLUDE: &str = "Faber sends this, not the person: your last turn ended w
 move is the person's. Say what is not done or not verified. Write your closing message to the person before that block.";
 
 fn closing_input(base: &str, memory: &crate::project::memory::MemoryList) -> String {
-    let files: Vec<_> =
-        memory.files.iter().filter(|file| file.over_limit.is_some()).map(|file| file.path.escape_debug().to_string()).collect();
+    let files: Vec<_> = memory
+        .files
+        .iter()
+        .filter(|file| file.over_limit.is_some() && !file.path.starts_with(".faber/notes/"))
+        .map(|file| file.path.escape_debug().to_string())
+        .collect();
     if files.is_empty() {
         return base.to_string();
     }
@@ -508,6 +512,8 @@ mod tests {
         std::fs::create_dir(dir.path().join(".faber")).unwrap();
         let file = dir.path().join(".faber/decisions.md");
         std::fs::write(dir.path().join(".faber/lessons.md"), "- Small note\n").unwrap();
+        std::fs::create_dir(dir.path().join(".faber/notes")).unwrap();
+        std::fs::write(dir.path().join(".faber/notes/big.md"), "y".repeat(13 * 1024)).unwrap();
         std::fs::write(&file, "x".repeat(8192)).unwrap();
         let list = crate::project::memory::list_faber(dir.path()).unwrap();
         assert_eq!(closing_input("close", &list), "close");

@@ -110,21 +110,32 @@ pub struct Edit {
     pub over_target: bool,
 }
 
+fn excluded_memory_part(part: &str, allow_claude: bool) -> bool {
+    let lower = part.to_ascii_lowercase();
+    if allow_claude && lower == ".claude" {
+        return false;
+    }
+    matches!(lower.as_str(), ".git" | ".codex" | ".gemini" | ".obsidian" | ".trash") || crate::permissions::credential_piece(&lower)
+}
+
 fn source(path: &str) -> Option<&'static str> {
     let parts: Vec<_> = path.split('/').collect();
-    if parts.iter().any(|p| p.is_empty() || matches!(*p, "." | ".." | ".git" | ".codex") || p.contains(['\\', ':', '\0'])) {
+    if parts.iter().any(|p| p.is_empty() || matches!(*p, "." | "..") || p.contains(['\\', ':', '\0']) || excluded_memory_part(p, true)) {
         return None;
     }
     let name = *parts.last()?;
-    if let Some(i) = parts.iter().position(|p| *p == ".faber") {
+    if let Some(i) = parts.iter().position(|p| p.eq_ignore_ascii_case(".faber")) {
+        if parts[i] != ".faber" || parts.iter().any(|p| excluded_memory_part(p, false)) {
+            return None;
+        }
         let kind = parts.get(i + 1)?;
         return (name.ends_with(".md")
-            && ["decisions", "decisions-old", "taste", "plans", "recipes", "learning", "memory", "rules", "lessons", "tasks"]
+            && ["decisions", "decisions-old", "taste", "plans", "recipes", "learning", "memory", "rules", "lessons", "tasks", "notes"]
                 .contains(&kind.trim_end_matches(".md")))
         .then_some("faber");
     }
-    if let Some(i) = parts.iter().position(|p| *p == ".claude") {
-        return (i + 2 == parts.len() && name == "CLAUDE.md").then_some("claude");
+    if let Some(i) = parts.iter().position(|p| p.eq_ignore_ascii_case(".claude")) {
+        return (parts[i] == ".claude" && i + 2 == parts.len() && name == "CLAUDE.md").then_some("claude");
     }
     match name {
         "CLAUDE.md" | "CLAUDE.local.md" => Some("claude"),
@@ -688,6 +699,27 @@ pub(super) fn faber_file_hash(project: &Path, name: &str) -> Result<String, &'st
     Ok(revision(&bytes))
 }
 
+/// Checks whether `.faber/notes/index.md` exists as a regular, non-empty UTF-8 file within `MAX_BYTES`,
+/// through no-follow handles. Returns only a boolean: repository prose never leaves this function.
+pub(super) fn has_notes_index(project: &Path) -> Result<bool, &'static str> {
+    let protected = resolved_private(&private_roots());
+    let (root, project_dir) = project_directory(project, &protected)?;
+    if private(&root.join(".faber/notes/index.md"), &protected) {
+        return Ok(false);
+    }
+    let Ok(dir) = project_dir.under(Path::new(".faber/notes")) else { return Ok(false) };
+    let Ok(file) = dir.file("index.md") else { return Ok(false) };
+    let Ok(meta) = file.metadata() else { return Ok(false) };
+    if meta.len() == 0 || meta.len() > MAX_BYTES as u64 {
+        return Ok(false);
+    }
+    let mut bytes = Vec::new();
+    if file.take(MAX_BYTES as u64 + 1).read_to_end(&mut bytes).is_err() || bytes.is_empty() || bytes.len() > MAX_BYTES {
+        return Ok(false);
+    }
+    Ok(std::str::from_utf8(&bytes).is_ok_and(|text| !text.trim().is_empty()))
+}
+
 /// Writes `.faber/<name>` in the project when its bytes differ, creating the folder and the file if needed, through the
 /// same no-follow handles and atomic replacement as an edit: a link planted in place of either is refused, never followed.
 /// Returns whether it wrote.
@@ -1030,6 +1062,12 @@ fn entries(text: &str, limit: usize) -> Vec<Entry> {
 fn note_target(path: &str) -> Option<u64> {
     const TARGETS: [(&str, u64); 5] = [("rules.md", 3), ("decisions.md", 8), ("taste.md", 1), ("lessons.md", 2), ("tasks/", 6)];
     let name = path.strip_prefix(".faber/").or_else(|| path.rfind("/.faber/").map(|at| &path[at + "/.faber/".len()..]))?;
+    if name == "notes/index.md" {
+        return Some(6 * 1024);
+    }
+    if name.starts_with("notes/") && name.ends_with(".md") {
+        return Some(12 * 1024);
+    }
     TARGETS
         .iter()
         .find(|(key, _)| if *key == "tasks/" { name.starts_with(key) && name.ends_with(".md") } else { name == *key })
@@ -1085,7 +1123,25 @@ fn reference_path(name: &str) -> Option<String> {
     let extension = Path::new(&name).extension().and_then(|e| e.to_str());
     let bare_file = matches!(
         extension,
-        Some("rs" | "ts" | "tsx" | "js" | "jsx" | "mjs" | "md" | "json" | "toml" | "yaml" | "yml" | "txt" | "py" | "go" | "html" | "css")
+        Some(
+            "rs" | "ts"
+                | "tsx"
+                | "js"
+                | "jsx"
+                | "mjs"
+                | "md"
+                | "json"
+                | "toml"
+                | "yaml"
+                | "yml"
+                | "txt"
+                | "py"
+                | "go"
+                | "html"
+                | "css"
+                | "luau"
+                | "lua"
+        )
     );
     (bare_file || (name.contains('/') && extension.is_some())).then_some(name)
 }
@@ -1495,15 +1551,21 @@ fn descend(path: &str) -> bool {
     if parts.len() > 64 {
         return false;
     }
-    if let Some(i) = parts.iter().position(|p| *p == ".claude") {
-        return i + 1 == parts.len();
+    let under_faber = parts.iter().any(|p| p.eq_ignore_ascii_case(".faber"));
+    if parts.iter().any(|p| {
+        excluded_memory_part(p, !under_faber) || matches!(p.to_ascii_lowercase().as_str(), "node_modules" | "target" | "dist" | "vendor")
+    }) {
+        return false;
     }
-    if let Some(i) = parts.iter().position(|p| *p == ".faber") {
-        return i + 1 == parts.len()
-            || ["decisions", "taste", "lessons", "plans", "recipes", "learning", "memory", "tasks"].contains(&parts[i + 1]);
+    if let Some(i) = parts.iter().position(|p| p.eq_ignore_ascii_case(".claude")) {
+        return parts[i] == ".claude" && i + 1 == parts.len();
     }
-    let name = parts.last().copied().unwrap_or_default();
-    !matches!(name, ".git" | ".codex" | "node_modules" | "target" | "dist" | "vendor")
+    if let Some(i) = parts.iter().position(|p| p.eq_ignore_ascii_case(".faber")) {
+        return parts[i] == ".faber"
+            && (i + 1 == parts.len()
+                || ["decisions", "taste", "lessons", "plans", "recipes", "learning", "memory", "tasks", "notes"].contains(&parts[i + 1]));
+    }
+    true
 }
 
 pub fn edit(project: &Path, edit: &Edit) -> Result<(), &'static str> {
@@ -2759,6 +2821,156 @@ mod tests {
         assert!(crlf.entries[0].reviewed && !crlf.entries[1].reviewed);
         std::fs::write(project.path().join(".faber/decisions.md"), "- Use SQLite. [by AI]\r\n- Second [by AI]\r\n- Third\r\n").unwrap();
         assert_eq!(keep(project.path(), &file, 1), Err(CHANGED), "the person never keeps words they did not see");
+    }
+
+    #[test]
+    fn project_notes_folder_is_listed_edited_targeted_and_skips_obsidian_metadata_and_links() {
+        let project = tempfile::tempdir().unwrap();
+        let notes = project.path().join(".faber/notes");
+        std::fs::create_dir_all(notes.join("systems")).unwrap();
+        std::fs::create_dir_all(notes.join(".obsidian/plugins/demo")).unwrap();
+        std::fs::create_dir_all(notes.join(".Obsidian")).unwrap();
+        std::fs::create_dir_all(notes.join(".trash")).unwrap();
+        std::fs::create_dir_all(notes.join(".Trash")).unwrap();
+        std::fs::create_dir_all(notes.join(".claude")).unwrap();
+        std::fs::create_dir_all(notes.join(".gemini")).unwrap();
+        std::fs::create_dir_all(notes.join(".codex")).unwrap();
+        std::fs::create_dir_all(notes.join(".git")).unwrap();
+        std::fs::write(notes.join("index.md"), format!("- [Combat](systems/combat.md) {}\n", "x".repeat(6 * 1024))).unwrap();
+        std::fs::write(notes.join("systems/combat.md"), "- Cooldown is 1.5s.\n").unwrap();
+        std::fs::write(notes.join("big-topic.md"), format!("- {}\n", "y".repeat(12 * 1024))).unwrap();
+        std::fs::write(notes.join(".obsidian/plugins/demo/README.md"), "- Obsidian plugin doc\n").unwrap();
+        std::fs::write(notes.join(".Obsidian/upper.md"), "- Uppercase obsidian doc\n").unwrap();
+        std::fs::write(notes.join(".trash/deleted.md"), "- Deleted trash note\n").unwrap();
+        std::fs::write(notes.join(".Trash/deleted-upper.md"), "- Deleted upper trash note\n").unwrap();
+        std::fs::write(notes.join(".claude/secret.md"), "- Nested claude secret\n").unwrap();
+        std::fs::write(notes.join(".gemini/secret.md"), "- Nested gemini secret\n").unwrap();
+        std::fs::write(notes.join(".codex/secret.md"), "- Nested codex secret\n").unwrap();
+        std::fs::write(notes.join(".git/README.md"), "- Nested git metadata\n").unwrap();
+
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.md"), "- Outside secret\n").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), notes.join("linked")).unwrap();
+        #[cfg(windows)]
+        junction::create(outside.path(), notes.join("linked")).unwrap();
+
+        let listed = list_faber(project.path()).unwrap();
+        let paths: Vec<_> = listed.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&".faber/notes/index.md"), "{paths:?}");
+        assert!(paths.contains(&".faber/notes/systems/combat.md"), "{paths:?}");
+        assert!(paths.contains(&".faber/notes/big-topic.md"), "{paths:?}");
+        assert!(
+            !paths.iter().any(|p| {
+                let low = p.to_ascii_lowercase();
+                low.contains(".obsidian")
+                    || low.contains(".trash")
+                    || low.contains(".claude")
+                    || low.contains(".gemini")
+                    || low.contains(".codex")
+                    || low.contains(".git")
+                    || low.contains("linked")
+            }),
+            "{paths:?}"
+        );
+        for refused in [
+            ".FABER/rules.md",
+            ".FABER/notes/index.md",
+            ".CLAUDE/CLAUDE.md",
+            ".faber/notes/.OBSIDIAN/plugins/demo/README.md",
+            ".faber/notes/.TRASH/deleted.md",
+            ".faber/notes/.CLAUDE/secret.md",
+            ".faber/notes/.GEMINI/secret.md",
+            ".faber/notes/.CODEX/secret.md",
+            ".faber/notes/.GIT/README.md",
+        ] {
+            let attempt = Edit {
+                path: refused.into(),
+                revision: String::new(),
+                start: 0,
+                end: 1,
+                text: Some("- edited".into()),
+                keep: false,
+                over_target: false,
+            };
+            assert_eq!(edit(project.path(), &attempt), Err(REFUSED), "{refused} must be refused");
+        }
+
+        let index = listed.files.iter().find(|f| f.path == ".faber/notes/index.md").unwrap();
+        assert_eq!(index.over_limit.map(|(_, target)| target), Some(6 * 1024));
+        let big = listed.files.iter().find(|f| f.path == ".faber/notes/big-topic.md").unwrap();
+        assert_eq!(big.over_limit.map(|(_, target)| target), Some(12 * 1024));
+        let combat = listed.files.iter().find(|f| f.path == ".faber/notes/systems/combat.md").unwrap();
+        assert_eq!(combat.over_limit, None);
+
+        let entry = &combat.entries[0];
+        edit(
+            project.path(),
+            &Edit {
+                path: combat.path.clone(),
+                revision: combat.revision.clone(),
+                start: entry.start,
+                end: entry.end,
+                text: Some("- Cooldown is 1.2s.".into()),
+                keep: false,
+                over_target: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(notes.join("systems/combat.md")).unwrap(), "- Cooldown is 1.2s.\n");
+    }
+
+    #[test]
+    fn project_notes_stale_detection_covers_luau_and_lua_references() {
+        let project = tempfile::tempdir().unwrap();
+        let notes = project.path().join(".faber/notes");
+        std::fs::create_dir_all(&notes).unwrap();
+        std::fs::create_dir_all(project.path().join("src/server")).unwrap();
+        std::fs::write(project.path().join("src/server/combat.luau"), "return {}\n").unwrap();
+        std::fs::write(notes.join("combat.md"), "- Live handler in `src/server/combat.luau`.\n- Missing helper in `balance.lua`.\n")
+            .unwrap();
+
+        refresh_stale(project.path(), &mut []).unwrap();
+        let file = listed(project.path(), ".faber/notes/combat.md", &[]);
+        assert!(!file.entries[0].stale);
+        assert!(file.entries[1].stale);
+
+        std::fs::write(project.path().join("balance.lua"), "return {}\n").unwrap();
+        refresh_stale(project.path(), &mut []).unwrap();
+        let restored = listed(project.path(), ".faber/notes/combat.md", &[]);
+        assert!(!restored.entries[0].stale && !restored.entries[1].stale);
+    }
+
+    #[test]
+    fn has_notes_index_requires_a_regular_non_empty_local_file() {
+        let project = tempfile::tempdir().unwrap();
+        assert_eq!(has_notes_index(project.path()), Ok(false));
+
+        let notes = project.path().join(".faber/notes");
+        std::fs::create_dir_all(&notes).unwrap();
+        std::fs::write(notes.join("index.md"), "   \n\t ").unwrap();
+        assert_eq!(has_notes_index(project.path()), Ok(false), "whitespace-only index is ignored");
+
+        std::fs::write(notes.join("index.md"), "# Notes\n- [Combat](combat.md)\n").unwrap();
+        assert_eq!(has_notes_index(project.path()), Ok(true));
+
+        // A linked `.faber/notes` directory is never followed.
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("index.md"), "# Outside\n").unwrap();
+        let linked = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(linked.path().join(".faber")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), linked.path().join(".faber/notes")).unwrap();
+        #[cfg(windows)]
+        junction::create(outside.path(), linked.path().join(".faber/notes")).unwrap();
+        assert_eq!(has_notes_index(linked.path()), Ok(false));
+
+        // A hard-linked `index.md` is refused too.
+        let hard = tempfile::tempdir_in(outside.path().parent().unwrap()).unwrap();
+        std::fs::create_dir_all(hard.path().join(".faber/notes")).unwrap();
+        if std::fs::hard_link(outside.path().join("index.md"), hard.path().join(".faber/notes/index.md")).is_ok() {
+            assert_eq!(has_notes_index(hard.path()), Ok(false));
+        }
     }
 }
 

@@ -215,5 +215,5 @@ Faber learns from use, in a way that stays visible and organized.
   A personal preference becomes global only with the user's approval. When in doubt, Faber treats a lesson as a
   preference and asks.
 - Everything sits in a visible list with one-click delete.
-- Decisions, taste, plans and recipes live in plain files in the project's hidden `.faber/` folder, so other programs
-  and AIs can read them. The conversation history of both areas stays private inside Faber.
+- Decisions, taste, plans, recipes and indexed notes (`.faber/notes/`) live in plain files in `.faber/`, readable by
+  other tools and AIs (including Obsidian). Conversation history stays private inside Faber.

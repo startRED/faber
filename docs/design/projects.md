@@ -79,7 +79,7 @@ revision-guarded edit. A matching person-authored decision stays byte-for-byte u
 approval outside the project. Memory shows one quiet localized line, "File may no longer exist; left out of the start
 card.", instead of the raw suffix. The editor keeps the exact source text. A later close clears the status when all
 references exist again. Commands, URLs, setting names and prose are not evaluated. No timer, watcher or new control.
-Generated rules and follow-up task files are excluded; tasks may name files that future work will create.
+Generated rules and follow-up task files are excluded; tasks may name files that future work will create. Modular living notes in `.faber/notes/` (6 KiB target for `.faber/notes/index.md`, 12 KiB for topic notes) are listed, edited, stale-checked (including `.luau` and `.lua` script references) and searchable through `memory_search` by topic filename and text, while skipping `.obsidian/` and `.trash/` folders so the directory also opens cleanly as an Obsidian Vault. When a regular non-empty `.faber/notes/index.md` exists, `.faber/rules.md` and the start card note its path as a fixed structural line without copying repository prose.
 Memory refuses Antigravity's default private folder (`.gemini`) for reads and edits, alongside the other CLI private folders.
 For Codex, each folder shows only the first nonempty instruction file it reads: `AGENTS.override.md`, then `AGENTS.md`.
 
@@ -96,7 +96,7 @@ at least 500 ms later and releasing the key that armed it, as in the shared cont
 write the actions wait. A changed-file refusal keeps the draft and asks the person to reopen the file. Read-only files get
 a plain refusal, and a replaced project folder or ancestor also refuses a stale save. One quiet line
 says that changes apply on the AI’s next launch in this folder; another says that separate copies and private home memory are outside this project-folder list. The list
-shows sources, not a claim that every nested instruction is active in every session. Faber has no memory store of its own: the one file a project's agent may create is `.faber/decisions.md`, and only for a lasting choice. Memory reads the project folder, so a decision written in a conversation's separate copy shows here once that copy's work is merged into the project; the copies are not scanned, which keeps opening Memory as light as it is.
+shows sources, not a claim that every nested instruction is active in every session. Faber has no separate memory store inside the repository: a project's agent records lasting choices in `.faber/decisions.md` and may maintain modular domain notes under `.faber/notes/` (indexed from `.faber/notes/index.md`). Memory reads the project folder, so a decision or note written in a conversation's separate copy shows here once that copy's work is merged into the project; the copies are not scanned, which keeps opening Memory as light as it is.
 
 Projects under linked parent folders work normally. Links from the project root down to a memory file are refused;
 the root identity recorded on reading must still match before a save opens any memory file.

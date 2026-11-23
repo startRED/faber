@@ -1679,6 +1679,7 @@ mod tests {
                                     "Skill(faber-guide:media-proof)",
                                     "Skill(faber-guide:workflow-proof)",
                                     "Skill(faber-guide:roblox-game-dev)",
+                                    "Skill(faber-guide:project-notes)",
                                 ],
                                 "{which}"
                             );

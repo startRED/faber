@@ -66,6 +66,9 @@ live analytics. The project keeps working on reversible fixes while a participan
 - The [Star Salvage example](../../demos/roblox/README.md) is a separate local place with an original short round, a pinned
   file build and a checklist for validating solo play, multiplayer and touch. It establishes a repeatable check for the
   file-based workflow. It is not a default game template or an evaluation of a live model's first attempt.
+- For multi-session games, keep living architecture, RemoteEvents, DataStore schemas, economy and playtest findings in
+  `.faber/notes/` indexed from `.faber/notes/index.md` via the first-party `project-notes` skill; citing `.luau` paths in
+  backticks lets Faber flag stale entries automatically, and the folder also opens directly in Obsidian if desired.
 
 ## Tool choices
 

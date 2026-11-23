@@ -117,7 +117,7 @@ pub(super) fn matches_task(item: &Item, request: &str, stacks: &BTreeSet<&str>) 
         ),
         "json-canvas" => Some("canvas|mind map|mapa mental|carte mentale|mindmap"),
         "obsidian-bases" => Some("obsidian bases|obsidian database|base do obsidian|bases de obsidian|base obsidian|obsidian-datenbank"),
-        "obsidian-markdown" => Some("obsidian|markdown"),
+        "obsidian-markdown" => Some("obsidian|wikilink|wikilinks|markdown"),
         "copywriting" => Some(
             "copy|sales copy|advert|anuncio|anuncios|publicidade|publicitario|publicitaire|werbetext|werbung|persuasive|persuasivo|persuasif|uberzeugend",
         ),
@@ -383,7 +383,7 @@ pub(super) fn labels(request: &str, cwd: Option<&Path>) -> (BTreeSet<String>, BT
         ("plan", "sequential thinking|step by step|passo a passo|paso a paso|etape par etape|schritt fur schritt"),
         (
             "documents",
-            "humanize|humanise|humanizar|humaniza|humaniser|humanisez|menschlicher|ki-text|obsidian|markdown|mind map|mapa mental|carte mentale|mindmap",
+            "humanize|humanise|humanizar|humaniza|humaniser|humanisez|menschlicher|ki-text|obsidian|wikilink|wikilinks|markdown|json canvas|mind map|mapa mental|carte mentale|mindmap",
         ),
         (
             "marketing",
@@ -937,6 +937,7 @@ mod tests {
             ("Corrija a interface no Roblox Studio", "roblox-dev-skill", vec!["roblox-datastores", "roblox-networking"]),
             ("Configure Rojo para meu jogo Roblox", "roblox-tooling", vec!["roblox-world-building", "roblox-physics"]),
             ("Ajuste a iluminação do mapa Roblox", "roblox-world-building", vec!["roblox-tooling", "roblox-datastores"]),
+            ("Organize wikilinks in my notes", "obsidian-markdown", vec!["humanizer", "obsidian-bases", "json-canvas"]),
         ] {
             let jobs = labels(request, None).0;
             let stacks = stack_labels(request, None);

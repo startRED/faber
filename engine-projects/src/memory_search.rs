@@ -63,6 +63,11 @@ fn author(entry: &Entry) -> &'static str {
     }
 }
 
+fn note_topic(path: &str) -> Option<String> {
+    let rest = path.strip_prefix(".faber/notes/")?.strip_suffix(".md")?;
+    Some(rest.replace(['/', '-', '_'], " "))
+}
+
 /// The lines of the notes in `.faber` that hold all the words, in file order. `CLAUDE.md` and `AGENTS.md` are left out: the CLI
 /// already loads them.
 fn notes(list: &MemoryList, query: &str) -> Vec<String> {
@@ -74,13 +79,20 @@ fn notes(list: &MemoryList, query: &str) -> Vec<String> {
             let text = e.body.as_deref().unwrap_or(&e.text).trim_start();
             // The list marker is Markdown, not what was written.
             let text = ["- ", "* ", "+ "].iter().find_map(|m| text.strip_prefix(m)).unwrap_or(text);
+            let text = if e.stale { text.trim_end().strip_suffix(crate::project::memory::STALE).unwrap_or(text) } else { text };
             let old = if f.path == ".faber/decisions-old.md" { " · old" } else { "" };
+            let stale = if e.stale { " · stale" } else { "" };
             let who = if crate::project::memory::LearningKind::for_path(&f.path).is_some() {
                 if e.reviewed { "kept by the person" } else { "not reviewed" }
             } else {
                 author(e)
             };
-            crate::search::matches(text, query).then(|| format!("{}:{}{old} · {} · {}", flat(&f.path), e.line, who, cut(text, NOTE_CHARS)))
+            let matched = if let Some(topic) = note_topic(&f.path) {
+                crate::search::matches(&format!("{topic} {text}"), query)
+            } else {
+                crate::search::matches(text, query)
+            };
+            matched.then(|| format!("{}:{}{old}{stale} · {} · {}", flat(&f.path), e.line, who, cut(text, NOTE_CHARS)))
         })
         .collect()
 }
@@ -360,5 +372,31 @@ mod tests {
         assert_eq!(text.lines().collect::<Vec<_>>(), [NOT_READY, NOTES_INCOMPLETE, NOTHING]);
         let failed = answer("x1", &Err("error.store.read"), &Err("error.memory.read"), NOW);
         assert_eq!(failed.lines().collect::<Vec<_>>(), ["Past conversations could not be read.", "Notes could not be read.", NOTHING]);
+    }
+
+    #[test]
+    fn project_notes_match_by_topic_filename_and_flag_stale_entries() {
+        let mut stale_entry = entry(4, "- Handler in `src/gone.luau` (stale?)  ", None, false);
+        stale_entry.stale = true;
+        let list = MemoryList {
+            incomplete: false,
+            files: vec![file(
+                ".faber/notes/systems/combat-economy.md",
+                "faber",
+                vec![entry(2, "- Max gold per round is 500", None, false), stale_entry],
+            )],
+        };
+        let found = answer("combat gold", &results(true, vec![]), &Ok(list.clone()), NOW);
+        assert!(
+            found.contains(".faber/notes/systems/combat-economy.md:2 · author unknown · Max gold per round is 500"),
+            "topic filename words participate in matching: {found}"
+        );
+        let stale = answer("economy handler", &results(true, vec![]), &Ok(list.clone()), NOW);
+        assert!(
+            stale.contains(".faber/notes/systems/combat-economy.md:4 · stale · author unknown · Handler in `src/gone.luau`"),
+            "stale notes are marked without raw suffix: {stale}"
+        );
+        assert!(!stale.contains("(stale?)"), "raw stale suffix is stripped even with trailing whitespace: {stale}");
+        assert_eq!(answer("stale", &results(true, vec![]), &Ok(list), NOW), NOTHING, "internal stale suffix is not searchable");
     }
 }

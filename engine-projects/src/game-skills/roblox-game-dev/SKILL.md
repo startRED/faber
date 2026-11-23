@@ -94,6 +94,7 @@ collision in a disposable place and render a preview. Verify and record license 
    Rokit. `rojo build -o Game.rbxl` makes a local place. If Rojo is missing, prepare the source and name the prerequisite.
    If a place uses Studio's [Script Sync](https://create.roblox.com/docs/ai/coding-harness), keep its folders and do not
    attach Rojo to them.
+4. Keep multi-session design notes in `.faber/notes/index.md` (`project-notes`).
 
 For setup prefer the [built-in Studio MCP](https://create.roblox.com/docs/studio/mcp), enabled by the person in Assistant ->
 Manage MCP Servers. In a trusted project with Full access, run the current `StudioMCP.exe` as a stdio server: on Windows
