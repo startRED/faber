@@ -111,8 +111,22 @@ async fn handshake(wire: &mut Wire, recording: &[(String, Value)], resume: Optio
     opened["id"] = open["id"].clone();
     support::emit(&mut wire.1, opened).await;
     if mode {
-        default_mode(wire).await;
+        default_startup(wire).await;
     }
+}
+
+async fn family_and_effort(wire: &mut Wire, model: &str, effort: &str) {
+    for (option, value) in [("model", model), ("thought_level", effort)] {
+        let req = support::expect_method(&mut wire.0, "session/set_config_option").await;
+        assert_eq!(req["params"]["configId"], option);
+        assert_eq!(req["params"]["value"], value);
+        support::emit(&mut wire.1, json!({"jsonrpc":"2.0","id":req["id"],"result":{}})).await;
+    }
+}
+
+async fn default_startup(wire: &mut Wire) {
+    family_and_effort(wire, "gemini-4-hydrogen", "medium").await;
+    default_mode(wire).await;
 }
 
 async fn default_mode(wire: &mut Wire) {
@@ -433,7 +447,7 @@ async fn agy_project_tools_follow_permissions_and_write_the_projects_plan() {
             }
             let opened = response(&plain, 2);
             support::emit(&mut wire.1, opened.clone()).await;
-            default_mode(&mut wire).await;
+            default_startup(&mut wire).await;
             support::expect_method(&mut wire.0, "session/prompt").await;
             let args = json!({"steps":[{"id":"inspect","text":"Inspect the project","state":"in_progress"}]});
             support::emit(
@@ -561,12 +575,7 @@ async fn agy_sets_listed_model_or_family_and_effort_before_prompt() {
             assert_eq!(req["params"]["modelId"], model);
             support::emit(&mut wire.1, json!({"jsonrpc":"2.0","id":req["id"],"result":{}})).await;
         } else {
-            for (option, value) in [("model", model), ("thought_level", "medium")] {
-                let req = support::expect_method(&mut wire.0, "session/set_config_option").await;
-                assert_eq!(req["params"]["configId"], option);
-                assert_eq!(req["params"]["value"], value);
-                support::emit(&mut wire.1, json!({"jsonrpc":"2.0","id":req["id"],"result":{}})).await;
-            }
+            family_and_effort(&mut wire, model, "medium").await;
         }
         default_mode(&mut wire).await;
         replay_turn(&mut wire, &recording, None).await;
