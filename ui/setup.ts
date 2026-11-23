@@ -32,10 +32,10 @@ export interface Card {
   error?: { message: string; detail?: string };
 }
 
-// Antigravity has none: Faber does not install it yet, and offers it only once it is found.
-export const OFFICIAL_PAGES: Partial<Record<Vendor, string>> = {
+export const OFFICIAL_PAGES: Record<Vendor, string> = {
   claude: 'https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview',
   codex: 'https://github.com/openai/codex',
+  gemini: 'https://antigravity.google/docs/cli/install',
 };
 
 /**

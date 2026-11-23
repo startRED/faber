@@ -84,6 +84,15 @@ fn find_cli_candidate(name: &str, env: &dyn Fn(&str) -> Option<String>) -> Optio
     Cli::find_in(name, &path_var, cfg!(windows), env, &|p| Path::new(p).is_file(), &|p| std::fs::read_to_string(p).unwrap_or_default())
 }
 
+/// `%LOCALAPPDATA%\agy\bin`, the folder Antigravity's installer uses on Windows.
+fn agy_dir() -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| user_home_dir().join("AppData").join("Local"))
+        .join("agy")
+        .join("bin")
+}
+
 fn user_home_dir() -> PathBuf {
     std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
@@ -99,7 +108,7 @@ pub(crate) async fn check(h: &Host, vendor: String) -> Res<CheckResult> {
         let Some(cli) = find_agy() else {
             // Gone since the last check: no longer connected, so its limits and billing are not shown or trusted.
             h.engine.note_antigravity_account(AccountStatus::SignedOut, None);
-            return Ok(CheckResult { vendor: v, installed: false, account: AccountStatus::Unknown, can_install: false });
+            return Ok(CheckResult { vendor: v, installed: false, account: AccountStatus::Unknown, can_install: cfg!(windows) });
         };
         // The check opens an empty session, which the CLI lists under this folder: it stays inside Faber's data folder.
         let scratch = h.data_dir.join("agy-check");
@@ -111,7 +120,7 @@ pub(crate) async fn check(h: &Host, vendor: String) -> Res<CheckResult> {
         };
         // The plan comes with the same answer, so the limits learn it without a second process.
         h.engine.note_antigravity_account(account, plan);
-        return Ok(CheckResult { vendor: v, installed: true, account, can_install: false });
+        return Ok(CheckResult { vendor: v, installed: true, account, can_install: cfg!(windows) });
     }
     let clis = detect_clis();
     let installed = clis.contains_key(&v);
@@ -156,8 +165,7 @@ pub(crate) async fn sign_in(vendor: String) -> Res<()> {
 pub(crate) async fn install(h: &Host, vendor: String) -> Res<()> {
     // An update never ends the process in the middle of an install: the shell holds it off until this is dropped.
     let _running = h.shell.hold_install()?;
-    // Faber does not install Antigravity's CLI yet: its card is offered only once `agy` is found.
-    let Some(v) = parse_vendor(&vendor).filter(|v| *v != Vendor::Gemini) else {
+    let Some(v) = parse_vendor(&vendor) else {
         h.announce(&SetupProgressEvent {
             event_type: "setup".into(),
             vendor: Vendor::Claude,
@@ -186,7 +194,9 @@ pub(crate) async fn install(h: &Host, vendor: String) -> Res<()> {
     // FABER_SETUP_SOURCE (tests): every download comes from that loopback server, the program lands in FABER_DATA_DIR and
     // the user's PATH is left alone. The engine refuses any other address, so tests run the same install code as people.
     let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());
+    // Antigravity's goes where its own installer puts it, which is where Faber looks for it (and the sandbox's in tests).
     let destination = match source {
+        _ if v == Vendor::Gemini => agy_dir(),
         Some(_) => h.data_dir.join("bin"),
         None => user_home_dir().join(".local").join("bin"),
     };
@@ -202,6 +212,7 @@ pub(crate) async fn install(h: &Host, vendor: String) -> Res<()> {
             "loopback": base,
             "claude_base": base,
             "codex_release": format!("{base}/releases/latest"),
+            "agy_base": base,
         });
     }
 

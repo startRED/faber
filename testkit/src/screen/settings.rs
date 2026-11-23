@@ -272,11 +272,11 @@ fn walks_the_sections(ctx: &mut Ctx) -> Result {
     ctx.shot(&mut app, "settings-appearance-narrow")?;
     app.page.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?;
 
-    // Accounts and limits: one card per AI. Claude is connected, Codex is not, and Claude's card holds the 5-hour window then
+    // Accounts and limits: one card per AI, Antigravity's too without agy. Claude is connected, Codex is not, and Claude's card holds the 5-hour window then
     // the 7-day one, with the shares the sidebar shows.
     let page = &mut app.page;
     open_section(page, "set.subscriptions")?;
-    same(page.count(&css(".acct"))?, 2, "the accounts listed")?;
+    same(page.count(&css(".acct"))?, 3, "the accounts listed")?;
     page.wait_for("Claude to be connected", &format!("({CLAUDE_STATE}) === 'connected'"))?;
     same(
         page.eval("document.querySelector('.acct[data-vendor=codex]').dataset.state")?.as_str(),

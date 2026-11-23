@@ -170,7 +170,7 @@ check('setup: the AI that is picked is filled and ticked, and the other ones are
   const dispose = render(() => createComponent(Setup, { mode: 'manage', onFinish: () => {} }), host);
   try {
     const picks = [...host.querySelectorAll<HTMLButtonElement>('.pick')];
-    equal(picks.length, 2, 'opened later, the cards offer the two AIs and no "None for now": Close says it');
+    equal(picks.length, 3, 'opened later, the cards offer the three AIs and no "None for now": Close says it');
     ok(picks.every((b) => b.getAttribute('aria-pressed') === 'false' && !b.querySelector('.tick')), 'nothing is picked at first');
     const codex = picks.find((b) => b.textContent!.includes('Codex'))!;
     ok(codex, 'Codex is called Codex');
@@ -204,15 +204,15 @@ check('setup: closing the cards while an AI installs and opening them again show
   }
 });
 
-check('setup first run: "None for now" sits beside the two AIs, and the line says which plan each one uses', () => {
+check('setup first run: "None for now" sits beside the three AIs, and the line says which plan each one uses', () => {
   const host = document.createElement('div');
   document.body.append(host);
   const dispose = render(() => createComponent(Setup, { mode: 'firstRun', onFinish: () => {} }), host);
   try {
     ok(host.querySelector('.fr-col > .accounts-scene[data-scene="accounts"]'), 'first run shows the accounts drawing');
     const picks = [...host.querySelectorAll<HTMLButtonElement>('.pick')];
-    equal(picks.length, 3);
-    equal(picks[2]!.textContent!.trim(), t('setup.none'));
+    equal(picks.length, 4);
+    equal(picks[3]!.textContent!.trim(), t('setup.none'));
     const line = host.querySelector('.sub')?.textContent ?? '';
     ok(line.includes('Pro') && line.includes('ChatGPT'), `the line names the plans: ${line}`);
   } finally {
@@ -280,4 +280,39 @@ check('setup: a rejected install without a progress event can be retried', async
       } finally { dispose(); host.remove(); noteSetupProgress({ type: 'setup', vendor: 'claude', step: 'done' }); }
     }
   } finally { api.setupCheck = oldCheck; api.setupInstall = oldInstall; }
+});
+
+check('setup: without agy, Antigravity is offered with Install, and a failed install offers its official page', async () => {
+  const oldCheck = api.setupCheck, oldInstall = api.setupInstall, oldLink = api.openLink;
+  const installs: string[] = [], links: string[] = [];
+  api.setupCheck = async (vendor) => ({ vendor, installed: false, account: 'unknown', canInstall: true });
+  api.setupInstall = async (vendor) => { installs.push(vendor); };
+  api.openLink = async (url: string) => { links.push(url); };
+  const host = document.createElement('div');
+  document.body.append(host);
+  noteSetupProgress({ type: 'setup', vendor: 'gemini', step: 'done' });
+  const dispose = render(() => createComponent(Setup, { mode: 'firstRun', onFinish: () => {} }), host);
+  try {
+    const pick = [...host.querySelectorAll<HTMLButtonElement>('.pick')].find((b) => b.textContent!.trim() === t('setup.antigravity'));
+    ok(pick, 'the Antigravity choice is there although agy is not');
+    pick.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const card = host.querySelector('.setup-card[data-vendor="gemini"]')!;
+    equal(card.querySelector('.setup-badge')?.textContent, t('setup.notInstalled'));
+    const install = card.querySelector<HTMLButtonElement>('.setup-card-actions .primary')!;
+    equal(install.textContent?.trim(), t('setup.install'));
+    install.click();
+    deepEqual(installs, ['gemini']);
+    noteSetupProgress({ type: 'setup', vendor: 'gemini', step: 'failed', error: 'reason.setup.connection' });
+    const page = [...card.querySelectorAll<HTMLButtonElement>('.setup-card-actions button')].find((b) => b.textContent!.trim() === t('setup.officialPage'));
+    ok(page, 'a failed install offers the official page beside Try again');
+    page.click();
+    deepEqual(links, ['https://antigravity.google/docs/cli/install']);
+  } finally {
+    dispose();
+    host.remove();
+    noteSetupProgress({ type: 'setup', vendor: 'gemini', step: 'done' });
+    api.setupCheck = oldCheck; api.setupInstall = oldInstall; api.openLink = oldLink;
+  }
 });

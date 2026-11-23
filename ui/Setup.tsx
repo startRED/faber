@@ -34,7 +34,6 @@ export function noteSetupProgress(e: SetupProgress) {
   setProgresses((prev) => ({ ...prev, [e.vendor]: e }));
 }
 
-// Antigravity is offered only once its CLI is found on this PC: Faber does not install it yet.
 const VENDORS = ['claude', 'codex', 'gemini'] as const;
 const NAMES = { claude: 'setup.claude', codex: 'setup.chatgpt', gemini: 'setup.antigravity' } as const;
 
@@ -114,11 +113,6 @@ export function Setup(props: SetupProps) {
       });
     }
     for (const v of selected()) if (v !== 'none') void checkVendor(v);
-    // Only a found CLI is checked, so with none installed this starts nothing.
-    void api.setupCheck('gemini').then(
-      (res) => res.installed && setChecks((prev) => ({ ...prev, gemini: res })),
-      () => undefined,
-    );
     const unlisten = api.on((e) => {
       if (e.type === 'setup') {
         if (e.step === 'done') {
@@ -150,8 +144,6 @@ export function Setup(props: SetupProps) {
     ['gemini', t('setup.antigravity')],
     ...(first() ? [['none', t('setup.none')] as [Subscription, string]] : []),
   ];
-  // The same entries every time, so the picks already on screen are kept when Antigravity's appears.
-  const choices = () => all.filter(([option]) => option !== 'gemini' || checks().gemini?.installed);
 
   return (
     <Stage step={first() ? 1 : undefined} labelledby="setup-heading">
@@ -164,9 +156,10 @@ export function Setup(props: SetupProps) {
         <p class="sub">{t('setup.body')}</p>
 
         <div class="picks" role="group" aria-label={t('setup.title')}>
-          <For each={choices()}>
+          <For each={all}>
             {([option, label]) => (
-              <button type="button" class="pick" aria-pressed={selected().includes(option)} onClick={() => onToggle(option)}>
+              // Four choices share one row down to the narrowest window (720 px): a quarter of the row when that is under 156 px.
+              <button type="button" class="pick" style={{ 'min-width': 'min(156px, calc((100% - 31px) / 4))' }} aria-pressed={selected().includes(option)} onClick={() => onToggle(option)}>
                 <Show when={option !== 'none'}>
                   <VendorMark vendor={option as Vendor} />
                 </Show>
@@ -247,7 +240,7 @@ export function Setup(props: SetupProps) {
                         <button
                           type="button"
                           class="btn"
-                          onClick={() => { const page = OFFICIAL_PAGES[vendor]; if (page) void api.openLink(page); }}
+                          onClick={() => void api.openLink(OFFICIAL_PAGES[vendor])}
                         >
                           {t('setup.officialPage')}
                         </button>
