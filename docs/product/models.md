@@ -31,12 +31,13 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   2.8 s and nine in ten under 3.9 s. An earlier design that let the router choose among anonymous, shuffled profiles
   got 76 of 88, spent more and was slower: the router judges requests well, the table weighs price against quality.
 - On 10/11/2026 the updated router was checked twice on 42 hand-labelled requests. Haiku returned 84 valid lines at each effort: at medium, kind 90%, difficulty 74%, check 85% and scope 98% agreement; at low, 89%, 74%, 79% and 98%. Median time was 2.7 s for both. Luna returned one valid line at medium and none at low, so this run cannot establish its accuracy. These labels are one person’s judgement, not proven answers.
-- Profiles use Artificial Analysis per-task runs, republished by [Slopalytics](https://slopalytics.com/) on
-  2026-11-10: rounded intelligence and coding sub-index, seconds per task and US$ per task, one scale; GPT-6.2 estimated.
-  No maximum effort: its extra quota and time are outside Auto's ladder. Fable xhigh and Luna xhigh remain excluded.
+- Antigravity uses weighted US$ per Intelligence Index task at standard API rates. Gemini 4 Argon low is estimated
+  at 36 (75% of medium). [Benchmark details](cache-router.md#antigravity-benchmark-profiles).
+- Profiles use 2026-11-10 Artificial Analysis runs republished by [Slopalytics](https://slopalytics.com/). Fields are
+  intelligence, coding, seconds and US$ per task. GPT-6.2 is estimated. Auto excludes max, Fable xhigh and Luna xhigh.
   Fable low is removed: its maker starts at medium/high and measured Opus high ahead for less per solved task.
   Luna high is added (21/13, 336 s, US$0.073), the Luna-only fallback. The router stays at medium.
-  The compiled table later moves to the live manifest and Faber's own scoreboard of kept and retried answers.
+  The table later moves to the live manifest and Faber's scoreboard.
 
   | Level | General intelligence | Code / project coding |
   | --- | ---: | ---: |

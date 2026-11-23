@@ -35,7 +35,7 @@ const fn p(vendor: Vendor, model: &'static str, effort: &'static str, iq: u8, ag
 }
 
 // shortcut: compiled in until the live manifest lets measured models join without a release.
-pub const PROFILES: [Profile; 31] = [
+pub const PROFILES: [Profile; 45] = [
     p(Vendor::Claude, "claude-fable-5-2", "high", 62, 53, 1059.0, 9.078),
     p(Vendor::Claude, "claude-fable-5-2", "medium", 56, 47, 497.0, 3.803),
     p(Vendor::Claude, "claude-opus-5-5", "xhigh", 57, 50, 976.0, 6.047),
@@ -67,6 +67,21 @@ pub const PROFILES: [Profile; 31] = [
     p(Vendor::Codex, "gpt-6.1-terra", "low", 29, 21, 65.0, 0.071),
     p(Vendor::Codex, "gpt-6-luna", "high", 21, 13, 336.0, 0.073),
     p(Vendor::Codex, "gpt-6-luna", "medium", 19, 9, 202.0, 0.042),
+    // Antigravity: benchmark basis and estimates are recorded in docs/product/models.md.
+    p(Vendor::Gemini, "gemini-4-neon", "xhigh", 61, 54, 1428.0, 6.44),
+    p(Vendor::Gemini, "gemini-4-neon", "high", 60, 52, 906.0, 3.74),
+    p(Vendor::Gemini, "gemini-4-neon", "medium", 55, 46, 546.0, 1.90),
+    p(Vendor::Gemini, "gemini-4-neon", "low", 44, 30, 228.0, 0.75),
+    p(Vendor::Gemini, "gemini-4-argon", "high", 50, 41, 1440.0, 9.95),
+    p(Vendor::Gemini, "gemini-4-argon", "medium", 48, 40, 1434.0, 8.63),
+    p(Vendor::Gemini, "gemini-4-argon", "low", 36, 30, 1291.0, 7.77),
+    p(Vendor::Gemini, "gemini-4-hydrogen", "xhigh", 54, 46, 984.0, 3.16),
+    p(Vendor::Gemini, "gemini-4-hydrogen", "high", 51, 45, 510.0, 1.87),
+    p(Vendor::Gemini, "gemini-4-hydrogen", "medium", 41, 30, 216.0, 0.80),
+    p(Vendor::Gemini, "gemini-4-hydrogen", "low", 27, 8, 84.0, 0.29),
+    p(Vendor::Gemini, "gemini-3.8-flash", "high", 31, 19, 954.0, 7.77),
+    p(Vendor::Gemini, "gemini-3.8-flash", "medium", 30, 18, 774.0, 6.26),
+    p(Vendor::Gemini, "gemini-3.8-flash", "low", 23, 9, 697.0, 5.63),
 ];
 
 /// The router itself: the fastest cheap model of each vendor.
@@ -110,11 +125,15 @@ Reply with one line of JSON only: \
 {\"kind\":\"chat|writing|code|visual|math|research|image|other\",\"difficulty\":\"easy|medium|hard\",\"check\":\"machine|glance|blind\",\
 \"scope\":\"tight|open\",\"best\":true|false,\"confidence\":<0..1>}";
 
-/// The profiles this user can run: a connected CLI and, for Codex, a model the account lists.
+/// The profiles this user can run: a runnable, connected CLI and, for Codex, a model the account lists.
 pub fn candidates(available: &[Vendor], codex_models: &[String]) -> Vec<Profile> {
     PROFILES
         .into_iter()
-        .filter(|p| available.contains(&p.vendor) && (p.vendor != Vendor::Codex || codex_models.iter().any(|m| m == p.model)))
+        .filter(|p| {
+            Vendor::RUNNABLE.contains(&p.vendor)
+                && available.contains(&p.vendor)
+                && (p.vendor != Vendor::Codex || codex_models.iter().any(|m| m == p.model))
+        })
         .collect()
 }
 

@@ -5,6 +5,33 @@ use faber_engine::router::Pick;
 const BOTH: [Vendor; 2] = [Vendor::Claude, Vendor::Codex];
 
 #[test]
+fn antigravity_profiles_match_the_recorded_model_efforts() {
+    use faber_engine::route::PROFILES;
+
+    let profiles = PROFILES.iter().filter(|p| p.vendor == Vendor::Gemini).collect::<Vec<_>>();
+    assert_eq!(profiles.len(), 14);
+    for (model, scores) in [
+        ("gemini-4-neon", &[44, 55, 60, 61][..]),
+        ("gemini-4-argon", &[36, 48, 50][..]),
+        ("gemini-4-hydrogen", &[27, 41, 51, 54][..]),
+        ("gemini-3.8-flash", &[23, 30, 31][..]),
+    ] {
+        for (effort, iq) in ["low", "medium", "high", "xhigh"].into_iter().zip(scores) {
+            assert!(profiles.iter().any(|p| p.model == model && p.effort == effort && p.iq == *iq), "{model} {effort}");
+        }
+    }
+}
+
+#[test]
+fn auto_profiles_exclude_antigravity_even_if_the_caller_lists_it_as_connected() {
+    assert!(!Vendor::RUNNABLE.contains(&Vendor::Gemini));
+    let profiles = candidates(&[Vendor::Claude, Vendor::Codex, Vendor::Gemini], &["gpt-6.1-sol".into()]);
+    assert!(profiles.iter().any(|p| p.vendor == Vendor::Claude));
+    assert!(profiles.iter().any(|p| p.vendor == Vendor::Codex));
+    assert!(profiles.iter().all(|p| p.vendor != Vendor::Gemini));
+}
+
+#[test]
 fn measured_picks_for_every_kind_level_and_connected_vendor() {
     let models = ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"].map(String::from);
     let sets = [candidates(&[Vendor::Claude], &models), candidates(&[Vendor::Codex], &models), candidates(&BOTH, &models)];

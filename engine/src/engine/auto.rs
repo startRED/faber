@@ -123,6 +123,9 @@ impl Core {
     }
 
     fn quota_allows(&self, vendor: Vendor, family: Option<&str>, purpose: Purpose, approved: bool) -> Result<(), Why> {
+        if vendor == Vendor::Gemini && purpose == (Purpose::UserTurn { by_hand: false }) && self.ledger.gemini.plan_seen_at.is_none() {
+            return Err(Why::Billing);
+        }
         let now = self.secs();
         let mut snap = self.snap(vendor, now);
         if vendor == Vendor::Claude && self.opts.claude_env_billed {
@@ -1517,6 +1520,38 @@ mod tests {
             assert!(pending.try_recv().is_err(), "the send waits for the classifier that is reading its text");
             assert_eq!(c.guess.as_ref().unwrap().waiters.len(), 1, "the send subscribes to the pending answer");
         });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn antigravity_auto_requires_sign_in_and_a_confirmed_tier_and_honors_backoff() {
+        use crate::account::AccountStatus;
+
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let now = 2_000_000_000.0;
+        engine.set_time_source(Arc::new(move || now));
+        let vendor = Vendor::Gemini;
+        let allowed = || engine.with(|c| c.allows(vendor, None, Purpose::UserTurn { by_hand: false }, false));
+        let plan = |id| crate::signals::antigravity_plan(&serde_json::json!({"_meta": {"antigravity": {"tier": {"id": id, "name": id}}}}));
+
+        engine.with(|c| {
+            c.opts.clis.insert(vendor, Cli { command: "fake".into(), prefix: vec![] });
+            c.ledger.gemini.billing = Billing::Subscription;
+        });
+        assert_eq!(allowed(), Err(Why::Billing), "billing alone does not confirm sign-in");
+        engine.note_antigravity_account(AccountStatus::SignedIn, Some(plan("free-tier")));
+        assert_eq!(allowed(), Err(Why::Billing));
+        engine.note_antigravity_account(AccountStatus::SignedIn, Some(plan("g1-pro-tier")));
+        assert_eq!(allowed(), Ok(()), "the tier suffices without a quota reading");
+        engine.with(|c| assert!(c.route_profiles(Some(vendor)).is_empty(), "a confirmed account still needs a runnable vendor"));
+
+        engine.note_antigravity_out(None);
+        assert_eq!(allowed(), Err(Why::Exhausted));
+        engine.set_time_source(Arc::new(move || now + crate::budget::AGY_BACKOFF + 1.0));
+        assert_eq!(allowed(), Ok(()));
+        engine.note_antigravity_account(AccountStatus::SignedOut, None);
+        assert_eq!(allowed(), Err(Why::Billing));
         engine.shutdown();
     }
 

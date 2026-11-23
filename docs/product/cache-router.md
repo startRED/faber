@@ -44,3 +44,29 @@ Low effort made neither router faster at the median and Luna slightly less accur
 The labels are one reader's, so a disagreement is a question, not a proven mistake. By the labels, the requests the
 routers called `blind` against the label were easy, of a kind the raise ignores, or already hard; the raise only moves
 medium code, math and research.
+
+## Antigravity benchmark profiles
+
+- Antigravity has 14 profiles for its Gemini models. Auto requires a runnable CLI, confirmed sign-in and a recognized
+  subscription tier. The quota factor stays neutral without a reading, and an out-of-quota error excludes Antigravity
+  until the reported reset or the default backoff. Antigravity is still outside `Vendor::RUNNABLE`, so Auto can't select
+  it. The small classifier still uses Luna or Haiku.
+- Antigravity's Intelligence Index scores were checked on 2026-11-23 against [Artificial Analysis's model table](https://artificialanalysis.ai/models/creators/google).
+  Coding scores use the rounded mean of Terminal-Bench 4.0 and FrontierCode-AA 2.0.
+  Costs use weighted US dollars per benchmark task from the [Neon and Hydrogen](https://artificialanalysis.ai/models/comparisons/gemini-4-neon-vs-gemini-4-hydrogen),
+  [Neon and Argon](https://artificialanalysis.ai/models/comparisons/gemini-4-neon-vs-gemini-4-argon) comparisons
+  and [Artificial Analysis's provider table](https://artificialanalysis.ai/providers/google) for Flash.
+  [Google's standard API pricing](https://aistudio.google.com/docs/pricing) confirms the token-rate basis, with Argon
+  using its regular rates from December 1, 2026. These are relative routing costs. Times are explicitly labeled
+  benchmark task minutes converted to seconds, cross-checked between the comparison pages and the model table where
+  both list a time. Independent end-to-end Antigravity timings are unavailable.
+
+| Model | Intelligence Index (low / medium / high / xhigh) | US$ per task (same order) |
+| --- | --- | --- |
+| Gemini 4 Neon | 44 / 55 / 60 / 61 | 0.75 / 1.90 / 3.74 / 6.44 |
+| Gemini 4 Argon | 36 estimated / 48 / 50 | 7.77 estimated / 8.63 / 9.95 |
+| Gemini 4 Hydrogen | 27 / 41 / 51 / 54 | 0.29 / 0.80 / 1.87 / 3.16 |
+| Gemini 3.8 Flash | 23 / 30 / 31 | 5.63 estimated / 6.26 / 7.77 |
+
+Argon low has no published benchmark row. Its intelligence and coding scores use 75% of medium as a provisional
+estimate. Argon low and Flash low use 90% of their medium rows' cost and time as provisional estimates.
