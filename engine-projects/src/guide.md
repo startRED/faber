@@ -24,7 +24,7 @@ The run button in the top bar (Ctrl+.) opens "Running now": every working conver
 
 ## Settings
 Open with Ctrl+, or "Settings" at the bottom of the sidebar; Esc goes back. Five sections:
-- "General". "You": "Language" (system, English, Portuguese, Spanish, French, German), "Your name", "Do you already use AI?" (picks which tutorial plays), "Tutorial" with "Watch again", "Keyboard shortcuts". "How the AI works": "Permissions for Chat and Projects" (the same choice as "Permission mode", both areas), "Web search", "Reply style", "Projects run my automatic actions", "Full trust for Faber’s own setup" (off: asks on a card before installing a catalog tool; on: installs without asking, never sends, publishes, pays or deletes), "Stronger AI if stuck", "Chat working folder" (only when Settings was opened from Chat), "Reasoning summary" (Codex only). "Notifications and system": "Notify me", "Play a sound", "Resume interrupted work when Faber opens", and on Windows only "Keep the computer awake while Faber works" and "Start Faber when I sign in". "Updates": "Receive previews".
+- "General". "You": "Language" (system, English, Portuguese, Spanish, French, German), "Your name", "Do you already use AI?" (picks which tutorial plays), "Tutorial" with "Watch again", "Keyboard shortcuts". "How the AI works": "Default model" for new Chat and Projects conversations, "Permissions for Chat and Projects" (the same choice as "Permission mode", both areas), "Web search", "Reply style", "Projects run my automatic actions", "Full trust for Faber’s own setup" (off: asks on a card before installing a catalog tool; on: installs without asking, never sends, publishes, pays or deletes), "Stronger AI if stuck", "Chat working folder" (only when Settings was opened from Chat), "Reasoning summary" (Codex only). "Notifications and system": "Notify me", "Play a sound", "Resume interrupted work when Faber opens", and on Windows only "Keep the computer awake while Faber works" and "Start Faber when I sign in". "Updates": "Receive previews".
 - "Projects": each project's "Checks" and "A separate copy for each conversation".
 - "Appearance": "Look" has six looks (default "Dark Room"; "Morning" is the light one), plus "Accent color", "Text size", "Motion", background, spacing, corners and fonts. Nothing applies until "Use this look"; "Back to default" restores it; "Look file" saves or opens a theme file.
 - "Accounts and limits": a card per AI with its plan and quota bars (5-hour and 7-day, with the reset time). "Manage accounts" connects or installs an AI. Faber never sees the login.
@@ -93,6 +93,7 @@ Tutorial | Tutorial | Tutorial | Tutoriel | Tutorial
 Watch again | Ver de novo | Ver de nuevo | Revoir | Noch einmal ansehen
 Keyboard shortcuts | Atalhos de teclado | Atajos de teclado | Raccourcis clavier | Tastenkürzel
 How the AI works | Como a IA trabalha | Cómo trabaja la IA | Comment l’IA travaille | So arbeitet die KI
+Default model | Modelo padrão | Modelo predeterminado | Modèle par défaut | Standardmodell
 Permissions for Chat and Projects | Permissões no Chat e em Projetos | Permisos para Chat y Proyectos | Autorisations du Chat et des Projets | Berechtigungen für Chat und Projekte
 Web search | Busca na web | Búsqueda web | Recherche web | Websuche
 Reply style | Estilo das respostas | Estilo de respuesta | Style des réponses | Antwortstil

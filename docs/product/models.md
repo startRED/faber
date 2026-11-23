@@ -6,18 +6,17 @@ Why only Claude Code and Codex, how Auto routes between them, and the rules for 
 
 Faber works with Claude only, Codex only, or both. It supports no other vendor.
 
-- **The subscription is the main path.** An API key is optional and goes only through the CLI's own login, so Faber
-  never sees it. Nobody needs an API.
+- **Use a subscription.** An optional API key goes through the CLI's login, where Faber never sees it.
 - **First run.** The user connects what they have. Faber finds or installs each official CLI and opens its own sign-in,
-  and the router and the toolbox only use what is connected. A person who is new to Claude, Codex and AI apps gets a
-  short tutorial; an experienced one skips it. After that Faber does not keep teaching: there is no help page, and
-  people ask Faber about Faber (built: Faber's own guide is a file every session can read, told by one short line,
-  [product map](../product-map.md#session-kits)).
+  and the router and toolbox only use connected accounts. New users get a short tutorial. Each session can read
+  [Faber's guide](../product-map.md#session-kits) when someone asks about the app.
 - **Multiple vendors:** reviews prefer a quota-ready vendor that can run a read-only review.
 - **One vendor:** reviews come from a different model of the same vendor in a fresh session, and the screen says the
   review is weaker.
 
 ### Auto: a blind router
+
+Settings > General sets the starting model for new Chat and Projects conversations. The composer can override it.
 
 Each vendor's model tends to prefer its own company's models, so in Auto no model ever sees a model's name or a vendor's
 name. Auto aims to pick a model that does the task well, without waste and quickly.

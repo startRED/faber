@@ -47,7 +47,7 @@ import { Grip } from './Grip.tsx';
 import { createWindowWidth, dockable, fit, isWide, type Kind, limitsOf, paneUsual, savedWidths, SIDE, STAGE_ROOMY, widthClass } from './layout.ts';
 import { Lockup } from './Mark.tsx';
 import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts';
-import { modelOptions, vendorName } from './models.ts';
+import { availableChoice, modelOptions, vendorName } from './models.ts';
 import { animateDetails, animateList, keepForExit, leaveColumn, watchMotion } from './motion.ts';
 import { Palette } from './Palette.tsx';
 import { Shortcuts, shortcutsOpen } from './Shortcuts.tsx';
@@ -245,7 +245,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     } catch { /* Keep the partial list and its continuation available for another try. */ }
     finally { setLoadingMoreChanges(false); }
   };
-  const [choice, setChoice] = createSignal<Choice>({ vendor: 'auto' });
+  const [choice, setChoice] = createSignal<Choice>();
   const [commandsVersion, setCommandsVersion] = createSignal(0);
   const commandVendor = () => {
     const conversation = current();
@@ -1061,7 +1061,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       // Consume the reveal in App: the next automatic turn can recreate its RunBlock.
       setSearchIndex(undefined);
     });
-    setChoice(next.id ? recall<Choice>(`faber.choice.${next.id}`, done.conversation?.choice ?? { vendor: 'auto' }) : { vendor: 'auto' });
+    setChoice(next.id ? recall<Choice | undefined>(`faber.choice.${next.id}`, done.conversation?.choice) : undefined);
     if (done.conversation) queueMicrotask(() => restoreRejected(done.conversation!.id, done.conversation!.messages.at(-1)));
   };
   const fresh = (next: Pick<Place, 'area' | 'projectId' | 'groupId'>) => {
@@ -1421,10 +1421,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
 
   // A saved choice that is no longer in the list (a model the account dropped, or the old generic ChatGPT entry)
   // falls back to Auto without forgetting it, so it comes back if the model does.
-  const picked = (): Choice => {
-    const c = choice();
-    return options().some((o) => o.choice.vendor === c.vendor && o.choice.model === c.model) ? c : { vendor: 'auto' };
-  };
+  const picked = (): Choice => availableChoice(options(), choice() ?? (!current()?.messages.length ? state().settings.defaultModel : undefined));
 
   const pickChoice = (c: Choice) => {
     setChoice(c);
@@ -1979,6 +1976,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               look={state().look}
               saved={state().settings}
               vendors={state().vendors}
+              models={state().models}
               quotas={quotas()}
               usage={state().usage ?? []}
               projects={state().projects}

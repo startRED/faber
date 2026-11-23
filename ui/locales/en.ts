@@ -1752,6 +1752,8 @@ export const en = {
   "set.group.type": "Text and layout",
   "set.group.system": "Notifications and system",
   "set.group.ai": "How the AI works",
+  "set.defaultModel": "Default model",
+  "set.defaultModelHint": "Starts new chats and project conversations.",
   "set.group.you": "You",
   'set.notifyMe': 'Notify me',
   "set.notifyHint": "When something needs you.",

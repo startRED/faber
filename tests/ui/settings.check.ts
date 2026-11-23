@@ -631,6 +631,39 @@ check('settings: unsupported system controls are absent outside Windows', () => 
   }
 });
 
+check('settings default model follows account availability and saves Auto explicitly', async () => {
+  const [saved, setSaved] = createSignal<Saved>({});
+  const [vendors, setVendors] = createSignal<Vendor[]>(['claude']);
+  const patches: Saved[] = [];
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, get vendors() { return vendors(); }, quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => { patches.push(patch); setSaved({ ...saved(), ...patch }); return true; },
+  }));
+  try {
+    const chip = () => view.host.querySelector<HTMLButtonElement>('[data-opt=set-default-model] .model-chip')!;
+    const gemini = () => view.host.querySelector<HTMLElement>('.model-group.gemini');
+    chip().click();
+    await tick();
+    equal(gemini(), null);
+    setVendors(['claude', 'gemini']);
+    ok(gemini()?.querySelector('.mk.gemini'));
+    [...view.host.querySelectorAll<HTMLButtonElement>('.model-option')].find((o) => o.textContent === 'Gemini 4 Hydrogen')!.click();
+    await tick();
+    ok(chip().querySelector('.mk.gemini'));
+    setVendors(['claude']);
+    equal(chip().querySelector('.mk.gemini'), null);
+    setVendors(['claude', 'gemini']);
+    ok(chip().querySelector('.mk.gemini'));
+    chip().click();
+    await tick();
+    view.host.querySelector<HTMLButtonElement>('.model-option')!.click();
+    deepEqual(patches, [{ defaultModel: { vendor: 'gemini', model: 'gemini-4-hydrogen' } }, { defaultModel: { vendor: 'auto' } }]);
+  } finally {
+    view.stop();
+  }
+});
+
 check('R140: the permission menu lists five modes with one plain line each, and the long text stays out of the page until the "?" opens it', async () => {
   const [saved, setSaved] = createSignal<Saved>({});
   const [vendors, setVendors] = createSignal<Vendor[]>(['claude']);

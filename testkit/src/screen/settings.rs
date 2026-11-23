@@ -4,7 +4,7 @@
 use super::shell::chat_with_future_resets;
 use super::{Result, Scenario, ask, claude_chat, ensure, eventually, pause, same, start_settings};
 use crate::app::Ctx;
-use crate::page::{Page, css, role_any};
+use crate::page::{Page, css, role, role_any};
 use crate::sandbox::Launch;
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -21,6 +21,7 @@ pub fn scenarios() -> Vec<Scenario> {
         },
         Scenario { name: "system toggles persist independently and survive reopening Settings", run: system_toggles_persist },
         Scenario { name: "receive previews starts off, saves on its own and survives reopening Settings", run: previews_persist },
+        Scenario { name: "settings default model persists and starts a fresh Chat draft", run: default_model_persists },
         Scenario { name: "autostart begins in the tray without creating a webview window", run: autostart_has_no_window },
         Scenario {
             name: "every section of Settings says its part: the accounts, the usage limits and what stays on this PC",
@@ -156,19 +157,35 @@ fn keyboard_traversal(ctx: &mut Ctx) -> Result {
                 )?;
                 let switch = page.eval("document.activeElement.matches('input[role=switch]')")?.as_bool() == Some(true);
                 if switch && section != 3 {
-                    let checked = page.eval("document.activeElement.checked")?;
+                    let checked = page.eval("document.activeElement.checked")?.as_bool().ok_or("switch has no checked state")?;
+                    let id = page.eval("document.activeElement.id")?;
+                    // These switches move before saving. Wait for the saved setting before pressing Space again.
+                    let key = match id.as_str() {
+                        Some("set-notify-switch") => Some("notifications"),
+                        Some("set-sound-switch") => Some("notificationSound"),
+                        Some("set-resume-interrupted-switch") => Some("resumeInterrupted"),
+                        Some("set-awake-switch") => Some("keepAwake"),
+                        Some("set-autostart-switch") => Some("autostart"),
+                        Some("set-previews-switch") => Some("previews"),
+                        Some("set-trust-switch") => Some("faberTrust"),
+                        Some("set-stronger-switch") => Some("strongerWhenStuck"),
+                        _ => None,
+                    };
+                    let check = |expected| {
+                        let dom = format!("document.activeElement.checked === {expected}");
+                        key.map_or_else(
+                            || dom.clone(),
+                            |key| {
+                                format!(
+                                    "(async () => {{ const invoke = window.faberShell?.invoke ?? window.__TAURI_INTERNALS__.invoke; return {dom} && (await invoke('state')).settings.{key} === {expected}; }})()"
+                                )
+                            },
+                        )
+                    };
                     page.press("Space")?;
-                    wait_keyboard_switch(
-                        page,
-                        "switch saves its keyboard choice",
-                        &format!("document.activeElement.checked !== {checked}"),
-                    )?;
+                    wait_keyboard_switch(page, "switch saves its keyboard choice", &check(!checked))?;
                     page.press("Space")?;
-                    wait_keyboard_switch(
-                        page,
-                        "switch restores its keyboard choice",
-                        &format!("document.activeElement.checked === {checked}"),
-                    )?;
+                    wait_keyboard_switch(page, "switch restores its keyboard choice", &check(checked))?;
                 }
                 let range = page.eval("document.activeElement.matches('input[type=range]')")?.as_bool() == Some(true);
                 if range {
@@ -195,6 +212,15 @@ fn keyboard_traversal(ctx: &mut Ctx) -> Result {
                     page.press("ArrowUp")?;
                     page.press("Escape")?;
                     page.wait_for("access menu Escape keeps Settings and its trigger focus", "document.querySelector('.settings') && document.activeElement?.id === 'set-permissions-pick' && document.activeElement.getAttribute('aria-expanded') === 'false'")?;
+                }
+                if page.eval("document.activeElement.matches('[data-opt=set-default-model] .model-chip')")?.as_bool() == Some(true) {
+                    page.press("Enter")?;
+                    page.wait_visible(&css(".model-menu"))?;
+                    page.press("Escape")?;
+                    page.wait_for(
+                        "model menu Escape keeps Settings and restores focus",
+                        "document.activeElement.matches('[data-opt=set-default-model] .model-chip[aria-expanded=false]')",
+                    )?;
                 }
                 if index + 1 < count {
                     page.press("Tab")?;
@@ -555,6 +581,39 @@ fn previews_persist(ctx: &mut Ctx) -> Result {
         open_settings(page)?;
         same(page.is_checked(&previews)?, on, "previews after reload")?;
     }
+    ctx.close(app.id)
+}
+
+fn default_model_persists(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
+    let page = &mut app.page;
+    open_settings(page)?;
+    let model = css("[data-opt=set-default-model] .model-chip");
+    page.click(&model)?;
+    page.wait_visible(&css(".model-menu"))?;
+    ctx.shot(&mut app, "settings-default-model-desktop")?;
+    let page = &mut app.page;
+    page.click(&role("button", "Claude Sonnet").exact())?;
+    let file = ctx.sb.data.join("settings.json");
+    eventually("the default model to reach settings.json", Duration::from_secs(15), || {
+        std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .is_some_and(|saved| saved["defaultModel"] == json!({"vendor": "claude", "model": "sonnet"}))
+    })?;
+    page.reload()?;
+    page.wait_for("the default model in a fresh draft", "!!document.querySelector('.composer .model-chip .mk.claude')")?;
+    open_settings(page)?;
+    page.wait_for(
+        "the default model in Settings after reload",
+        "!!document.querySelector('[data-opt=set-default-model] .model-chip .mk.claude')",
+    )?;
+    page.cdp.call("Emulation.setDeviceMetricsOverride", json!({ "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": false }))?;
+    page.wait_for("the Settings panel has room on a phone", "document.querySelector('.s-main')?.clientWidth >= 320")?;
+    page.click(&model)?;
+    page.wait_visible(&css(".model-menu"))?;
+    ctx.shot(&mut app, "settings-default-model-phone")?;
     ctx.close(app.id)
 }
 
