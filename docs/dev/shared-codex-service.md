@@ -2,11 +2,6 @@
 
 This page records the controlled Windows recovery exercises and the separate resource measurements.
 
-The three-conversation regression test holds an approval in one conversation while two others go silent. The
-old driver sent a health probe while the approval was pending. With the protection in place, the approval remains
-deliverable and the health probe can run after a fresh quiet window once the person answers. The test uses only
-an in-memory protocol fixture with a paused clock.
-
 Five starts of stock Codex 0.166.0 with fresh CLI profiles on Windows answered the startup handshake in 195–274 ms.
 Those samples started no turns and used no subscription. Faber allows 30 seconds. In a controlled run with no handshake
 answer, two waiting conversations sent no turn and each received the failure after writer exit was confirmed.
