@@ -9,7 +9,8 @@ existing guide. Opening a card or copying its request uses no model, tool instal
 
 Before using Studio, the agent lists the official skills provided by the connected Studio and loads the one that matches
 the task. It uses enabled Catalog skills for specialist help or file-based work, including the optional community
-Roblox development guide. Install that guide through the normal Catalog confirmation. If Studio is unavailable, the agent
+Roblox development guide, world building and project tooling skills. Install them through the normal Catalog confirmation.
+If Studio is unavailable, the agent
 uses project files and official documentation where possible and reports which Studio checks it could not run.
 
 ## Five paths, chosen by what the request means

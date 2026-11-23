@@ -229,6 +229,10 @@ fn game_intent(id: &str) -> Option<&'static str> {
         "godot-tilemap" => Some("tilemap|tiles|tilemaps"),
         "roblox-characters" => Some("character|characters|personagem|personaje|personnage|figur|avatar"),
         "roblox-datastores" => Some("datastore|datastores|save|salvar|guardar|sauvegarder|speichern"),
+        "roblox-tooling" => Some("rojo|rokit|stylua|selene|wally|pesde|lune|luau-lsp|script sync|sourcemap"),
+        "roblox-world-building" => {
+            Some("map|maps|mapa|mapas|terrain|terreno|lighting|iluminacao|iluminacion|eclairage|beleuchtung|world building|ambientacao")
+        }
         "unity-build-pipeline" => Some("build|pipeline|compilar|compilacao|compilacion|compiler|kompilieren"),
         "unity-scriptableobjects" => Some("scriptableobject|scriptableobjects"),
         "unreal-blueprints" => Some("blueprint|blueprints"),
@@ -931,6 +935,8 @@ mod tests {
             ),
             ("Design a save system for my game", "game-save-systems", vec!["game-audio-design", "game-level-design", "game-card-design"]),
             ("Corrija a interface no Roblox Studio", "roblox-dev-skill", vec!["roblox-datastores", "roblox-networking"]),
+            ("Configure Rojo para meu jogo Roblox", "roblox-tooling", vec!["roblox-world-building", "roblox-physics"]),
+            ("Ajuste a iluminação do mapa Roblox", "roblox-world-building", vec!["roblox-tooling", "roblox-datastores"]),
         ] {
             let jobs = labels(request, None).0;
             let stacks = stack_labels(request, None);
