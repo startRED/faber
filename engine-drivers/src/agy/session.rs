@@ -361,7 +361,7 @@ mod tests {
         let file = dir.path().join("file");
         std::fs::write(&file, "").unwrap();
         let resolved = real_path(dir.path(), "file").unwrap();
-        assert_eq!(Path::new(&resolved), file.canonicalize().unwrap().as_path().strip_prefix(r"\\?\").unwrap_or(&file));
+        assert_eq!(Path::new(&resolved).canonicalize().unwrap(), file.canonicalize().unwrap());
         assert!(!resolved.starts_with(r"\\?\"));
         assert_eq!(
             real_path(dir.path(), "missing"),
