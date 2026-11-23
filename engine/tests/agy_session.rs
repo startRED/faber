@@ -228,6 +228,67 @@ async fn agy_launch_and_recorded_text() {
 }
 
 #[tokio::test]
+async fn claude_starts_an_antigravity_child_in_a_project_with_three_connected_ais() {
+    let dir = DataFolder::new();
+    let folder = support::work_folder();
+    let (lead_spawn, leads) = support::pipes();
+    let (child_spawn, input, output) = support::controlled();
+    let spawn: Spawner = Arc::new(move |bin, args, cwd| match bin {
+        "claude" => lead_spawn(bin, args, cwd),
+        "gemini" => child_spawn(bin, args, cwd),
+        _ => panic!("unexpected start of {bin}"),
+    });
+    let engine = boot(&dir, Permissions::Ask, spawn);
+    engine.replace_clis(Vendor::ALL.map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })).into());
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+    let parent = engine
+        .send(SendRequest {
+            conversation_id: None,
+            area: Area::Project,
+            project_id: Some(project.id),
+            text: "Delegate the next task".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "claude".into(), model: Some("claude-haiku-5-5".into()), effort: None },
+        })
+        .unwrap();
+    let mut lead = support::next_pipe(&leads).await;
+    lead.say(json!({"type":"system","subtype":"init","session_id":"lead","model":"claude-haiku-5-5"})).await;
+    let recording = entries("plain");
+    lead.say(json!({"type":"control_request","request_id":"start-child","request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":{
+            "title":"Check the result","brief":prompt_text(&recording),"ai":"antigravity"
+        },"_meta":{"claudecode/toolUseId":"child"}}}}}))
+        .await;
+    support::until("the lead received its child conversation", || {
+        lead.lines.lock().unwrap().iter().any(|line| {
+            let response = &line["response"];
+            if response["request_id"] != "start-child" {
+                return false;
+            }
+            assert_eq!(response["response"]["mcp_response"]["result"]["isError"], false, "{response}");
+            true
+        })
+    })
+    .await;
+    let child = engine.state().conversations.into_iter().find(|c| c.title == "Check the result").unwrap().id;
+    let mut wire = (input, output);
+    support::expect_method(&mut wire.0, "initialize").await;
+    support::emit(&mut wire.1, response(&recording, 1)).await;
+    let open = support::expect_method(&mut wire.0, "session/new").await;
+    assert!(open["params"]["mcpServers"].as_array().is_some_and(|servers| !servers.is_empty()));
+    support::emit(&mut wire.1, response(&recording, 2)).await;
+    default_startup(&mut wire).await;
+    replay_turn(&mut wire, &recording, None).await;
+    let reply = settled(&engine, &child).await;
+    assert_eq!(reply.text.trim(), "pong");
+    let conversation = engine.open(&child).unwrap();
+    assert_eq!(conversation.started_by.as_deref(), Some(parent.as_str()));
+    assert!(conversation.sessions.contains_key(&Vendor::Gemini));
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn agy_tools_and_full_access() {
     let message = recorded("tools", Permissions::FullAccess, None).await;
     assert_eq!(message.status, Some(Status::Done));
