@@ -63,7 +63,7 @@ fn project_file(root: &Path, relative: &str, home: Option<&Path>) -> Option<Path
     let written = root.join(relative);
     // A project may be a drive root containing the home. A link into that home's setup still stays inside the project.
     if !std::fs::symlink_metadata(&written).is_ok_and(|m| m.is_file())
-        || (relative.starts_with(".codex/") && !std::fs::symlink_metadata(root.join(".codex")).is_ok_and(|m| m.is_dir()))
+        || relative.split_once('/').is_some_and(|(dir, _)| !std::fs::symlink_metadata(root.join(dir)).is_ok_and(|m| m.is_dir()))
     {
         return None;
     }
@@ -82,13 +82,12 @@ pub fn project_names_with(root: &Path, vendor: Vendor, home: Option<&Path>, read
     let relative = match vendor {
         Vendor::Claude => ".mcp.json",
         Vendor::Codex => ".codex/config.toml",
-        // Not yet: its server file is read once its CLI runs.
-        Vendor::Gemini => return BTreeSet::new(),
+        Vendor::Gemini => ".agents/mcp_config.json",
     };
     let Some(path) = project_file(root, relative, home) else { return BTreeSet::new() };
     let Some(text) = read(&path) else { return BTreeSet::new() };
     match vendor {
-        Vendor::Claude => {
+        Vendor::Claude | Vendor::Gemini => {
             #[derive(serde::Deserialize)]
             struct Names {
                 #[serde(rename = "mcpServers", default)]
@@ -104,7 +103,6 @@ pub fn project_names_with(root: &Path, vendor: Vendor, home: Option<&Path>, read
             }
             toml::from_str::<Names>(&text).map(|n| n.mcp_servers.into_keys().take(256).collect()).unwrap_or_default()
         }
-        Vendor::Gemini => BTreeSet::new(),
     }
 }
 

@@ -13,7 +13,7 @@ Faber works with Claude only, Codex only, or both. It supports no other vendor.
   short tutorial; an experienced one skips it. After that Faber does not keep teaching: there is no help page, and
   people ask Faber about Faber (built: Faber's own guide is a file every session can read, told by one short line,
   [product map](../product-map.md#session-kits)).
-- **Both vendors:** reviews and second opinions come from the other vendor.
+- **Multiple vendors:** reviews prefer a quota-ready vendor that can run a read-only review.
 - **One vendor:** reviews come from a different model of the same vendor in a fresh session, and the screen says the
   review is weaker.
 

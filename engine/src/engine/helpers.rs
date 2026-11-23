@@ -238,8 +238,10 @@ impl Core {
         let prompt = helper::worker_prompt(input, review.is_none()).ok_or("the brief was empty")?;
         let economy = self.economy(conv);
         let review_vendor = review.unwrap_or_else(|| {
-            let other = helper::other(lead_vendor);
-            if self.vendors().contains(&other) { other } else { lead_vendor }
+            Vendor::RUNNABLE
+                .into_iter()
+                .find(|v| *v != lead_vendor && *v != Vendor::Gemini && self.opts.clis.contains_key(v))
+                .unwrap_or(lead_vendor)
         });
         let refusal = |why| match why {
             Why::Billing => "that AI may be billed per use, so Faber does not call it on its own",
@@ -248,6 +250,8 @@ impl Core {
         let mut refused = None;
         let candidates: Vec<_> = crate::route::candidates(&self.vendors(), &self.codex_models)
             .into_iter()
+            // Antigravity's driver cannot enforce the helper's read-only plan permissions.
+            .filter(|p| p.vendor != Vendor::Gemini)
             .filter(|p| job != "review" || p.vendor == review_vendor)
             .filter(|p| match self.allows(p.vendor, family_of(p.model), Purpose::UserTurn { by_hand: false }, false) {
                 Ok(()) => true,
