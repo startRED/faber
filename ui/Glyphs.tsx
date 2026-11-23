@@ -118,8 +118,8 @@ export function Icon(props: { name: keyof typeof PATHS; small?: boolean }) {
   );
 }
 
-/** A vendor's shape and colour: a square for Claude, a diamond for Codex, a neutral dot while Auto is still choosing. The
- * vendor's name always comes with it. */
+/** A vendor's shape and colour: a square for Claude, a diamond for Codex, a triangle for Antigravity, a neutral dot while Auto
+ * is still choosing. The vendor's name always comes with it. */
 export function VendorMark(props: { vendor?: Vendor }) {
-  return <span class="mk" classList={{ claude: props.vendor === 'claude', codex: props.vendor === 'codex' }} aria-hidden="true" />;
+  return <span class="mk" classList={{ claude: props.vendor === 'claude', codex: props.vendor === 'codex', gemini: props.vendor === 'gemini' }} aria-hidden="true" />;
 }

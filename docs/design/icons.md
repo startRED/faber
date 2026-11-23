@@ -51,8 +51,10 @@ a loading mark is the one motion that says work goes on (`.st-working` has its o
 ## Who is speaking
 
 `ActorMark` and `VendorMark` draw a shape and a colour, never a vendor's logo and never a vendor's name: a coral square for
-Claude, a violet diamond for Codex, Faber's own mark (Curioso, in the second ink) when Faber, not an AI, said or chose it.
-The three meaning colours stay locked ([looks.md](looks.md#meaning-colours-are-locked)); the shape comes with the colour
+Claude, a violet diamond for Codex, a triangle for Antigravity, Faber's own mark (Curioso, in the second ink) when Faber, not an AI, said or chose it.
+The triangle is drawn in the second ink (`.mk.gemini` in `ui/icons/icons.css`), so Antigravity adds no colour to the locked ones and the mark holds in
+every look and in high contrast; it is 3:1 against every surface (`tests/ui/antigravity-mark.check.ts` measures it in the six looks) and reads at 14 px.
+The answer header, the running rows, the usage cards and the sidebar's usage line draw it through `VendorMark`. The three meaning colours stay locked ([looks.md](looks.md#meaning-colours-are-locked)); the shape comes with the colour
 and the name always comes with the mark.
 
 ## Where it is used

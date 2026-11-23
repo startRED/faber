@@ -56,6 +56,7 @@ import './i18n.check.ts';
 import './inbox.check.ts';
 import './keepgoing.check.ts';
 import './interactions.check.ts';
+import './antigravity-mark.check.ts';
 import './models.check.ts';
 import './mojibake.check.ts';
 import './motion.check.ts';

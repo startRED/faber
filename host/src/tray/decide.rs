@@ -669,6 +669,12 @@ mod tests {
             stopped_text(&english, "", "reason.keepGoing.pace", Some(Vendor::Gemini)),
             "Faber: stopped keeping going so Antigravity stays on pace"
         );
+        // In the words the screen sent for another language, the slot still fills with the same name, for each case that names an AI.
+        sent.stopped = BTreeMap::from([("billed".to_string(), "{title}: parou, {ai} pode cobrar por uso".to_string())]);
+        assert_eq!(
+            stopped_text(&sent, "Login", "reason.keepGoing.billed", Some(Vendor::Gemini)),
+            "Login: parou, Antigravity pode cobrar por uso"
+        );
         // A standing goal that needs the person is told the same way, with the goal's words as the title.
         assert_eq!(
             stopped_text(&english, "every check passes", "reason.goal.needsYou", None),
