@@ -129,8 +129,10 @@ fn antigravity_installs(ctx: &mut Ctx) -> Result {
     super::skip_tour(&mut app.page)?;
     ready_to_chat(&mut app)?;
     let model_group = css(".model-menu .model-group.gemini").has_text("Antigravity");
+    let account_model = css(".model-menu section[aria-label='Antigravity']").role("button", "Gemini 4 Neon").exact();
     app.page.click(&css(".composer .model-chip"))?;
     app.page.wait_visible(&model_group)?;
+    app.page.wait_visible(&account_model)?;
     app.page.wait_for(
         "the Antigravity mark in the model menu",
         "document.querySelector('.model-menu .model-group.gemini .mk.gemini')?.getBoundingClientRect().width > 0",
@@ -146,6 +148,7 @@ fn antigravity_installs(ctx: &mut Ctx) -> Result {
     ready_to_chat(&mut app)?;
     app.page.click(&css(".composer .model-chip"))?;
     app.page.wait_visible(&model_group)?;
+    app.page.wait_visible(&account_model)?;
     ctx.close(app.id)
 }
 

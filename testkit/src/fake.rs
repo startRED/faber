@@ -333,7 +333,9 @@ fn agy_acp(state: Option<&Path>, args: &[String], stdin: &mut dyn BufRead, stdou
                 json!({ "jsonrpc": "2.0", "id": request["id"], "result": { "protocolVersion": 1, "agentInfo": { "name": "Antigravity ACP Server" } } })
             }
             Some("session/new") if marker.exists() => json!({ "jsonrpc": "2.0", "id": request["id"], "result": {
-                "sessionId": "00000000-0000-4000-8000-000000000001", "models": { "availableModels": [] } } }),
+                "sessionId": "00000000-0000-4000-8000-000000000001", "models": {
+                    "currentModelId": "gemini-4-neon-high",
+                    "availableModels": [{ "modelId": "gemini-4-neon-high", "name": "Gemini 4 Neon (High)" }] } } }),
             Some("session/new") => {
                 json!({ "jsonrpc": "2.0", "id": request["id"], "error": { "code": -32000, "message": "Authentication required" } })
             }
