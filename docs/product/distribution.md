@@ -21,9 +21,9 @@ belongs to them.
 
 ## Distribution
 
-- GitHub Releases on every tag, downloaded directly: an `.exe` (NSIS) installer for Windows, a universal `.dmg` for macOS,
-  AppImage and `.deb` for Linux. Windows comes first, and macOS and Linux compatibility is kept from now on. arm64
-  Windows and `.rpm` come later.
+- GitHub Releases on every tag, downloaded directly: an `.exe` (NSIS) installer for Windows, one `.dmg` for each Mac
+  processor (Apple silicon and Intel), AppImage and `.deb` for Linux. Windows comes first, and macOS and Linux
+  compatibility is kept from now on. arm64 Windows and `.rpm` come later.
 - Every user-facing change ships by itself as a preview, and a stable follows weekly (R130, R156). When CI goes green on
   `phase-1-base` and a `feat`, `fix` or `perf` commit that touches the shipped app (`ui/`, `engine/`, `src-tauri/`,
   `package.json`, `vite.config.ts`) landed since the last tag, `auto-release.yml` tags `vX.Y.(Z+1)-preview.N` and starts the
