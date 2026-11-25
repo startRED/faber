@@ -1,35 +1,24 @@
 ## What changed and why
 
-<!-- One or two sentences. The commit type in the title (feat, fix, perf, docs, ...) is a release decision, see AGENTS.md. -->
+<!-- One or two sentences. Title the pull request `type(scope): summary` (feat, fix, perf, docs, test, ci, refactor,
+     chore, style, build, revert), as `.github/workflows/pr-title.yml` checks, and target `phase-1-base`. -->
 
-## For you
+## Related issue
 
-<!-- Paste the English entry of this pull request's docs/next/<branch>.json (R142); the release
-     notes and the what's-new screen are built from those entries, not from this text.
-     How to write it: docs/dev/whats-new.md.
-     Write "Nothing a person sees." when that is true. -->
+<!-- `Closes #<number>`, or delete this section. -->
 
-## Coherence
-
-<!-- A change a person sees: `Extends: <product-map entry>` or `New: <closest existing thing and why it does not fit>`.
-     Anything else: "Not a change a person sees." -->
-
-## Visual critique
-
-<!-- A change a person sees (R172, `.claude/skills/visual-critique/SKILL.md`): the lowest screen of each, scored by a
-     fresh session from `node scripts/shots.mjs before` and `after`. The score never drops; a touched screen reaches 32.
-     Anything else: "Not a change a person sees." -->
-
-Visual critique: before X/40, after Y/40, by <session>
-
-## Cost
-
-<!-- Memory and processor cost measured, or why there is none (docs, tests only). -->
-
-## Proofs run
+## Checks run
 
 - [ ] `npm run lint`, `npm run typecheck`, `npm run docs`, `npm run build`
-- [ ] `cargo fmt --all --check`, `npm run test:scripts`, `cargo t --claims`
-- [ ] The heavy suites and Clippy run in CI on the queued commit (AGENTS.md, Proof commands)
+- [ ] `cargo fmt --all --check`, `npm run test:scripts`, `node scripts/cargo.mjs t --claims`
+- [ ] The heavy suites and Clippy run in CI; a maintainer queues and lands an approved pull request
+
+## For user-facing or state and process changes
+
+<!-- Optional for documentation and small fixes. -->
+
+- **Coherence.** A change a person sees: `Extends: <entry of docs/product-map.md>` or `New: <closest existing thing and
+  why it does not fit>`. Anything else: "Not a change a person sees."
+- **Memory and processor cost.** Needed when the change touches processes, long-lived state or how much the screen
+  keeps drawn. Measured, or why there is none.
 - [ ] `docs/product-map.md` and the `docs/design/` pages updated when they needed it
-- [ ] Queued with `node scripts/land.mjs <number>` right after opening; CI lands it, nobody waits on it
