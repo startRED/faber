@@ -1150,6 +1150,7 @@ impl Engine {
         let handle = runtime.clone();
         runtime.spawn(async move {
             let mut plan_checked = f64::MIN;
+            let mut idle_checked = f64::MIN;
             loop {
                 let Some(core) = me.upgrade() else { return };
                 let engine = Engine { core, runtime: handle.clone() };
@@ -1158,6 +1159,10 @@ impl Engine {
                     c.goals_tick();
                     c.secs()
                 });
+                if !(0.0..evict::LET_GO_EVERY).contains(&(now - idle_checked)) {
+                    idle_checked = now;
+                    engine.let_idle_go();
+                }
                 if !(0.0..PLAN_EVERY).contains(&(now - plan_checked)) {
                     plan_checked = now;
                     engine.check_claude_plan(Duration::from_secs(20)).await;
@@ -1671,6 +1676,12 @@ impl Engine {
             c.test_items = items.into_iter().map(|item| &*Box::leak(Box::new(item))).collect();
             c.catalog_store = Some(store);
         })
+    }
+    /// Lets every conversation nothing uses leave memory (`evict.rs`). `watch_accounts` runs it every few minutes.
+    pub fn let_idle_go(&self) {
+        if self.with(|c| c.evict_idle()) {
+            faber_winproc::release_freed_memory();
+        }
     }
     /// Tests: the ids of the conversations held in memory, sorted (`evict.rs`).
     #[doc(hidden)]
@@ -4319,7 +4330,9 @@ impl Core {
                 && let Some(l) = self.retire(conv)
             {
                 l.session.close();
-                self.evict_idle();
+                if self.evict_idle() {
+                    faber_winproc::release_freed_memory();
+                }
             }
             return;
         }
@@ -4367,7 +4380,11 @@ impl Core {
                 {
                     l.session.close();
                     // The closed session was the last thing using it, unless the screen still shows it.
-                    core.evict_idle();
+                    let gone = core.evict_idle();
+                    drop(core);
+                    if gone {
+                        faber_winproc::release_freed_memory();
+                    }
                 }
             })
             .abort_handle();

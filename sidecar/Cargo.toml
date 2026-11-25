@@ -17,6 +17,9 @@ faber-channel = { path = "../channel", features = ["host"] }
 faber-engine = { path = "../engine" }
 faber-host = { path = "../host" }
 faber-update = { path = "../update" }
+# The allocator, and the call that asks it to give freed memory back after conversations leave (`release_freed_memory`).
+faber-winproc = { path = "../winproc", features = ["mimalloc"] }
+mimalloc = { version = "0.1", default-features = false }
 serde_json = "1"
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt", "rt-multi-thread", "sync", "time"] }
 

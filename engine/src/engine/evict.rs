@@ -7,7 +7,14 @@
 //! running-list entry (a question, a check, a wait), Keep going, a helper, a follow-up, a recovery, a copy being made, a
 //! parent of a kept conversation, or a message of the person's in the last 15 minutes (a mission waits for them,
 //! `goals::person_there`). When unsure, it stays.
+//!
+//! The check runs when the screen opens a conversation, when an idle CLI closes, and every [`LET_GO_EVERY`] besides: a run
+//! of a CLI that keeps no idle process (Codex, Antigravity) or a message turning 15 minutes old changes nothing on screen,
+//! and its conversation stayed in memory until the person opened another one.
 use super::*;
+
+/// How often the engine looks for conversations nothing uses any more, without the screen doing anything.
+pub(super) const LET_GO_EVERY: f64 = 5.0 * 60.0;
 
 /// What a conversation knows only in memory and gets back when it is read again: its CLIs' commands and context readings.
 /// `stopped` is not kept: it matters only while a turn closes or a queue waits, and neither lets a conversation go.
@@ -20,18 +27,26 @@ impl Core {
     /// The screen opened `id`: it stays, and the conversations nothing uses leave memory.
     pub(super) fn shown(&mut self, id: &str) {
         self.shown = Some(id.to_string());
-        self.evict_idle();
+        if self.evict_idle() {
+            faber_winproc::release_freed_memory();
+        }
     }
 
-    /// Drops every conversation nothing uses, after saving it, so its file holds all it had.
-    pub(super) fn evict_idle(&mut self) {
+    /// Drops every conversation nothing uses, after saving it, so its file holds all it had. True when one left: a conversation
+    /// is millions of small allocations, and the caller then asks the allocator to give them back
+    /// (`faber_winproc::release_freed_memory`), outside the engine's lock where it can.
+    #[must_use]
+    pub(super) fn evict_idle(&mut self) -> bool {
         // A run that just ended leaves its done card while the conversation is still here (`ended.rs`).
         self.refresh_running();
-        let now = now();
+        // The engine's clock, so a test can move the 15 minutes forward (`Engine::set_time_source`).
+        let now = (self.secs() * 1000.0) as u64;
         let gone: Vec<String> = self.convs.keys().filter(|id| self.unused(id, now)).cloned().collect();
+        let before = self.convs.len();
         for id in gone {
             self.evict_saved(&id);
         }
+        self.convs.len() < before
     }
 
     pub(super) fn evict_if_unused(&mut self, id: &str) {

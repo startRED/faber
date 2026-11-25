@@ -65,9 +65,9 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   screen up to 30 times a second, so an update carries only the steps that changed since the last one
   (`host/src/feed.rs`): sent whole, a long agent reply (thousands of steps, 11 MB) was parsed by the webview at each
   update, and on 2026-10-22 the window grew to 8.3 GB after a few hours of such replies. The engine keeps in memory
-  only the conversation on screen and the ones something is still working on (`engine/src/engine/evict.rs`, R461):
-  every conversation opened used to stay until Faber closed, tool outputs included, and the installed app reached 707 MB
-  in the engine and 1.3 GB in all after three hours on 2026-10-27. The sidebar's list reads only the conversation files
+  only the conversation on screen and the ones something is still working on (`engine/src/engine/evict.rs`, R461),
+  checked again every five minutes; the sidecar's mimalloc then gives the freed memory back. Every conversation used to
+  stay until Faber closed: 707 MB in the engine after three hours (2026-10-27). The sidebar's list reads only the files
   that changed since it last read them (`Store::list`), instead of decoding all of them (202 MB) twice a turn. The
   screen check `long session` opens twelve big conversations in turn and fails if the app keeps them.
 - **CLIs that cost almost nothing while idle.** A Claude Code process takes about 120 MB just waiting (more in long

@@ -46,6 +46,11 @@ use tokio::sync::{broadcast, mpsc};
 
 mod updates;
 
+/// mimalloc gives freed memory back when the engine asks after conversations leave memory (`release_freed_memory`), where the
+/// system heap kept much of it (measured 2026-11-24, `faber_winproc::release_freed_memory`).
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 /// How long commands already running may take to finish once stdin closes, before they are stopped.
 const FINISH: std::time::Duration = std::time::Duration::from_secs(1);
 

@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn now() -> u64 {
@@ -81,6 +82,24 @@ async fn r_next_a_conversation_with_a_queue_or_a_recent_message_stays_in_memory(
         vec!["q1", "r2", "s3"],
         "a queued turn still has to be sent, and the person wrote in r2 under 15 minutes ago (a mission waits for them)"
     );
+}
+
+#[tokio::test]
+async fn r_next_a_conversation_leaves_memory_on_its_own_once_nothing_uses_it() {
+    let dir = support::tempdir();
+    // The person wrote in r1 a minute ago: it stays while a mission may still wait for them.
+    let engine = boot(dir.path(), &[conversation("r1", now() - 60_000), conversation("s2", now() - HOUR)]);
+    let clock = Arc::new(AtomicU64::new(now() / 1000));
+    let time = clock.clone();
+    engine.set_time_source(Arc::new(move || time.load(Ordering::SeqCst) as f64));
+    engine.open_for_screen("r1").expect("r1 opens");
+    engine.open_for_screen("s2").expect("s2 opens");
+    assert_eq!(engine.in_memory(), vec!["r1", "s2"]);
+    // Twenty minutes later nothing on screen changes, and the engine's own round lets r1 go.
+    clock.fetch_add(20 * 60, Ordering::SeqCst);
+    engine.set_utc_offset(-10_800);
+    engine.watch_accounts();
+    support::until("r1 leaves memory without the screen opening anything", || engine.in_memory() == vec!["s2"]).await;
 }
 
 #[tokio::test]

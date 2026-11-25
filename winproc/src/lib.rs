@@ -11,6 +11,18 @@
 mod gpu;
 pub use gpu::available_vram_mb;
 
+/// Gives memory freed since the last call back to the system, in a program built with the `mimalloc` feature and running on
+/// it (the sidecar). The system heap keeps much of what millions of small freed allocations held: after 760 MB of
+/// conversation-shaped values were dropped across tokio threads, it still held 277 MB where mimalloc, told to collect, held
+/// 182 MB (measured 2026-11-24). Without the feature it does nothing.
+pub fn release_freed_memory() {
+    // SAFETY: mi_collect takes no pointers; it only walks mimalloc's own heaps and returns their free pages.
+    #[cfg(feature = "mimalloc")]
+    unsafe {
+        libmimalloc_sys::mi_collect(true)
+    }
+}
+
 /// Puts this dedicated worker in macOS's background quality-of-service class until it exits.
 #[cfg(target_os = "macos")]
 pub fn background_thread() -> std::io::Result<()> {
