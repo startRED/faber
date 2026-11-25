@@ -316,6 +316,7 @@ Message search keeps a word index in memory and finds matching conversations new
 | `budget.json` | Quota readings, spending and requests of unknown cost. | The engine |
 | `notes-seen` | The last “what's new” entry the person saw. | `save_notes_seen` in the shell |
 | `update.log`, `startup.log`, `update-tried` | Update and startup logs, and the last attempted update. | `src-tauri/src/update.rs`, `electron/startup.ts`, `engine-core/src/startup.rs` |
+| `engine-slow.log`, `engine-slow.old.log` | Local record of each time the engine's lock was waited for or held a second or more, with where it was taken (64 KB, then it starts over keeping the older lines once). Nothing sends it. | The engine (`engine/src/engine/slow_lock.rs`) |
 | `catalog-hint-seen` | Marks that Faber suggested a missing catalog item. | The engine |
 | `shell-texts.json` | Tray text in the person's language. | The tray |
 | `cache-health.jsonl` | Local record of cache misses. | The engine |

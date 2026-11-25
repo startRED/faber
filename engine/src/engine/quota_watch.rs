@@ -25,7 +25,7 @@ const ANTIGRAVITY_TIMEOUT: Duration = Duration::from_secs(12);
 /// Marks a vendor’s reading as under way for exactly as long as the task that does it lives: whichever way that task ends
 /// (an answer, a failure, the engine going away, a panic), the mark is lifted, so a vendor is never left unread for good.
 struct InFlight {
-    core: std::sync::Weak<Mutex<Core>>,
+    core: std::sync::Weak<super::slow_lock::Timed<Core>>,
     vendor: Vendor,
 }
 

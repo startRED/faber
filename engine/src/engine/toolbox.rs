@@ -61,7 +61,7 @@ fn change_tool(enabled: Option<bool>, remove: bool) -> &'static str {
 }
 
 /// An allowed catalog change counts as work until the task ends, including a panic or Stop: an app update waits for it.
-pub(super) struct Running(pub(super) std::sync::Weak<std::sync::Mutex<Core>>);
+pub(super) struct Running(pub(super) std::sync::Weak<super::slow_lock::Timed<Core>>);
 
 impl Drop for Running {
     fn drop(&mut self) {

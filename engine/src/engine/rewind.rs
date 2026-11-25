@@ -205,7 +205,7 @@ impl Engine {
             }
             if core.rewind_delete_admitted(id) {
                 let changed = core.rewind.admission_changed.clone();
-                core = changed.wait(core).unwrap_or_else(|e| e.into_inner());
+                core = core.wait(&changed);
             } else {
                 let history = core.rewind.history.clone().expect("a busy history check has its worker");
                 drop(core);

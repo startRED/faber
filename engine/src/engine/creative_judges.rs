@@ -22,7 +22,7 @@ type JudgeMeter = (Vendor, &'static str, Arc<Mutex<Option<f64>>>);
 struct Judges {
     sessions: Vec<Session>,
     meters: Vec<JudgeMeter>,
-    me: std::sync::Weak<Mutex<Core>>,
+    me: std::sync::Weak<super::slow_lock::Timed<Core>>,
     conv: String,
 }
 

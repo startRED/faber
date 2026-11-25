@@ -12,7 +12,7 @@ pub type GitRunner = Arc<dyn Fn() -> Option<Box<dyn Executor + Send>> + Send + S
 /// A copy made for conversation `.0`, not yet recorded on it.
 type Made = Option<(String, WorkCopy)>;
 
-struct Sweep(Weak<Mutex<Core>>);
+struct Sweep(Weak<super::slow_lock::Timed<Core>>);
 impl Drop for Sweep {
     fn drop(&mut self) {
         if let Some(core) = self.0.upgrade() {
