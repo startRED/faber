@@ -53,6 +53,9 @@ The message menu's confirmation and its saved-message notice, in Chat and Projec
 - Recovery also finishes an empty temporary created before its identity was recorded, preserving unexpected contents
   before cleanup. On Unix startup reaches validated cleanup folders in known project folders and private history,
   including empty ones. Uncertain versions are kept instead of being deleted to free space.
+- Opening history at start reads every saved point on up to four threads and checks each distinct saved path once
+  against credentials and `.git`, however many points name it. On the owner's PC (123 points, 178,007 saved paths,
+  17,578 distinct) the open went from about 25 s of every start to about 1 s (2026-11-25, `engine/examples/rewind_open.rs`).
 - A conversation with an interrupted restore cannot be deleted, even after confirming the loss of its separate copy.
   The existing error display asks the person to finish the restore first, so recovery keeps the conversation it needs.
   Saving ordinary history may briefly delay deletion, but never replaces the question about unsaved work with a busy error.

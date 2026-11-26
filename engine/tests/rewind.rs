@@ -1088,6 +1088,35 @@ async fn rewind_overlap_refuses_restore_without_interrupting_another_conversatio
 }
 
 #[test]
+fn rewind_a_saved_point_or_journal_naming_a_git_path_closes_history_at_open() {
+    for (kind, tamper) in [("points", "before.absent"), ("journals", "operations")] {
+        let mut s = Setup::new();
+        s.write("file", b"before");
+        s.names(&["file"]);
+        s.capture("m1", 1);
+        s.write("file", b"after");
+        s.seal(2);
+        s.history.restore(&s.request("m1", Mode::Both), &mut s.conversation, 3).unwrap();
+        let folder =
+            std::fs::read_dir(s.data.path().join("rewind")).unwrap().map(|entry| entry.unwrap().path()).find(|path| path.is_dir()).unwrap();
+        let saved = std::fs::read_dir(folder.join(kind))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.extension().is_some_and(|extension| extension == "json"))
+            .unwrap();
+        let mut record: serde_json::Value = serde_json::from_slice(&std::fs::read(&saved).unwrap()).unwrap();
+        if kind == "points" {
+            record["before"]["absent"].as_array_mut().unwrap().push(json!(".git/config"));
+        } else {
+            record["operations"][0]["path"] = json!(".git/config");
+        }
+        std::fs::write(&saved, serde_json::to_vec(&record).unwrap()).unwrap();
+        drop(s.history);
+        assert_eq!(History::open(s.data.path(), 4).err().as_deref(), Some("error.rewind.path"), "a tampered {tamper} must not open");
+    }
+}
+
+#[test]
 fn rewind_restart_at_every_swap_barrier_preserves_versions_and_redo() {
     use faber_winproc::rewind::{Root, file_identity, swap_paths};
     use sha2::{Digest, Sha256};

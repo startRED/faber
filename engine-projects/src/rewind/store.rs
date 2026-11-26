@@ -59,6 +59,61 @@ impl Budget {
     }
 }
 
+/// Threads that read the history at open: enough to overlap the reads, few enough to leave a game its processor.
+const LOAD_THREADS: usize = 4;
+
+/// A history file bigger than this is read while no other big one is: four readers then hold at most one 64 MiB file
+/// and three small ones, instead of four 64 MiB files at once.
+const BIG_FILE: u64 = 8 * 1024 * 1024;
+
+enum Saved {
+    // Boxed: the list holds one of these per history file, and a point or a journal is most of a kilobyte.
+    Point(Box<Point>),
+    Journal(Box<Journal>),
+}
+
+impl Saved {
+    /// The checks that touch no disk: the record sits under its own folder and name and belongs to a real conversation.
+    fn named(&self, folder: &str, id: &str) -> bool {
+        match self {
+            Saved::Point(point) => point.folder == folder && point.info.id == id && uuid_name(&point.conversation),
+            Saved::Journal(journal) => journal.folder == folder && journal.id == id && uuid_name(&journal.conversation),
+        }
+    }
+
+    /// Every path the record would read or write, with the folder it is under.
+    fn paths(&self) -> Box<dyn Iterator<Item = (&Path, &str)> + '_> {
+        match self {
+            Saved::Point(point) => Box::new(
+                point
+                    .before
+                    .files
+                    .keys()
+                    .chain(point.before.absent.iter())
+                    .chain(point.before.skipped.iter())
+                    .map(|path| (point.root.as_path(), path.as_str())),
+            ),
+            Saved::Journal(journal) => Box::new(journal.operations.iter().map(|op| (journal.root.as_path(), op.path.as_str()))),
+        }
+    }
+}
+
+/// Reads one history file. With `big`, a file over `BIG_FILE` (sized from the opened file, not the listing) is read while
+/// holding it, so parallel readers never hold several big files at once.
+fn read_json_at<T: for<'de> Deserialize<'de>>(root: &Root, name: &str, big: Option<&std::sync::Mutex<()>>) -> Result<T, String> {
+    let mut file = root.open_file(name).map_err(error)?;
+    let size = file.metadata().map_err(error)?.len();
+    if size > RECOVERY_RESERVE {
+        return Err("error.rewind.budget".into());
+    }
+    let _alone = big.filter(|_| size > BIG_FILE).map(|big| big.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+    // Sized once: a point can be megabytes of names, read in a few large reads rather than many growing ones.
+    let mut bytes = Vec::with_capacity(size as usize + 1);
+    let identity = fingerprint(&file).map_err(error)?;
+    StableRead { file: &mut file, identity: &identity }.take(RECOVERY_RESERVE + 1).read_to_end(&mut bytes).map_err(error)?;
+    serde_json::from_slice(&bytes).map_err(error)
+}
+
 pub struct History {
     data: PathBuf,
     root: Root,
@@ -97,9 +152,15 @@ impl History {
             batch: RefCell::new(None),
             charges: RefCell::new(BTreeMap::new()),
         };
+        let began = Instant::now();
         history.load()?;
+        history.record_work(|work| work.load_us += micros(began));
+        let began = Instant::now();
         history.recover_history_cleanup()?;
+        history.record_work(|work| work.recover_us += micros(began));
+        let began = Instant::now();
         history.inspect_project_cleanup()?;
+        history.record_work(|work| work.inspect_us += micros(began));
         history.cleanup(at)?;
         Ok(history)
     }
@@ -161,18 +222,11 @@ impl History {
         Ok(())
     }
 
-    fn read_json<T: for<'de> Deserialize<'de>>(&self, name: &str) -> Result<T, String> {
-        let mut file = self.root.open_file(name).map_err(error)?;
-        if file.metadata().map_err(error)?.len() > RECOVERY_RESERVE {
-            return Err("error.rewind.budget".into());
-        }
-        let mut bytes = Vec::new();
-        let identity = fingerprint(&file).map_err(error)?;
-        StableRead { file: &mut file, identity: &identity }.take(RECOVERY_RESERVE + 1).read_to_end(&mut bytes).map_err(error)?;
-        serde_json::from_slice(&bytes).map_err(error)
-    }
-
+    /// Reads every point and journal. The files are listed first, then read and parsed on a few threads, then checked in
+    /// the order they were listed. The owner's 123 files (209 MB of JSON, 178,007 saved paths) took about 25 s at every
+    /// start in one pass that resolved each path once per point naming it (2026-11-25).
     fn load(&mut self) -> Result<(), String> {
+        let mut listed = Vec::new();
         for entry in std::fs::read_dir(&self.data).map_err(error)? {
             let entry = entry.map_err(error)?;
             let folder = entry.file_name().to_string_lossy().into_owned();
@@ -193,37 +247,55 @@ impl History {
                     let Some(id) = name.strip_suffix(".json").filter(|id| uuid_name(id)) else {
                         continue;
                     };
-                    let relative = format!("{folder}/{kind}/{name}");
-                    if kind == "points" {
-                        let point: Point = self.read_json(&relative)?;
-                        if point.folder != folder
-                            || point.info.id != id
-                            || !uuid_name(&point.conversation)
-                            || point
-                                .before
-                                .files
-                                .keys()
-                                .chain(point.before.absent.iter())
-                                .chain(point.before.skipped.iter())
-                                .any(|p| !allowed(&point.root, p))
-                        {
-                            return Err("error.rewind.path".into());
-                        }
-                        self.points.insert(id.into(), point);
-                    } else {
-                        let journal: Journal = self.read_json(&relative)?;
-                        if journal.folder != folder
-                            || journal.id != id
-                            || !uuid_name(&journal.conversation)
-                            || journal.operations.iter().any(|op| !allowed(&journal.root, &op.path))
-                        {
-                            return Err("error.rewind.path".into());
-                        }
-                        self.journals.insert(id.into(), journal);
-                    }
+                    listed.push((folder.clone(), kind == "points", id.to_string(), format!("{folder}/{kind}/{name}")));
                 }
             }
         }
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, LOAD_THREADS);
+        let root = &self.root;
+        let big = std::sync::Mutex::new(());
+        let read: Vec<Result<Saved, String>> = on_threads(
+            &listed,
+            threads,
+            |(_, point, _, relative)| {
+                let big = Some(&big);
+                if *point {
+                    read_json_at(root, relative, big).map(|point| Saved::Point(Box::new(point)))
+                } else {
+                    read_json_at(root, relative, big).map(|journal| Saved::Journal(Box::new(journal)))
+                }
+            },
+            || Err("error.rewind.storage".into()),
+        );
+        // Only records that pass the free checks are resolved ahead; the rest fail below, in listing order, as before.
+        let mut check = PathCheck::from_env();
+        check.prefill(
+            listed
+                .iter()
+                .zip(&read)
+                .filter_map(|((folder, _, id, _), saved)| saved.as_ref().ok().filter(|saved| saved.named(folder, id)))
+                .flat_map(Saved::paths),
+            threads,
+        );
+        for ((folder, _, id, _), saved) in listed.into_iter().zip(read) {
+            let saved = saved?;
+            if !saved.named(&folder, &id) || saved.paths().any(|(root, path)| !check.allowed(root, path)) {
+                return Err("error.rewind.path".into());
+            }
+            match saved {
+                Saved::Point(point) => {
+                    self.points.insert(id, *point);
+                }
+                Saved::Journal(journal) => {
+                    self.journals.insert(id, *journal);
+                }
+            }
+        }
+        let (resolved, spent) = (check.resolved(), check.spent_us());
+        self.record_work(|work| {
+            work.path_checks += resolved;
+            work.path_check_us += spent;
+        });
         Ok(())
     }
 

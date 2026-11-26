@@ -261,3 +261,41 @@ fn rewind_capture_restore_and_cleanup_cost() {
     // Sealing runs after the turn, off the message's path: it only has to stay cheap.
     assert!(changed_seal_time <= Duration::from_millis(1000), "eight-file sealing exceeded 1000 ms: {changed_seal_time:?}");
 }
+
+/// Opening the history checks every saved path against credentials and `.git`. It used to resolve each path once per
+/// point naming it, so a project with many points over the same files cost seconds at every start (the owner's history:
+/// 178,007 checks, 17,578 distinct paths, about 25 s, 2026-11-25). Each distinct path is resolved once now.
+#[test]
+fn opening_resolves_each_saved_path_once_however_many_points_name_it() {
+    const SHARED: usize = 200;
+    const POINTS: usize = 4;
+    let temporary = std::env::temp_dir().canonicalize().unwrap();
+    let folder = tempfile::tempdir_in(&temporary).unwrap();
+    let data = tempfile::tempdir_in(&temporary).unwrap();
+    let names: Vec<_> = (0..SHARED).map(|index| format!("file-{index:04}.bin")).collect();
+    for (index, name) in names.iter().enumerate() {
+        std::fs::write(folder.path().join(name), &payload(index as u64 + 1)[..64]).unwrap();
+    }
+    let mut git = Git { names: names.iter().flat_map(|name| name.bytes().chain([0])).collect(), calls: 0 };
+    let mut conversation: Conversation = serde_json::from_value(json!({
+        "id": CONVERSATION, "title": "Rewind open", "area": "project", "workingFolder": folder.path(),
+        "createdAt": 1, "updatedAt": 1, "messages": []
+    }))
+    .unwrap();
+    let mut history = History::open(data.path(), 1).unwrap();
+    for (turn, name) in names.iter().enumerate().take(POINTS) {
+        let id = format!("question-{turn}");
+        let at = 2 + turn as u64 * 2;
+        conversation.messages.push(Message::new(id.clone(), Role::User, format!("Turn {turn}"), at));
+        history.capture(&mut git, folder.path(), &conversation, &id, &format!("turn-{turn}"), at, false).unwrap();
+        std::fs::write(folder.path().join(name), format!("turn {turn}")).unwrap();
+        let scan = history.scan_seal(&mut git, folder.path()).unwrap();
+        history.seal(scan, at + 1).unwrap();
+    }
+    assert_eq!(history.list(CONVERSATION).len(), POINTS);
+    drop(history);
+    let reopened = History::open(data.path(), 20).unwrap();
+    let work = reopened.work();
+    assert_eq!(reopened.list(CONVERSATION).len(), POINTS, "every point is still there");
+    assert_eq!(work.path_checks, SHARED as u64, "each distinct path is resolved once, not once per point ({POINTS} points)");
+}

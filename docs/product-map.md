@@ -357,7 +357,7 @@ Message search keeps a word index in memory and finds matching conversations new
 
 Ordinary Chat folders keep rewind history; temporary chats do not. Saved restore copies remain subject to retention after a conversation is deleted (`rewind::safety_tests`, `engine::rewind::safety_tests`).
 
-Rewind saves file versions for restore and redo, checks files before reuse, and recovers unfinished work at startup. `rewind_cost` checks capture, sealing, restore and cleanup performance.
+Rewind saves file versions for restore and redo, checks files before reuse, and recovers unfinished work at startup. `rewind_cost` checks capture, sealing, restore and cleanup performance, and that opening resolves each saved path once (`opening_resolves_each_saved_path_once_however_many_points_name_it`); `engine/examples/rewind_open.rs` times each stage of the open on a copied data folder.
 Idle Codex conversations waiting on the same process tree share a timer sample and keep their own writer checks.
 On Windows the sample verifies process identity within the owned job, using the process IDs returned by the job itself.
 The shared Codex connection keeps masking conversation tokens after close and skips per-token work on ordinary lines.

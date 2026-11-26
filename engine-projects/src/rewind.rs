@@ -47,6 +47,14 @@ pub struct Work {
     pub full_cleanup_runs: u64,
     pub owned_files_deleted: u64,
     pub object_reads: u64,
+    /// The stages of `History::open`: reading points and journals, finishing an interrupted cleanup, inspecting
+    /// project cleanup (the full cleanup that follows is `cleanup_us`).
+    pub load_us: u64,
+    pub recover_us: u64,
+    pub inspect_us: u64,
+    /// Distinct paths of points and journals resolved while opening (each once, however many points name it).
+    pub path_checks: u64,
+    pub path_check_us: u64,
 }
 
 pub(super) fn micros(start: Instant) -> u64 {
@@ -373,39 +381,148 @@ fn allowed(root: &Path, path: &str) -> bool {
 }
 
 fn allowed_with(root: &Path, path: &str, var: &dyn Fn(&str) -> Option<String>) -> bool {
-    if !crate::changes::safe(path) || crate::permissions::secret(&root.join(path), true) {
-        return false;
+    PathCheck::new(var).allowed(root, path)
+}
+
+/// `allowed` for many paths at once. The credential locations are resolved once instead of once per path, and each
+/// distinct path is resolved once: opening the owner's history (123 points holding 178,007 paths, 17,578 of them
+/// distinct) ran this check for every path of every point and took about 25 s of every start (2026-11-25). The answer
+/// for a path is the one `allowed` gives at the moment it was first asked; keep one only for one pass, such as an open.
+pub(super) struct PathCheck {
+    credentials: Vec<(String, bool)>,
+    /// Answers by the exact root and path as written, so two spellings are never folded into one answer.
+    seen: std::collections::HashMap<std::ffi::OsString, std::collections::HashMap<String, bool>>,
+    resolved: u64,
+    spent: Duration,
+}
+
+impl PathCheck {
+    pub(super) fn new(var: &dyn Fn(&str) -> Option<String>) -> Self {
+        let credentials = crate::permissions::relocated_credentials(var).into_iter().map(|(p, file)| (normal(&p), file)).collect();
+        Self { credentials, seen: Default::default(), resolved: 0, spent: Duration::ZERO }
     }
-    if root.join(path).canonicalize().is_ok_and(|real| {
-        crate::permissions::secret(&real, true) || real.components().any(|p| p.as_os_str().to_string_lossy().eq_ignore_ascii_case(".git"))
-    }) {
-        return false;
+
+    pub(super) fn from_env() -> Self {
+        Self::new(&|key| std::env::var(key).ok())
     }
-    let normal = |p: &str| {
-        // Metadata resolution catches relocated directory aliases too, without reading a credential's contents.
-        let real = Path::new(p).canonicalize().unwrap_or_else(|_| PathBuf::from(p));
-        let p = real.to_string_lossy().replace('\\', "/").to_lowercase();
-        let p = if let Some(unc) = p.strip_prefix("//?/unc/") { format!("//{unc}") } else { p.strip_prefix("//?/").unwrap_or(&p).into() };
-        let mut parts = Vec::new();
-        for part in p.split('/') {
-            if part == "." {
-                continue;
-            }
-            if part == ".." {
-                if parts.last().is_some_and(|p: &&str| !p.ends_with(':') && !p.is_empty()) {
-                    parts.pop();
-                }
-            } else {
-                parts.push(part);
+
+    /// How many paths were resolved on disk.
+    pub(super) fn resolved(&self) -> u64 {
+        self.resolved
+    }
+
+    /// Time spent resolving, in microseconds.
+    pub(super) fn spent_us(&self) -> u64 {
+        self.spent.as_micros().min(u64::MAX as u128) as u64
+    }
+
+    fn known(&self, root: &Path, path: &str) -> Option<bool> {
+        self.seen.get(root.as_os_str()).and_then(|paths| paths.get(path)).copied()
+    }
+
+    fn remember(&mut self, root: &Path, path: &str, answer: bool) {
+        self.seen.entry(root.as_os_str().to_owned()).or_default().insert(path.to_owned(), answer);
+        self.resolved += 1;
+    }
+
+    pub(super) fn allowed(&mut self, root: &Path, path: &str) -> bool {
+        if let Some(known) = self.known(root, path) {
+            return known;
+        }
+        let began = Instant::now();
+        let answer = self.check(root, path);
+        self.spent += began.elapsed();
+        self.remember(root, path, answer);
+        answer
+    }
+
+    /// Resolves the paths not asked yet on up to `threads` threads, so a later `allowed` answers from memory. Each path
+    /// costs a few file-system calls; the owner's 17,578 took 0.7 s on one thread (2026-11-25).
+    pub(super) fn prefill<'a>(&mut self, paths: impl IntoIterator<Item = (&'a Path, &'a str)>, threads: usize) {
+        let mut asked = std::collections::HashSet::new();
+        let todo: Vec<_> =
+            paths.into_iter().filter(|(root, path)| asked.insert((root.as_os_str(), *path)) && self.known(root, path).is_none()).collect();
+        let began = Instant::now();
+        let this = &*self;
+        // A worker that panicked answers "not allowed" for its paths, which closes history rather than opening it.
+        let answers = on_threads(&todo, threads, |(root, path)| this.check(root, path), || false);
+        for ((root, path), answer) in todo.iter().zip(answers) {
+            self.remember(root, path, answer);
+        }
+        self.spent += began.elapsed();
+    }
+
+    fn check(&self, root: &Path, path: &str) -> bool {
+        let joined = root.join(path);
+        if !crate::changes::safe(path) || crate::permissions::secret(&joined, true) {
+            return false;
+        }
+        // One resolution serves both questions: where the path really is, and how it compares with the credentials.
+        let real = joined.canonicalize();
+        if real.as_ref().is_ok_and(|real| {
+            crate::permissions::secret(real, true)
+                || real.components().any(|p| p.as_os_str().to_string_lossy().eq_ignore_ascii_case(".git"))
+        }) {
+            return false;
+        }
+        let absolute = written(&real.unwrap_or(joined));
+        !self
+            .credentials
+            .iter()
+            .any(|(p, file)| absolute == *p || (!file && absolute.strip_prefix(p.as_str()).is_some_and(|tail| tail.starts_with('/'))))
+    }
+}
+
+/// Maps `items` in order on up to `threads` scoped threads. A chunk whose thread cannot start runs on this thread. In a
+/// build that unwinds, a chunk whose thread panicked answers `lost()` for each of its items, so every item keeps its own
+/// slot; the release build aborts on a panic, as it did before this ran on threads.
+pub(super) fn on_threads<T: Sync, R: Send>(items: &[T], threads: usize, work: impl Fn(&T) -> R + Sync, lost: impl Fn() -> R) -> Vec<R> {
+    if items.is_empty() {
+        return Vec::new();
+    }
+    let size = items.len().div_ceil(threads.max(1));
+    let work = &work;
+    std::thread::scope(|scope| {
+        let started: Vec<_> = items
+            .chunks(size)
+            .map(|chunk| (chunk, std::thread::Builder::new().spawn_scoped(scope, move || chunk.iter().map(work).collect::<Vec<_>>()).ok()))
+            .collect();
+        let mut out = Vec::with_capacity(items.len());
+        for (chunk, worker) in started {
+            match worker.map(|worker| worker.join()) {
+                Some(Ok(answers)) => out.extend(answers),
+                Some(Err(_)) => out.extend(chunk.iter().map(|_| lost())),
+                None => out.extend(chunk.iter().map(work)),
             }
         }
-        parts.join("/").trim_end_matches('/').to_string()
-    };
-    let absolute = normal(&root.join(path).to_string_lossy());
-    !crate::permissions::relocated_credentials(var).into_iter().any(|(p, file)| {
-        let p = normal(&p);
-        absolute == p || (!file && absolute.strip_prefix(&p).is_some_and(|tail| tail.starts_with('/')))
+        out
     })
+}
+
+/// A path resolved and written one way (forward slashes, lower case, no `.` or `..`) so two spellings compare equal.
+fn normal(p: &str) -> String {
+    // Metadata resolution catches relocated directory aliases too, without reading a credential's contents.
+    written(&Path::new(p).canonicalize().unwrap_or_else(|_| PathBuf::from(p)))
+}
+
+/// `normal` for a path already resolved.
+fn written(real: &Path) -> String {
+    let p = real.to_string_lossy().replace('\\', "/").to_lowercase();
+    let p = if let Some(unc) = p.strip_prefix("//?/unc/") { format!("//{unc}") } else { p.strip_prefix("//?/").unwrap_or(&p).into() };
+    let mut parts = Vec::new();
+    for part in p.split('/') {
+        if part == "." {
+            continue;
+        }
+        if part == ".." {
+            if parts.last().is_some_and(|p: &&str| !p.ends_with(':') && !p.is_empty()) {
+                parts.pop();
+            }
+        } else {
+            parts.push(part);
+        }
+    }
+    parts.join("/").trim_end_matches('/').to_string()
 }
 
 fn names(exec: &mut dyn Executor, root: &Path, git_dir: &Path, deadline: Instant, ignored: bool) -> Result<Vec<u8>, String> {
@@ -1807,6 +1924,29 @@ impl History {
 #[cfg(test)]
 mod validation_tests {
     use super::*;
+
+    #[test]
+    fn on_threads_keeps_every_answer_in_its_slot_when_a_worker_panics() {
+        let items: Vec<u32> = (0..10).collect();
+        // Three threads take chunks of four: 0..4, 4..8 and 8..10. The middle one panics on 5.
+        let answers = on_threads(&items, 3, |n| if *n == 5 { panic!("lost on purpose") } else { Some(*n) }, || None);
+        assert_eq!(answers, [Some(0), Some(1), Some(2), Some(3), None, None, None, None, Some(8), Some(9)]);
+        assert_eq!(on_threads(&items, 64, |n| n * 2, || 0), items.iter().map(|n| n * 2).collect::<Vec<_>>());
+        assert!(on_threads(&[] as &[u32], 4, |n| *n, || 0).is_empty());
+    }
+
+    #[test]
+    fn path_check_answers_each_exact_spelling_once_and_never_folds_two_into_one() {
+        let root = std::env::temp_dir();
+        let mut check = PathCheck::new(&|_| None);
+        for path in ["a/b.txt", "a/./b.txt", "a/b.txt", "a\\b.txt", "a/./b.txt"] {
+            check.allowed(&root, path);
+        }
+        assert_eq!(check.resolved(), 3, "three spellings, each resolved once");
+        check.prefill([(root.as_path(), "a/b.txt"), (root.as_path(), "c.txt"), (root.as_path(), "c.txt")], 2);
+        assert_eq!(check.resolved(), 4, "the ahead pass skips what is known and repeats");
+        assert!(!check.allowed(&root, ".git/config"), "a repository path is never allowed");
+    }
 
     #[test]
     fn rewind_choice_snapshot_roundtrip_recovers_a_pruned_later_choice_and_the_original_earlier_choice() {
