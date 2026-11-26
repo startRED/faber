@@ -56,6 +56,7 @@ import { forgetProject } from './projects.ts';
 import { createOpening, upsert, whole } from './opening.ts';
 import { Running } from './Running.tsx';
 import { openedDetails, showDetails } from './Details.tsx';
+import { openedMap, showMap } from './ProjectMap.tsx';
 import { agentWide, dropHelperTarget, helperTarget, openedAgent, showAgent, startMessage, toggleAgentWide } from './AgentChat.tsx';
 import { openedVisual, showVisual } from './VisualAnswer.tsx';
 import { openedSite, showSite, siteWide, sitesOf, toggleSiteWide } from './Site.tsx';
@@ -634,7 +635,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // What the column shows decides its usual width (docs/design/layout.md): a page, a diff, a visual answer or a file reads wide,
   // a quick question has a chat's width, and the lists keep the room beside the reading column.
   const paneKind = (): Kind =>
-    sideAgent() || sideDetails() ? 'list'
+    sideAgent() || sideDetails() || sideMap() ? 'list'
     : sideVisual() ? 'visual'
     : sideSite() ? 'browser'
     : sideAside() ? 'aside'
@@ -718,6 +719,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     showAside(undefined);
     showFile(undefined);
     showDetails(undefined);
+    showMap(undefined);
     setChangesOpen(undefined);
     setBackgroundOpen(false);
     if (!columnOpen()) return;
@@ -798,6 +800,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     return open && current()?.id === open.conversationId ? open : undefined;
   };
   const sideDetails = () => openedDetails() === current()?.id && current()?.area === 'project' ? current() : undefined;
+  // The project map (task 206): the rooms of the project on screen, beside its work.
+  const sideMap = () => openedMap() === current()?.id && current()?.area === 'project' ? current() : undefined;
   const sideChanges = () => changesOpen() && changesOpen() === current()?.id ? changesOpen() : undefined;
   const canReview = () => {
     const c = current();
@@ -834,13 +838,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     clearTimeout(glideTimer);
     glideTimer = setTimeout(() => setGlide(false), 450);
   }, { defer: true }));
-  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
-  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
-  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), showVisual(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
-  createEffect(on(openedVisual, (open) => open && !open.inline && (showAgent(undefined), showSite(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
-  createEffect(on(openedFile, (open) => open && (showAgent(undefined), showSite(undefined), showVisual(undefined), showAside(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
-  createEffect(on(openedDetails, (id) => id && (showAgent(undefined), showSite(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false)), { defer: true }));
-  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside() ?? (openedVisual()?.inline ? undefined : openedVisual()) ?? sideFile() ?? (openedDetails() ? { conversationId: openedDetails() } : undefined) ?? (changesOpen() ? { conversationId: changesOpen() } : undefined), (open) => {
+  createEffect(on(openedAgent, (open) => open && (showSite(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined), showMap(undefined)), { defer: true }));
+  createEffect(on(openedSite, (open) => open && (showAgent(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined), showMap(undefined)), { defer: true }));
+  createEffect(on(openedAside, (open) => open && (showAgent(undefined), showSite(undefined), showVisual(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined), showMap(undefined)), { defer: true }));
+  createEffect(on(openedVisual, (open) => open && !open.inline && (showAgent(undefined), showSite(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined), showMap(undefined)), { defer: true }));
+  createEffect(on(openedFile, (open) => open && (showAgent(undefined), showSite(undefined), showVisual(undefined), showAside(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined), showMap(undefined)), { defer: true }));
+  createEffect(on(openedDetails, (id) => id && (showAgent(undefined), showSite(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showMap(undefined)), { defer: true }));
+  createEffect(on(openedMap, (id) => id && (showAgent(undefined), showSite(undefined), showVisual(undefined), showAside(undefined), showFile(undefined), setChangesOpen(undefined), setBackgroundOpen(false), showDetails(undefined)), { defer: true }));
+  createEffect(on(() => openedAgent() ?? openedSite() ?? openedAside() ?? (openedVisual()?.inline ? undefined : openedVisual()) ?? sideFile() ?? (openedDetails() ? { conversationId: openedDetails() } : undefined) ?? (openedMap() ? { conversationId: openedMap() } : undefined) ?? (changesOpen() ? { conversationId: changesOpen() } : undefined), (open) => {
     if (!open) return;
     // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
     if (current()?.id !== open.conversationId) return;
@@ -861,6 +866,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (changesOpen() !== id) setChangesOpen(undefined);
     showFile(undefined);
     if (openedDetails() !== id) showDetails(undefined);
+    if (openedMap() !== id) showMap(undefined);
   }, { defer: true }));
   // The column view of the conversation on screen is written as it opens and goes when it closes.
   createEffect(on([changesOpen, openedDetails], ([changed, details]) => {
@@ -1779,6 +1785,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     }
     return sideAside() && colShown() ? closeColumn() : showAside({ conversationId: current()?.id });
   };
+  const toggleMap = () => {
+    if (columnExit) {
+      const same = !!sideMap();
+      openColumn(true);
+      if (same) return;
+    }
+    return sideMap() && colShown() ? closeColumn() : showMap(current()?.id);
+  };
   const toggleChanges = () => {
     if (columnExit) {
       const same = !!sideChanges();
@@ -1792,6 +1806,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     showAside(undefined);
     showFile(undefined);
     showDetails(undefined);
+    showMap(undefined);
     setBackgroundOpen(false);
     setChangesOpen(current()?.id);
     // The same conversation's changes again: the signal does not move, so the column is opened here.
@@ -1853,6 +1868,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         showAside(undefined);
         showFile(undefined);
         showDetails(undefined);
+        showMap(undefined);
         setChangesOpen(undefined);
         setBackgroundOpen(true);
         if (!byUser()) {
@@ -1882,6 +1898,16 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       details={sideDetails() ? { conversationId: sideDetails()!.id, messages: sideDetails()!.messages, copy: current()?.id === place().id ? sideDetails()!.copy : undefined,
         background: state().background?.items ?? [], changes: { id: sideDetails()!.id, files: changeList()?.files ?? [], loading: changes.loading,
           incomplete: changeList()?.incomplete, loadingMore: loadingMoreChanges(), onMore: () => void moreChanges() } } : undefined}
+      map={sideMap() ? {
+        conversationId: sideMap()!.id, messages: sideMap()!.messages, folders: [sideMap()!.copy?.path, sideMap()!.workingFolder],
+        // Back to the answer that last changed a room: the thread opens at it, the map stays beside it.
+        onGoBack: (index) => void go(place(), index),
+        onAsk: (text) => {
+          // The box sits behind a modal column: the column makes way first, so the box can take the question.
+          if (trapped()) closeColumn();
+          queueMicrotask(() => fill?.(text));
+        },
+      } : undefined}
       agent={sideAgent()}
       site={sideSite()}
       visual={sideVisual()}
@@ -1901,6 +1927,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         showAside(undefined);
         showFile(undefined);
         showDetails(undefined);
+        showMap(undefined);
         setChangesOpen(undefined);
         setBackgroundOpen(false);
         // The back button is gone with the subagent or the page: focus stays in the column, on the list's first control.
@@ -2196,6 +2223,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                       >
                         <Icon name="chat" />
                       </button>
+                      <Show when={current()?.area === 'project'}>
+                        <button class="iconbtn pane-map" aria-pressed={!!sideMap() && colShown()} aria-label={t('map.title')} title={t('map.title')} onClick={toggleMap}>
+                          <Icon name="layers" />
+                        </button>
+                      </Show>
                       <Show when={hasChanges()}>
                         <button class="iconbtn pane-changes" aria-pressed={!!sideChanges() && colShown()} aria-label={t('changes.title')} title={`${t('changes.title')} (${keysOf('changes')})`} onClick={toggleChanges}>
                           <Icon name="changes" />

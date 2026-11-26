@@ -3216,6 +3216,29 @@
     "about": "The pages each project answer of a conversation pictured before and after it ran, by message id: each page's number and its two picture names, which `site_picture` shows."
   },
   {
+    "name": "project_rooms",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "A project conversation's rooms (its screens and major parts) with their recent changes, newest picture and the room the newest answer changed: one scan of the folder, read once per open of the map and per answer end."
+  },
+  {
     "name": "open_terminal",
     "args": [
       [

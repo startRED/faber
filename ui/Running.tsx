@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, Show, type Accessor, type ComponentProps
 import { api, errorText, type AgentAsk, type BackgroundCommand, type Conversation, type FileChange, type Project, type RunningItem, type Summary } from './api.ts';
 import { AgentChat } from './AgentChat.tsx';
 import { DetailsPane } from './Details.tsx';
+import { ProjectMapPane } from './ProjectMap.tsx';
 import { Changes } from './Changes.tsx';
 import { FilePane } from './FileView.tsx';
 import { Commands } from './Commands.tsx';
@@ -58,6 +59,8 @@ export function Running(props: {
   /** The conversation's changes, opened from the topbar. */
   changes?: { id: string; files: FileChange[]; loading: boolean; incomplete?: boolean; loadingMore?: boolean; onMore?: () => void; onReview?: (security: boolean) => void };
   details?: Omit<ComponentProps<typeof DetailsPane>, 'onBack' | 'onClose'>;
+  /** The project map of the conversation on screen (task 206). */
+  map?: Omit<ComponentProps<typeof ProjectMapPane>, 'onBack' | 'onClose'>;
   background?: BackgroundCommand[];
   conversations?: Summary[];
   commands?: boolean;
@@ -139,7 +142,7 @@ export function Running(props: {
   };
   return (
     <aside id="running" class="runcol" classList={{ wide: props.wide }} data-surface="running" aria-labelledby="running-title" role={props.modal ? 'dialog' : undefined} aria-modal={props.modal ? 'true' : undefined} ref={(el) => { props.ref(el); animateList(el); }}>
-      <Show when={props.details} fallback={<>
+      <Show when={props.map} fallback={<Show when={props.details} fallback={<>
       <Show
         when={props.agent}
         fallback={
@@ -321,7 +324,9 @@ export function Running(props: {
       >
         {(agent) => <AgentChat step={agent().step} streaming={agent().streaming} helpable={agent().helpable} onBack={() => props.onBack?.()} onTell={(text) => props.onTell?.(text)} onClose={props.onClose} wide={props.wide} onWide={props.onWide} />}
       </Show>
-      </>}>{(details) => <DetailsPane {...details()} onBack={() => props.onBack?.()} onClose={props.onClose} />}</Show>
+      </>}>{(details) => <DetailsPane {...details()} onBack={() => props.onBack?.()} onClose={props.onClose} />}</Show>}>
+        {(map) => <ProjectMapPane {...map()} onBack={() => props.onBack?.()} onClose={props.onClose} />}
+      </Show>
       <Show when={props.resize}>{(r) => <Grip edge="run" label={t('run.resize')} value={r().value} limits={r().limits} fallback={r().fallback} onChange={r().onChange} />}</Show>
     </aside>
   );

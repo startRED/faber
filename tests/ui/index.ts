@@ -49,6 +49,7 @@ import './optimistic.check.ts';
 import './visual-answers.check.ts';
 import './reply-media.check.ts';
 import './before-after.check.ts';
+import './project-map.check.ts';
 import './reply-web-media.check.ts';
 import './visual-pieces.check.ts';
 import './commands.check.ts';

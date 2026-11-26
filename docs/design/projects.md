@@ -39,6 +39,12 @@ mission board and the local build card left the bundle with their 30 s poll (R17
   project conversation in the folder itself, never a separate copy, whose next message resumes it with its own CLI, even
   with Auto in the picker; opening it again opens the same conversation, archived or not. Its earlier turns stay in the CLI: the conversation shows what is said from then on.
   Claude Code has no list to ask, so its sessions come from its history files of that folder only (parity F5).
+- In a project conversation, the topbar's map button opens the project map in the right column (`ui/ProjectMap.tsx`,
+  task 206): a list of rooms, never a graph. Up to eight screens (files in `pages`, `routes`, `screens` or `views`, or
+  `page` files) then the heaviest parts, twelve at most, from the map's scan (`engine/src/engine/rooms.rs`). The room the
+  newest answer changed is lit, in colour and words; while an answer works, the rooms its edits touch. An open room shows
+  its newest before and after picture, up to five recently changed files (the last 20 answers' saved changes), "Go back to
+  that answer" and "Ask about this part" (fills the composer). One read per open and per answer end.
 
 When native Git is missing, one quiet card above the composer explains that each conversation works in the project
 folder (`reason.git_missing`). Its single ghost button, Download Git, opens the official download page in the system

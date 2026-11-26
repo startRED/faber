@@ -19,6 +19,23 @@ export interface AnswerPage {
   after: string | null;
 }
 
+/** One room of a project (task 206): a screen or a major part, read from the project map (`engine/src/engine/rooms.rs`). */
+export interface Room {
+  /** From its file or folder; empty for the home screen. */
+  name: string;
+  kind: 'screen' | 'part';
+  /** The file or folder it covers, relative to the project. */
+  at: string;
+  /** Files in it recent answers changed, newest first. */
+  recent: string[];
+  /** The newest answer that changed it, and that answer's place in the conversation. */
+  changedBy?: { message: string; answer: string; index: number };
+  /** The newest before and after picture of an answer that changed it. */
+  picture?: { answer: string; page: AnswerPage };
+  /** The newest answer changed it. */
+  touched: boolean;
+}
+
 export interface SiteTabs {
   tabs: SiteTab[];
   front?: string;
@@ -1280,6 +1297,8 @@ export const api = {
   /** Each project answer of a conversation that pictured its pages before and after it ran, by message id, in one read;
    * `sitePicture` shows each picture by its name. */
   answerPictures: (id: string) => invoke<Record<string, AnswerPage[]>>('answer_pictures', { id }),
+  /** A project conversation's rooms, read once per open of the map and once per answer end. */
+  projectRooms: (id: string) => invoke<Room[]>('project_rooms', { id }),
   cookieProfiles: () => invoke<CookieProfile[]>('cookie_profiles'),
   cookieSites: (profile: string) => invoke<{ ticket: string; sites: CookieSite[] }>('cookie_sites', { profile }),
   cookieImport: (id: string, ticket: string, sites: string[]) => invoke<number>('cookie_import', { id, ticket, sites }),

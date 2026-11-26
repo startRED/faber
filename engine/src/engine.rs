@@ -81,6 +81,8 @@ mod parked;
 mod pick_up;
 mod pictures;
 pub use pictures::AnswerPage;
+mod rooms;
+pub use rooms::{ChangedBy, Room, RoomPicture};
 mod plan;
 mod pr_watch;
 mod quiet_child;

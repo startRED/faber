@@ -962,6 +962,12 @@ table! {
         let engine = h.engine.clone();
         off("error.conversationGone", move || engine.answer_pictures(&id)).await
     }
+    /// A project conversation's rooms (its screens and major parts) with their recent changes, newest picture and the room the
+    /// newest answer changed: one scan of the folder, read once per open of the map and per answer end.
+    Read Free fn project_rooms(h, id: String) -> Vec<faber_engine::engine::Room> {
+        let engine = h.engine.clone();
+        off("error.conversationGone", move || engine.project_rooms(&id)).await
+    }
     Write Person fn open_terminal(h, id: String) -> bool {
         let Some(cmd) = h.engine.terminal(&id) else { return Ok(false) };
         terminal::open(&cmd).map_err(|_| "error.terminal.open")?;

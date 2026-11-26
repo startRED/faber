@@ -763,6 +763,26 @@ async fn an_answers_before_and_after_pictures_are_read_by_name_and_shown_by_site
     }
 }
 
+#[tokio::test]
+async fn project_rooms_lists_a_project_folder_and_nothing_for_a_chat() {
+    let (host, dir) = host().await;
+    let folder = dir.path().join("app");
+    std::fs::create_dir_all(folder.join("src/pages")).unwrap();
+    std::fs::write(folder.join("src/pages/Login.tsx"), "export function Login() {}\n").unwrap();
+    let project = host.engine.add_project(&folder.to_string_lossy()).unwrap();
+    let conv: faber_engine::model::Conversation = serde_json::from_value(json!({
+        "id": "p1", "title": "p1", "area": "project", "projectId": project.id, "createdAt": 1, "updatedAt": 2, "messages": []
+    }))
+    .unwrap();
+    faber_engine::store::Store::new(&host.data_dir).save(&conv);
+    let rooms = host.dispatch("project_rooms", json!({ "id": "p1" })).await.unwrap();
+    assert_eq!(rooms, json!([{"name": "Login", "kind": "screen", "at": "src/pages/Login.tsx", "recent": [], "touched": false}]));
+    seed_conversation(&host, "c1", None, None);
+    for id in ["c1", "gone", "../p1"] {
+        assert_eq!(host.dispatch("project_rooms", json!({ "id": id })).await.unwrap(), json!([]), "{id}");
+    }
+}
+
 #[cfg(not(faber_telemetry))]
 #[test]
 fn sharing_commands_are_absent_without_an_endpoint() {

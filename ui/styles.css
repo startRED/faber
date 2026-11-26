@@ -998,6 +998,22 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .before-after-shot img { object-position: top; }
 .before-after-shot figcaption { color: var(--ink-3); font-size: var(--fs-xs); }
 .thumb-more:hover { background: var(--s3); color: var(--ink); }
+/* The project map (ProjectMap.tsx): a short list of rooms in the column; the room the answer changes is lit by colour and a
+   label, never by motion alone. */
+.map-rooms { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.map-room { min-width: 0; border-radius: var(--r-sm); border: 1px solid transparent; transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
+.map-room[data-lit] { background: var(--accent-soft); border-color: var(--accent); }
+.map-room-head { width: 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 8px 10px; border: 0; border-radius: var(--r-sm); background: none; color: var(--ink); font: inherit; text-align: left; cursor: default; }
+.map-room-head:hover { background: var(--s3); }
+.map-room-name { min-width: 0; font-weight: 580; overflow-wrap: anywhere; }
+.map-room-kind { color: var(--ink-3); font-size: var(--fs-xs); }
+.map-room-lit { margin-left: auto; color: var(--accent-text); font-size: var(--fs-xs); }
+.map-room-body { display: grid; gap: 10px; padding: 2px 10px 10px; }
+.map-room-at, .map-room-recent ul { margin: 0; color: var(--ink-3); font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.map-room-recent { display: grid; gap: 4px; }
+.map-room-recent ul { padding: 0; list-style: none; display: grid; gap: 2px; color: var(--ink-2); }
+.map-room-label { color: var(--ink-3); font-size: var(--fs-xs); }
+.map-room-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .composer .attach-row { padding: 12px 14px 4px; }
 .attach-all { margin-left: 4px; }
 /* Who a message about a helper goes to (task 130): one quiet line above the empty field, never words in it. */
