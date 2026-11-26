@@ -306,7 +306,7 @@ pub fn inventory(data: &Path, home: Option<&Path>, project: Option<&Path>) -> Ve
     Vendor::RUNNABLE
         .into_iter()
         .map(|vendor| {
-            let mut list = List { vendor, rows: Vec::new(), issues: Vec::new() };
+            let mut list = native_inventory(vendor, home, project);
             for item in crate::tools::catalog().iter().filter(|item| installed.contains_key(&item.id)) {
                 list.rows.push(Row {
                     name: item.id.clone(),
@@ -325,44 +325,49 @@ pub fn inventory(data: &Path, home: Option<&Path>, project: Option<&Path>) -> Ve
                     status: statuses.get(&item.id).cloned(),
                 });
             }
-            let roots: &[&str] = match vendor {
-                Vendor::Claude => &[".claude/skills"],
-                Vendor::Codex => &[".agents/skills", ".codex/skills"],
-                Vendor::Gemini => &[],
-            };
-            if let Some(home) = home {
-                for root in roots {
-                    skills(&mut list, home, root, "user");
-                }
-                if vendor == Vendor::Claude {
-                    plugins(&mut list, home, project);
-                }
-            } else {
-                list.issue("user", "skill", "unavailable");
-                list.issue("user", "plugin", "unavailable");
-            }
-            if let Some(project) = project {
-                if home.and_then(|h| h.canonicalize().ok()) == project.canonicalize().ok() || crate::permissions::forbidden_folder(project)
-                {
-                    list.issue("project", "skill", "unreadable");
-                } else {
-                    for root in roots.iter().filter(|root| **root != ".codex/skills") {
-                        skills(&mut list, project, root, "project");
-                    }
-                }
-            }
-            // Overrides, ancestor roots and transient --plugin-dir arguments need a CLI report, not a broad setup read.
-            list.issue("user", "skill", "unsupported");
-            if project.is_some() {
-                list.issue("project", "skill", "unsupported");
-            }
-            list.issue("user", "plugin", "unsupported");
-            if vendor == Vendor::Codex && project.is_some() {
-                list.issue("project", "plugin", "unsupported");
-            }
             list.rows.sort_by(|a, b| (a.source, a.kind, &a.name).cmp(&(b.source, b.kind, &b.name)));
             list.rows.dedup_by(|a, b| a.source == b.source && a.kind == b.kind && a.name == b.name && a.location == b.location);
             list
         })
         .collect()
+}
+
+/// Only the active CLI's external installations. This read does not prepare or hash the catalog store.
+pub fn native_inventory(vendor: Vendor, home: Option<&Path>, project: Option<&Path>) -> List {
+    let mut list = List { vendor, rows: Vec::new(), issues: Vec::new() };
+    let roots: &[&str] = match vendor {
+        Vendor::Claude => &[".claude/skills"],
+        Vendor::Codex => &[".agents/skills", ".codex/skills"],
+        Vendor::Gemini => &[],
+    };
+    if let Some(home) = home {
+        for root in roots {
+            skills(&mut list, home, root, "user");
+        }
+        if vendor == Vendor::Claude {
+            plugins(&mut list, home, project);
+        }
+    } else {
+        list.issue("user", "skill", "unavailable");
+        list.issue("user", "plugin", "unavailable");
+    }
+    if let Some(project) = project {
+        if home.and_then(|h| h.canonicalize().ok()) == project.canonicalize().ok() || crate::permissions::forbidden_folder(project) {
+            list.issue("project", "skill", "unreadable");
+        } else {
+            for root in roots.iter().filter(|root| **root != ".codex/skills") {
+                skills(&mut list, project, root, "project");
+            }
+        }
+    }
+    // Overrides, ancestor roots and transient --plugin-dir arguments need a CLI report, not a broad setup read.
+    list.issue("user", "skill", "unsupported");
+    if project.is_some() {
+        list.issue("project", "skill", "unsupported");
+    }
+    list.issue("user", "plugin", "unsupported");
+    if vendor == Vendor::Codex && project.is_some() {
+        list.issue("project", "plugin", "unsupported");
+    }
+    list
 }

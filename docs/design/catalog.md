@@ -170,10 +170,13 @@ existing checks. Completed receipts add no per-session hashing or writes. No bac
 
 ## Agent requests
 
-Site, game, video and voice searches lead with kit items, install status and purpose, then regular matches.
-
-In the asking conversation's live Full access mode, checked installs skip the card (R584). Digests still apply and
-`self-changes.jsonl` logs `conv` and `full_access`. Other installs ask (R33).
+Agent search shows up to eight hits per shelf: Faber Kit, mine, then open world by installs. Site, game,
+video and voice put their kit first. Mine: the ledger, the CLI's skills and plugins, known servers.
+Live search sends at most eight plain words (no paths, emails, URLs, domains, file names, IDs or numbers). The inventory and
+both directories run in parallel, each with a 4 s deadline and a 512 KiB body cap; a failed one leaves the other shelves.
+Up to 16 queries are cached: full answers 10 min, partial ones 1 min. Look-alikes of checked tools are dropped.
+Neither Faber nor the AI installs a directory hit yet (the AI is told not to); R33 will ask once when it can. Checked installs
+in live Full access skip the card (R584), verify digests and log `conv` and `full_access`.
 
 Removal has separate consent. Its card says Catalog Undo lasts until restart and current tools stay available.
 
@@ -182,11 +185,8 @@ an earlier backup are replaced; the current files become the one retained backup
 the tool's on/off state, and running conversations keep their leased kits. An incomplete journal is recovered before
 new catalog preparation, while unknown or changed recovery files remain preserved and block new delivery.
 
-Replacement hashes stream through a 64 KiB buffer, with the existing 64 MiB tool-file cap, and run during explicit
-capture/publication and the preparation worker. Ready-cache reads gain no filesystem scan. No new timer, process or
-persistent screen is added. Runtime memory and processor costs still require the queued commit's measurements.
+Replacement streams hashes in 64 KiB chunks under the 64 MiB file cap. Catalog search starts no process; the cache keeps only
+result IDs, sources and ranks.
 
-Pinned runtime trees add three server cards through the existing search, paging, detail, licence and install controls.
-Their hand-written descriptions disclose Chrome or Node.js 24 requirements; rejection reasons use the ordinary retry
-notice in all five languages. Context7 and step-by-step thinking follow the same Full access boundary in Chat and
-Projects; browser servers remain Projects-only. No layout, focus, motion, empty-state or 720 px rule changes.
+Pinned server descriptions disclose Chrome or Node.js 24 requirements. Rejections use the localized retry notice.
+Context7 and step-by-step thinking share the Full access boundary in Chat and Projects. Browser servers are Projects-only.

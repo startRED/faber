@@ -10,8 +10,11 @@ Why: plan item D2 and the owner's answer 5 (R33 stays: an unchecked item asks on
 Build:
 
 - One search tool for the AI with one-line results in three shelves: Faber Kit (checked), open world, mine.
-- Unchecked results are marked and install only after one yes.
+- Unchecked results are marked for discovery. Faber's install path for these results stays blocked pending the owner's decision on source pins.
 
 Leave out: installing unchecked items without asking.
 
-Done: tests with recorded responses for ranking and marking; a network failure falls back to the checked list. Security (third-party code): two reviews from different vendors (R146).
+Done: tests with recorded responses for ranking, marking, privacy and directory failures. A failed directory leaves the local shelves and any results from the other directory. Security (third-party code): two reviews from different vendors (R146).
+
+State: the search half shipped on 2026-11-26. The install half waits for the owner's choice of how to pin an
+open-world item (directories give no version or digest).

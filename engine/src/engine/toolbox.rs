@@ -1,6 +1,6 @@
 //! The agent's toolbox (`crate::toolbox`): `quota` answers from the readings the engine already holds, `catalog` from the shipped
-//! catalog and the store's ledger. Searching starts no request, so both are offered to a project's own agent in any permission
-//! mode. `catalog` with `install` changes Faber itself (guardrail 3): it checks consent, then installs through the
+//! catalog, the store's ledger and public directories when live web search is enabled. `catalog` with `install` changes Faber
+//! itself (guardrail 3): it checks consent, then installs through the
 //! one installer the Catalog screen uses (`tools::install_for_agent`, whose last check of what Faber holds runs under the store lock), and only a tool the store holds no copy of.
 //! `memory_search` is answered in `memory_search.rs`. `offer_bigger` shows one question card per conversation and answers from the
 //! person's choice (`answer.rs`).
@@ -128,26 +128,67 @@ impl Core {
         if let Some(remove) = remove {
             return self.install_call(conv, sid, call, remove, None, true);
         }
-        // The ledger is a small file and a few checks of the store's folders: read away from the lock.
+        let query = input["query"].as_str().unwrap_or_default().to_string();
+        let live = &self.live[conv];
+        let (vendor, cwd) = (live.vendor, live.cwd.clone());
+        let turn = live.turn.clone();
+        let project = self.convs.get(conv).filter(|c| c.area == Area::Project).and_then(|c| c.project_id.as_ref());
+        let mut native: Vec<_> = project
+            .and_then(|id| self.mcp_servers.get(&(id.clone(), vendor)))
+            .filter(|reading| reading.cwd == cwd)
+            .into_iter()
+            .flat_map(|reading| reading.servers.iter().filter(|server| !reading.added.contains(&server.name)))
+            .map(|server| (server.name.clone(), "server"))
+            .collect();
+        let in_project = project.is_some();
+        let web_revision = self.web_revision;
         let store = self.catalog_store();
+        let runtime = self.opts.runtime.clone();
         let (me, conv) = (self.me.clone(), conv.to_string());
-        let read = self.opts.runtime.spawn_blocking(move || {
-            let installed = store.installed();
-            let entries: Vec<_> = crate::tools::catalog()
-                .iter()
-                .map(|item| toolbox::Entry {
-                    item,
-                    plugin: store.plugin_definition(&item.id).is_some(),
-                    installed: installed.contains_key(&item.id),
-                    on: installed.contains_key(&item.id) && store.enabled(&item.id),
-                })
-                .collect();
-            toolbox::catalog(&entries, &input)
-        });
         self.opts.runtime.spawn(async move {
-            let (ok, text) = read.await.unwrap_or_else(|_| (false, "Faber could not read the catalog.".into()));
+            let online = {
+                let Some(core) = me.upgrade() else { return };
+                let core = core.lock().unwrap_or_else(|e| e.into_inner());
+                let Some(live) = core.live.get(&conv).filter(|live| live.sid == sid && live.turn == turn) else { return };
+                in_project
+                    && live.permissions != Permissions::Isolated
+                    && core.web_revision == web_revision
+                    && crate::visual::network(core.store.settings().web_search)
+            };
+            let open = async { if online { crate::open_search::search(&query).await } else { Ok(Vec::new()) } };
+            let inventory = async {
+                if !in_project {
+                    return Ok(Vec::new());
+                }
+                crate::tool_inventory::read_with(true, move || {
+                    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from);
+                    Ok(vec![crate::tool_inventory::native_inventory(vendor, home.as_deref(), Some(&cwd))])
+                })
+                .await
+            };
+            let (open, inventory) = tokio::join!(open, inventory);
+            if let Some(list) = inventory.unwrap_or_default().into_iter().find(|list| list.vendor == vendor) {
+                native.extend(list.rows.into_iter().map(|row| (row.name, row.kind)));
+            }
+            let read = runtime.spawn_blocking(move || {
+                let installed = store.installed();
+                let entries: Vec<_> = crate::tools::catalog()
+                    .iter()
+                    .map(|item| toolbox::Entry {
+                        item,
+                        plugin: store.plugin_definition(&item.id).is_some(),
+                        installed: installed.contains_key(&item.id),
+                        on: installed.contains_key(&item.id) && store.enabled(&item.id),
+                    })
+                    .collect();
+                toolbox::catalog(&entries, &native, &query, open)
+            });
+            let (ok, text) = read.await.map_or_else(|_| (false, "Faber could not read the catalog.".into()), |text| (true, text));
             let Some(core) = me.upgrade() else { return };
-            core.lock().unwrap_or_else(|e| e.into_inner()).answer_toolbox(&conv, sid, &call, ok, text);
+            let core = core.lock().unwrap_or_else(|e| e.into_inner());
+            if core.live.get(&conv).is_some_and(|live| live.turn == turn) {
+                core.answer_toolbox(&conv, sid, &call, ok, text);
+            }
         });
     }
 

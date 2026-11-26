@@ -115,6 +115,7 @@ native.rs
 native_fork.rs
 npm.rs
 nudge.rs
+open_search.rs
 out.rs
 output.rs
 overload.rs

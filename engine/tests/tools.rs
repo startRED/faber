@@ -50,12 +50,13 @@ fn goal_catalog_search_starts_with_the_kit_and_stays_within_budget() {
         let entries: Vec<_> =
             items.iter().map(|item| Entry { item, plugin: false, installed: item.id == kit.items[0], on: false }).collect();
         for query in [query.to_string(), format!("{goal} {wide_query}")] {
-            let (ok, answer) = catalog(&entries, &serde_json::json!({ "query": query }));
-            assert!(ok);
+            let answer = catalog(&entries, &[], &query, Ok(Vec::new()));
+            let (answer, _) = answer.split_once("\nmine\n").unwrap();
             println!("{goal} catalog answer: {} bytes, {} lines", answer.len(), answer.lines().count());
             assert!(answer.len() <= CONTEXT_BUDGET && answer.len() <= DISCOVERY_BUDGET);
             assert!(answer.lines().count() <= 21, "at most twenty lines plus the more-results count");
             let mut lines = answer.lines();
+            assert_eq!(lines.next(), Some("Faber Kit"));
             assert_eq!(lines.next(), Some(kit.purpose.as_str()), "{goal} kit must come first");
             for (index, id) in kit.items.iter().enumerate() {
                 let line = lines.next().unwrap();
@@ -74,12 +75,10 @@ fn catalog_search_without_a_goal_keeps_ordinary_results() {
 
     let entries: Vec<_> =
         faber_engine::tools::catalog().iter().map(|item| Entry { item, plugin: false, installed: false, on: false }).collect();
-    let (ok, answer) = catalog(&entries, &serde_json::json!({ "query": "zzzz qqqq" }));
-    assert!(ok);
-    assert_eq!(answer, "Nothing in the catalog matches. Try other words for the job, or call it with no words for the recommended tools.");
-    let (ok, answer) = catalog(&entries, &serde_json::json!({ "query": "debugging a bug" }));
-    assert!(ok);
-    assert!(answer.starts_with("systematic-debugging — Systematic debugging (skill): Finds the cause of a bug"));
+    let answer = catalog(&entries, &[], "zzzz qqqq", Ok(Vec::new()));
+    assert!(answer.contains("Nothing in the catalog matches"));
+    let answer = catalog(&entries, &[], "debugging a bug", Ok(Vec::new()));
+    assert!(answer.starts_with("Faber Kit\nsystematic-debugging — Systematic debugging (skill): Finds the cause of a bug"));
 }
 
 /// The digest covers the supplied bytes, including a refused payload: the final digest cannot hide a missing guard.

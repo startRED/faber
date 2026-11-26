@@ -13,6 +13,7 @@ pub mod guide;
 pub mod mcp_servers;
 pub mod memory_search;
 pub mod mention;
+pub mod open_search;
 pub mod project;
 pub mod rewind;
 pub mod tool_inventory;

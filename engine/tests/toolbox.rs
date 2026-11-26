@@ -1,5 +1,5 @@
 //! The agent's toolbox (`quota`, `catalog`, `memory_search`, `offer_bigger`): offered to a project's own agent in both CLIs and never in Chat, and
-//! answered from what Faber holds, with no request, process or download.
+//! exercised with simulated CLI pipes and no live directory requests.
 use crate::support::{self, Pipe, next_pipe, pipes};
 use faber_engine::cli::Cli;
 use faber_engine::events::EngineEvent;
@@ -112,7 +112,12 @@ async fn claude_code_reads_the_limits_and_searches_the_catalog_in_any_permission
         let (dir, folder) = (support::DataFolder::new(), support::work_folder());
         let (spawn, made) = pipes();
         let app = engine(&dir, Vendor::Claude, spawn);
-        app.save_settings(Settings { permissions: Some(mode), ..Settings::default() }).unwrap();
+        app.save_settings(Settings {
+            permissions: Some(mode),
+            web_search: Some(faber_engine::model::WebSearch::Off),
+            ..Settings::default()
+        })
+        .unwrap();
         let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
         let id = app.send(request(Vendor::Claude, Area::Project, Some(project))).unwrap();
         let mut pipe = next_pipe(&made).await;
@@ -148,7 +153,8 @@ async fn claude_code_reads_the_limits_and_searches_the_catalog_in_any_permission
 
         let (found, error) = claude_call(&mut pipe, "catalog", "catalog", json!({ "query": "debugging a bug" })).await;
         assert!(!error, "{found}");
-        let first = found.lines().next().unwrap();
+        assert_eq!(found.lines().next(), Some("Faber Kit"));
+        let first = found.lines().nth(1).unwrap();
         assert!(
             first.starts_with("systematic-debugging — Systematic debugging (skill): Finds the cause of a bug")
                 && first.contains("Licence: MIT.")
@@ -156,7 +162,7 @@ async fn claude_code_reads_the_limits_and_searches_the_catalog_in_any_permission
                 && first.ends_with("not installed."),
             "{first}"
         );
-        assert!(found.lines().count() <= 21, "at most 20 results");
+        assert!(found.lines().count() <= 12, "eight checked results plus headings and count");
 
         let reply = app.open(&id).unwrap().messages.last().cloned().unwrap();
         let rows: Vec<_> = reply.tools.unwrap().iter().map(|t| t.name.clone()).collect();
@@ -332,6 +338,7 @@ async fn codex_reads_the_limits_and_searches_the_catalog_through_its_dynamic_too
     let (dir, folder) = (support::DataFolder::new(), support::work_folder());
     let (spawn, made) = pipes();
     let app = engine(&dir, Vendor::Codex, spawn);
+    app.save_settings(Settings { web_search: Some(faber_engine::model::WebSearch::Off), ..Settings::default() }).unwrap();
     let project = app.add_project(&folder.path().to_string_lossy()).unwrap().id;
     let id = app.send(request(Vendor::Codex, Area::Project, Some(project))).unwrap();
     let mut pipe = next_pipe(&made).await;
@@ -348,7 +355,7 @@ async fn codex_reads_the_limits_and_searches_the_catalog_through_its_dynamic_too
     assert!(quota.contains("Codex (subscription") && quota.contains("weekly: 30% used") && quota.contains("renews in"), "{quota}");
     let (found, failed) = codex_call(&mut pipe, 901, "catalog", json!({ "query": "debugging a bug" })).await;
     assert!(!failed, "{found}");
-    assert!(found.starts_with("systematic-debugging — Systematic debugging (skill)") && found.lines().count() <= 21, "{found}");
+    assert!(found.starts_with("Faber Kit\nsystematic-debugging — Systematic debugging (skill)") && found.lines().count() <= 12, "{found}");
 
     let reply = app.open(&id).unwrap().messages.last().cloned().unwrap();
     assert!(reply.tools.unwrap().iter().any(|t| t.name == "Catalog"), "the step reads as Faber's own");
@@ -971,7 +978,8 @@ async fn full_trust_in_settings_installs_without_a_card_and_plan_refuses_even_th
 
 #[tokio::test]
 async fn an_install_that_needs_no_answer_from_the_person_gets_none() {
-    let mut agent = claude_project(Permissions::Ask).await;
+    let mut agent =
+        claude_project_with_web(Permissions::Ask, Serve::new(vec![], false), vec![], Some(faber_engine::model::WebSearch::Off)).await;
     agent.call("unknown", "toolu_u", json!({ "install": "no-such-tool" })).await;
     let (text, error) = agent.reply("unknown").await;
     assert!(error && text.contains("No tool with that id"), "{text}");
