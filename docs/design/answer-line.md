@@ -100,3 +100,16 @@ header and its plan are in [conversation.md](conversation.md); the work log abov
   so and stays open instead of claiming that it stopped.
   If a queued message had already been handed over and its receipt is missing, it stays in the queue for the person
   to check. Keep going stops on that reply so the queued message cannot be sent twice.
+
+## Before and after
+
+Under a finished project answer whose app pages Faber pictured before and after it (`engine/src/engine/pictures.rs`),
+one quiet row sits below the reply's files and pages (`ui/BeforeAfter.tsx`): a small label in the third ink, then for
+each page its before and after thumbnails side by side, 96 × 60 px, each captioned "Before" or "After" in the small
+size. A thumbnail opens the shared picture viewer, whose arrows move through that answer's pictures only, in the row's
+order. A page missing either picture, an answer with none, or one still running shows nothing. The thread reads every
+answer's pictures in one call when it opens and when its newest answer finishes, and reads again at growing gaps for
+about 30 seconds while that answer waits for an after picture; another conversation on screen starts over and never
+shows the last one's pictures. Nothing moves. A row's pictures load once it scrolls into view, as data URLs through
+`site_picture`, and go with the row (`tests/ui/before-after.check.ts`). The engine reads no record over 64 KiB, at most
+the newest 500 records and three pages each, and follows no link or junction.

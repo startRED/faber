@@ -3193,6 +3193,29 @@
     "about": "The picture the browser took for a call, as a data URL, so the page never reads the disk itself."
   },
   {
+    "name": "answer_pictures",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The pages each project answer of a conversation pictured before and after it ran, by message id: each page's number and its two picture names, which `site_picture` shows."
+  },
+  {
     "name": "open_terminal",
     "args": [
       [

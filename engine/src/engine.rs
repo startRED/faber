@@ -80,6 +80,7 @@ mod overload;
 mod parked;
 mod pick_up;
 mod pictures;
+pub use pictures::AnswerPage;
 mod plan;
 mod pr_watch;
 mod quiet_child;
@@ -1720,9 +1721,24 @@ impl Engine {
     pub fn set_node_missing(&self, missing: bool) {
         self.with(|c| c.node_missing = missing);
     }
-    /// The picture Faber's browser took for a call, when there is one.
+    /// The picture Faber's browser took for a call, or an answer's before or after picture by its name, when there is one.
     pub fn site_picture(&self, id: &str, call: &str) -> Option<PathBuf> {
-        self.with(|c| c.site_picture(id, call))
+        pictures::picture_path(&self.attachments_of(id)?, call)
+    }
+    /// Each answer of a conversation that kept a before or after picture, with its pages, read outside the engine's lock.
+    pub fn answer_pictures(&self, id: &str) -> BTreeMap<String, Vec<pictures::AnswerPage>> {
+        self.attachments_of(id).map(|dir| pictures::answers_pages(&dir)).unwrap_or_default()
+    }
+    /// The attachments folder of a conversation Faber keeps, known in memory or by its file alone: the lock is held for one
+    /// look at the disk, and no record is read or transcript recovered. A missing, empty or unsafe id has none.
+    fn attachments_of(&self, id: &str) -> Option<PathBuf> {
+        if !crate::model::valid_id(id) {
+            return None;
+        }
+        self.with(|c| {
+            let known = c.convs.contains_key(id) || c.opts.data_dir.join("conversations").join(format!("{id}.json")).is_file();
+            known.then(|| c.opts.data_dir.join("attachments").join(id))
+        })
     }
     /// The absolute path of a file in a chat workspace, or None if the path points outside it or is missing.
     pub fn workspace_file(&self, id: &str, path: &str) -> Option<PathBuf> {

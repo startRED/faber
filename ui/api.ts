@@ -12,6 +12,13 @@ export type Vendor = 'claude' | 'codex' | 'gemini';
 /** A conversation's tabs in Faber's browser: where each one is, which one is in front and which one the agent drives. */
 export interface SiteTab { id: string; url: string; title?: string }
 /** A conversation's tabs in Faber's browser (`engine-core/src/browser/tabs.rs`); `closed` waits for "Reopen closed tab". */
+/** One page of an answer's before and after pictures (`engine/src/engine/pictures.rs`): null for a picture not kept. */
+export interface AnswerPage {
+  page: number;
+  before: string | null;
+  after: string | null;
+}
+
 export interface SiteTabs {
   tabs: SiteTab[];
   front?: string;
@@ -1270,6 +1277,9 @@ export const api = {
   onSiteKey: (listener: (key: string) => void) => listen<string>('faber:site-key', (e) => listener(e.payload)),
   onSiteLoading: (listener: (loading: boolean) => void) => listen<boolean>('faber:site-loading', (e) => listener(e.payload)),
   sitePicture: (id: string, call: string) => invoke<string | null>('site_picture', { id, call }),
+  /** Each project answer of a conversation that pictured its pages before and after it ran, by message id, in one read;
+   * `sitePicture` shows each picture by its name. */
+  answerPictures: (id: string) => invoke<Record<string, AnswerPage[]>>('answer_pictures', { id }),
   cookieProfiles: () => invoke<CookieProfile[]>('cookie_profiles'),
   cookieSites: (profile: string) => invoke<{ ticket: string; sites: CookieSite[] }>('cookie_sites', { profile }),
   cookieImport: (id: string, ticket: string, sites: string[]) => invoke<number>('cookie_import', { id, ticket, sites }),

@@ -988,6 +988,15 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .thumb .thumb-x:hover { background: var(--danger); color: var(--bg); }
 @media (hover: none) { .thumb .thumb-x { opacity: 1; } }
 .thumb-more { display: grid; place-items: center; color: var(--ink-2); font-size: var(--fs-ui); font-weight: 580; cursor: default; transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+/* An answer's pages before and after (BeforeAfter.tsx): one quiet row under the answer, before then after for each page. */
+.before-after { display: grid; gap: 6px; }
+.before-after-head { color: var(--ink-3); font-size: var(--fs-xs); }
+.before-after-pages { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.before-after-page { display: flex; gap: 6px; }
+.before-after-shot { display: grid; gap: 4px; margin: 0; }
+.before-after-shot .thumb { --thumb: 96px; display: block; height: 60px; border-radius: var(--r-sm); }
+.before-after-shot img { object-position: top; }
+.before-after-shot figcaption { color: var(--ink-3); font-size: var(--fs-xs); }
 .thumb-more:hover { background: var(--s3); color: var(--ink); }
 .composer .attach-row { padding: 12px 14px 4px; }
 .attach-all { margin-left: 4px; }

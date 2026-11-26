@@ -139,13 +139,6 @@ impl Core {
         }
         tab
     }
-
-    /// Where a call's picture is kept, when the conversation exists and the picture was taken.
-    pub(super) fn site_picture(&self, conv: &str, call: &str) -> Option<PathBuf> {
-        self.store.get(conv)?;
-        let path = self.opts.data_dir.join("attachments").join(conv).join(browser::picture_name(call)?);
-        path.is_file().then_some(path)
-    }
 }
 
 /// All browser picture writers hold Core's lock so the budget and conversation deletion cannot race a write.

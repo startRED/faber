@@ -34,6 +34,7 @@ import { VisualFiles } from './VisualAnswer.tsx';
 import type { VisualAnswer } from './api.ts';
 import { agentActivity, agentMeta, ChangedLines, Delta, openedAgent, SourceList, showAgent, startMessage, talkAbout } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
+import { AnswerPictures, answerPicturesOf, BeforeAfter } from './BeforeAfter.tsx';
 import { appsOf, AwayPage, awaySites, SiteCard, sitesOf, stepsOf } from './Site.tsx';
 import { Quote } from './Floating.tsx';
 import { Strip } from './Thumbs.tsx';
@@ -906,6 +907,10 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
           <For each={sites()}>{(s) => <SiteCard conversationId={props.conversationId} tool={s.tool} site={s.site} steps={pageSteps} />}</For>
         </div>
       </Show>
+      {/* The app's pages before and after a finished project answer, when Faber pictured them. */}
+      <Show when={props.area === 'project' && !streaming()}>
+        <BeforeAfter conversationId={props.conversationId} messageId={m().id} />
+      </Show>
       <Show when={props.area !== 'project' && m().checks}>{(c) => <ChecksLine c={c()} />}</Show>
       <Show when={props.area !== 'project' && m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
       {/* Only the person's own Stop is said: a turn Faber started and cut needs no word, and one that ended on a reason says that. */}
@@ -1273,6 +1278,8 @@ export function Thread(props: Shared & { messages: Message[]; temporary?: boolea
     onCleanup(session.close);
     return session;
   });
+  // The before and after pictures of every answer on screen, in one read for the whole thread.
+  const pictured = answerPicturesOf(props);
   const waitAction = () => {
     if (props.archived) return;
     const problem = props.waitingOn?.problem;
@@ -1321,6 +1328,7 @@ export function Thread(props: Shared & { messages: Message[]; temporary?: boolea
   );
   return (
     <ReplyMediaContext.Provider value={media}>
+    <AnswerPictures.Provider value={pictured}>
       <Show when={props.rewindNotice}>
         <p class="woke" classList={{ 'rewind-empty': !props.messages.length }} tabindex={props.messages.length ? undefined : 0} onContextMenu={(e) => { const available = redo(); if (!props.messages.length && available) openMenu(e, [{ id: 'rewind-redo', label: t(available.recovery ? 'rewind.recover' : 'rewind.redo'), run: () => showRestore({ id: available.messageId, role: 'user', text: '', at: 0 }, available) }], e.currentTarget); }}>
           {fromEngine(props.rewindNotice)}
@@ -1418,6 +1426,7 @@ export function Thread(props: Shared & { messages: Message[]; temporary?: boolea
       }</Show>
       <Show when={shown() ? restore() : undefined} keyed>{(target) => <Rewind conversationId={props.conversationId} messageId={target.message.id} point={target.message.rewind} redo={target.redo} conversationNames={props.conversationNames} leaving={!open()} onClose={() => setOpen(false)} onChanged={async () => { await props.onRewind?.(); setRevision((n) => n + 1); }} />}</Show>
       <Quote />
+    </AnswerPictures.Provider>
     </ReplyMediaContext.Provider>
   );
 }

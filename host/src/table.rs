@@ -956,6 +956,12 @@ table! {
         let Some(source) = h.engine.site_picture(&id, &call) else { return Ok(None) };
         Ok(data_url(&source, "image/jpeg", 2_000_000))
     }
+    /// The pages each project answer of a conversation pictured before and after it ran, by message id: each page's number
+    /// and its two picture names, which `site_picture` shows.
+    Read Free fn answer_pictures(h, id: String) -> std::collections::BTreeMap<String, Vec<faber_engine::engine::AnswerPage>> {
+        let engine = h.engine.clone();
+        off("error.conversationGone", move || engine.answer_pictures(&id)).await
+    }
     Write Person fn open_terminal(h, id: String) -> bool {
         let Some(cmd) = h.engine.terminal(&id) else { return Ok(false) };
         terminal::open(&cmd).map_err(|_| "error.terminal.open")?;

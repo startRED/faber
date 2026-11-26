@@ -707,6 +707,62 @@ async fn an_ai_pins_but_never_unpins() {
     let c1 = host.dispatch("open", json!({ "id": "c1" })).await.unwrap();
     assert!(c1["pinnedAt"].is_null(), "{c1}");
 }
+#[tokio::test]
+async fn an_answers_before_and_after_pictures_are_read_by_name_and_shown_by_site_picture() {
+    let (host, _dir) = host().await;
+    seed_conversation(&host, "c1", None, None);
+    let answers = host.data_dir.join("attachments/c1/answer-pictures");
+    std::fs::create_dir_all(&answers).unwrap();
+    for name in ["before-reply-1.jpg", "after-reply-1.jpg", "after-reply-2.jpg"] {
+        std::fs::write(answers.join(name), [0xff, 0xd8]).unwrap();
+    }
+    let record = json!([
+        {"page": "a", "before": "before-reply-1.jpg", "after": "after-reply-1.jpg"},
+        {"page": "b", "before": null, "after": "after-reply-2.jpg"},
+        {"page": "c", "before": null, "after": null},
+    ]);
+    std::fs::write(answers.join("pictures-reply.json"), record.to_string()).unwrap();
+    std::fs::write(answers.join("after-older-1.jpg"), [0xff, 0xd8]).unwrap();
+    std::fs::write(answers.join("pictures-older.json"), json!([{"page": "a", "before": null, "after": "after-older-1.jpg"}]).to_string())
+        .unwrap();
+    // Records that name nothing kept, or another file, add no answer.
+    std::fs::write(answers.join("pictures-empty.json"), json!([{"page": "a", "before": "../secret.jpg", "after": null}]).to_string())
+        .unwrap();
+    std::fs::write(answers.join("pictures-not json.json"), record.to_string()).unwrap();
+    // One read gives every answer of the conversation.
+    let all = host.dispatch("answer_pictures", json!({ "id": "c1" })).await.unwrap();
+    assert_eq!(
+        all,
+        json!({
+            "older": [{"page": 1, "before": null, "after": "after-older-1.jpg"}],
+            "reply": [
+                {"page": 1, "before": "before-reply-1.jpg", "after": "after-reply-1.jpg"},
+                {"page": 2, "before": null, "after": "after-reply-2.jpg"},
+            ],
+        })
+    );
+    // A free read: another conversation's agent reads the names too, never the pictures.
+    let agent = Caller::Agent { conversation: Some("c9".into()) };
+    assert_eq!(host.dispatch_as(&agent, "answer_pictures", json!({ "id": "c1" })).await.unwrap(), all);
+    seed_conversation(&host, "c2", None, None);
+    // An empty id would name the attachments root itself: refused before the disk is looked at, as an unsafe one is, even
+    // when a record file with no name exists.
+    seed_conversation(&host, "", None, None);
+    assert!(host.data_dir.join("conversations/.json").is_file());
+    std::fs::create_dir_all(host.data_dir.join("attachments/answer-pictures")).unwrap();
+    std::fs::copy(answers.join("pictures-reply.json"), host.data_dir.join("attachments/answer-pictures/pictures-reply.json")).unwrap();
+    std::fs::copy(answers.join("after-reply-2.jpg"), host.data_dir.join("attachments/answer-pictures/after-reply-2.jpg")).unwrap();
+    for id in ["c2", "gone", "../c1", ""] {
+        assert_eq!(host.dispatch("answer_pictures", json!({ "id": id })).await.unwrap(), json!({}), "{id}");
+        assert_eq!(host.dispatch("site_picture", json!({ "id": id, "call": "after-reply-2.jpg" })).await.unwrap(), Value::Null, "{id}");
+    }
+    let shown = host.dispatch("site_picture", json!({ "id": "c1", "call": "before-reply-1.jpg" })).await.unwrap();
+    assert_eq!(shown, json!("data:image/jpeg;base64,/9g="));
+    for call in ["before-reply-3.jpg", "pictures-reply.json", "../answer-pictures/before-reply-1.jpg"] {
+        assert_eq!(host.dispatch("site_picture", json!({ "id": "c1", "call": call })).await.unwrap(), Value::Null, "{call}");
+    }
+}
+
 #[cfg(not(faber_telemetry))]
 #[test]
 fn sharing_commands_are_absent_without_an_endpoint() {

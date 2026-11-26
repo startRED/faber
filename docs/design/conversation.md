@@ -69,7 +69,7 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
   with 12 × 16 px padding and 1.55 leading. At heights up to 540 px it uses 6 × 12 px padding and 40 × 28 px pictures.
   Composer thumbnails are 56 px with a remove button on hover and focus. The dark viewer grows from the thumbnail
   and returns to it. Its arrows and ← → browse pictures, Esc or an outside click closes it, and Tab stays inside.
-  It shows a count and exists only while open. Reply pictures and galleries use the same viewer. Video-site cards open the side panel.
+  It shows a count and exists only while open. Reply pictures, galleries and [an answer's pages before and after](answer-line.md#before-and-after) use it too. Video-site cards open the side panel.
 - Reading width, text selection, scroll anchoring and the latest-message control are in [reading.md](reading.md).
 - Loading earlier messages keeps already drawn top-level message rows and their text nodes by message id. Streaming
   still updates that same row in place; paging does not reparse unchanged ordinary replies or move their text selection
@@ -116,9 +116,8 @@ The newest reply has a quiet, wrapping line of what the conversation delivered a
   settings. Commands announced after replacement still show their output and keep their own Stop. Waiting for an old
   shared-server thread to close blocks rewind without keeping the current idle session alive. Stop leaves waiting messages in the queue without
   keeping a retired session alive; the person can send them later on a new session. Nothing moves, and no setting or first-run step comes with it.
-- While an answer streams the engine reports it at most every 33 ms, and each update carries only what changed: the
-  words and thinking added since the last one (`textFrom`, `thinkingFrom` in `host/src/feed.rs`) and the steps that
-  changed (`toolsFrom`), rebuilt and combined in `ui/opening.ts`. The screen applies every waiting event in one batch
+- While an answer streams the engine reports at most every 33 ms, each update carrying only new words and thinking
+  (`textFrom`, `thinkingFrom` in `host/src/feed.rs`) and changed steps (`toolsFrom`), combined in `ui/opening.ts`. The screen applies every waiting event in one batch
   once per animation frame (`ui/frame.ts`, with a 100 ms fallback while hidden), keeps unchanged timeline parts as the
   same object (`keepParts` in `ui/timeline.ts`), and draws the text block by block (`ui/markdown.tsx`): an unchanged
   block keeps its DOM and only the open one is parsed and sanitised again. A tick that changed only tools builds no text.
