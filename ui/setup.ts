@@ -53,7 +53,7 @@ export function shouldOpenSetup(
 }
 
 /** The two steps that come before the first conversation. Step 3 is the new conversation itself. */
-export type FirstStep = 'accounts' | 'look';
+export type FirstStep = 'sharing' | 'accounts' | 'look';
 
 /** `firstRun` is step 1 of 3 and moves on to step 2. `manage` is only the account cards with a Close button: it saves
  * `setup` and nothing else, so reconnecting an account later can neither restart the first run nor reset the tutorial. */
@@ -66,9 +66,15 @@ export function lookDue(settings: Pick<Settings, 'appearance'> | undefined): boo
 }
 
 /** The step the window opens at: step 1 under the old rule, else step 2 when it is due, else none. */
-export function firstRunStep(settings: Settings | undefined, conversations: readonly unknown[]): FirstStep | undefined {
+export function firstRunStep(settings: Settings | undefined, conversations: readonly unknown[], sharing?: { choice: boolean | null }): FirstStep | undefined {
+  if (sharing?.choice === null) return 'sharing';
   if (shouldOpenSetup(settings, conversations)) return 'accounts';
   return lookDue(settings) ? 'look' : undefined;
+}
+
+/** A failed consent save is shown normally, but must never keep the first-run screen from opening. */
+export async function finishSharingChoice(save: () => Promise<void>, onError: (error: unknown) => void, advance: () => void): Promise<void> {
+  try { await save(); } catch (error) { onError(error); } finally { advance(); }
 }
 
 /** What `setup` saves, in either mode. Nothing else about the first run changes with it. */

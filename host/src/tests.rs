@@ -73,6 +73,10 @@ fn the_table_holds_every_command_the_screen_calls_once() {
         if !cfg!(feature = "test-hooks") && test_only.contains(&name.as_str()) {
             continue;
         }
+        // The sharing commands exist only in a build that has an endpoint (R583).
+        if !cfg!(faber_telemetry) && name.starts_with("sharing_") {
+            continue;
+        }
         let listed = Host::commands().iter().filter(|c| c.name == name).count();
         assert_eq!(listed, 1, "`{name}` is called by ui/api.ts and listed {listed} times");
     }
@@ -702,4 +706,20 @@ async fn an_ai_pins_but_never_unpins() {
     host.dispatch_as(&Caller::Person, "pin", json!({ "id": "c1", "on": false, "by": "c9" })).await.unwrap();
     let c1 = host.dispatch("open", json!({ "id": "c1" })).await.unwrap();
     assert!(c1["pinnedAt"].is_null(), "{c1}");
+}
+#[cfg(not(faber_telemetry))]
+#[test]
+fn sharing_commands_are_absent_without_an_endpoint() {
+    for name in ["sharing_state", "sharing_set", "sharing_preview", "sharing_language"] {
+        assert!(super::Host::commands().iter().all(|entry| entry.name != name));
+        assert!(super::Host::reach(name).is_none());
+    }
+}
+
+#[cfg(faber_telemetry)]
+#[test]
+fn sharing_commands_are_screen_only_with_an_endpoint() {
+    for name in ["sharing_state", "sharing_set", "sharing_preview", "sharing_language"] {
+        assert_eq!(matches!(super::Host::reach(name), Some(super::Reach::Screen)), faber_engine::sharing::endpoint().is_some());
+    }
 }

@@ -14,6 +14,7 @@ import { animateList } from './motion.ts';
 import { ProjectsSection } from './ProjectSettings.tsx';
 import { Recents } from './Recents.tsx';
 import { ReportProblem } from './ReportProblem.tsx';
+import { SharingSettings } from './Sharing.tsx';
 import type { Quotas } from './sidebar.ts';
 import './settings.css';
 
@@ -51,6 +52,8 @@ const SUMMARY = [['default', 'set.default'], ['auto', 'set.summary.auto'], ['con
 const REPLY_STYLE = [['default', 'set.replyStyle.default'], ['short', 'set.replyStyle.short'], ['explained', 'set.replyStyle.explained'], ['own', 'set.replyStyle.own']] as const;
 
 interface Props {
+  sharing?: import('./api.ts').SharingState;
+  onSharing?: (yes: boolean) => Promise<boolean>;
   /** The look on the page. */
   look: Look;
   saved: Saved;
@@ -358,6 +361,9 @@ export function Settings(props: Props) {
             </div>
           </Match>
           <Match when={section() === 'privacy'}>
+            <Show when={props.sharing && props.onSharing}>
+              <SharingSettings state={props.sharing!} onChange={props.onSharing!} onError={props.onError} />
+            </Show>
             <Group>
               <BlockedSites saved={props.saved} onSave={save} onError={props.onError} />
               <Show when={hasBrowserExtensions}>
@@ -370,7 +376,7 @@ export function Settings(props: Props) {
                   {(id) => (
                     <li>
                       <Icon name="check" />
-                      {t(`set.privacy.${id}`)}
+                      {id === 'telemetry' && props.sharing ? t(props.sharing.choice ? 'sharing.on' : 'sharing.off') : t(`set.privacy.${id}`)}
                     </li>
                   )}
                 </For>

@@ -65,7 +65,8 @@ import { agentSteps, helperNumbers, helpersAtWork } from './worklog.ts';
 import { createAutoOpen, doneCards, isWaiting, openPlace, type Place, placeOfRunning, shownRunning, stopOffered, store, waitingKeys } from './running.ts';
 import { type Keep, type Section, Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
-import { continuePatch, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
+import { SharingQuestion } from './Sharing.tsx';
+import { continuePatch, finishSharingChoice, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
 import { Catalog, showInCatalog } from './Catalog.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { keepRows, neighbour, seedQuotas, withQuota } from './sidebar.ts';
@@ -120,6 +121,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const saved = recall<Place | undefined>('faber.place', undefined);
   useLanguage(props.initial.settings.language);
   const [state, setState] = createSignal<AppState>(props.initial);
+  const sharingEnabled = createMemo(() => state().sharing?.choice === true);
+  createEffect(on([lang, sharingEnabled], ([language, enabled]) => {
+    if (enabled) void api.sharingLanguage(language).catch(() => undefined);
+  }));
   tickWhile(() => state().conversations.some((c) => c.waitingOn !== undefined && !c.waitingOn.problem));
   // The area, the project and the conversation the user is in, changed together so no screen ever shows a conversation
   // with another conversation's project.
@@ -269,7 +274,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const [back, setBack] = createSignal<Keep>();
   // The first run: step 1 (the accounts) or step 2 (the look) while one is due, else none. `setupOpen` is the same account
   // cards opened later, from the no-AI state or from Settings: they never reopen the first run.
-  const [step, setStep] = createSignal<FirstStep | undefined>(firstRunStep(props.initial.settings, props.initial.conversations));
+  const [step, setStep] = createSignal<FirstStep | undefined>(firstRunStep(props.initial.settings, props.initial.conversations, props.initial.sharing));
   const [setupOpen, setSetupOpen] = createSignal(false);
   // The control that opened the account cards, by its `data-restore`: the shell is drawn again when they close, so focus
   // goes to the new copy of that control.
@@ -1941,6 +1946,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       <Show
         when={!step() && !setupOpen()}
         fallback={
+          <Show when={step() !== 'sharing'} fallback={<SharingQuestion onPick={async (yes) => finishSharingChoice(async () => {
+            const sharing = await api.sharingSet(yes, lang());
+            setState((previous) => ({ ...previous, sharing }));
+          }, (error) => setSaveError(failureText(error)), () => setStep(firstRunStep(state().settings, state().conversations)))} />}>
           <Show
             when={step() === 'look'}
             fallback={
@@ -1978,11 +1987,20 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               }}
             />
           </Show>
+          </Show>
         }
       >
         <>
           <Show when={settingsOpen()}>
             <Settings
+              sharing={state().sharing}
+              onSharing={async (yes) => {
+                try {
+                  const sharing = await api.sharingSet(yes, lang());
+                  setState((previous) => ({ ...previous, sharing }));
+                  return true;
+                } catch (error) { setSaveError(failureText(error)); return false; }
+              }}
               look={state().look}
               saved={state().settings}
               vendors={state().vendors}

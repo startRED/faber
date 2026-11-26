@@ -618,7 +618,15 @@ impl Release for Live {
             std::process::exit(0)
         }
         #[cfg(not(windows))]
-        update.install(bytes).map_err(|e| e.to_string()).inspect_err(|e| self.note("install-failed", e))
+        update
+            .install(bytes)
+            .map_err(|e| e.to_string())
+            .inspect(|_| {
+                if self.app.state::<Faber>().engine.sharing().choice() == Some(true) {
+                    self.note("installed", "");
+                }
+            })
+            .inspect_err(|e| self.note("install-failed", e))
     }
 
     /// Starts Faber again and ends this process. The engine was shut down for an install that did not happen, so this

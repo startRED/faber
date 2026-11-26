@@ -10,5 +10,6 @@ pub use faber_engine_projects::*;
 pub use faber_engine_store::*;
 
 pub mod engine;
+pub mod sharing;
 
 pub use engine::{AppEvent, AppState, BranchRequest, Clock, Engine, EngineOptions, SendRequest, TabStep, TerminalCommand, WarmRequest};

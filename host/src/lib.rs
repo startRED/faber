@@ -375,8 +375,10 @@ impl Wiring {
 
     /// The host around `engine`. `hidden` is a test or automated run: no visible dialog may open in it.
     pub fn host(self, engine: Engine, data_dir: PathBuf, hidden: bool, runtime: Handle) -> Host {
+        let sharing = engine.sharing();
         Host {
             engine,
+            sharing,
             feed: self.feed,
             voice: Voice { shell: self.shell.clone(), events: self.events },
             shell: self.shell,
@@ -395,6 +397,7 @@ impl Wiring {
 /// The engine and what the commands share around it.
 pub struct Host {
     pub engine: Engine,
+    sharing: Arc<faber_engine::sharing::Sharing>,
     /// What the screen last heard of each streaming reply (`feed.rs`).
     pub feed: Arc<Mutex<Feed>>,
     pub shell: Arc<dyn Shell>,
@@ -417,6 +420,10 @@ pub struct Host {
 }
 
 impl Host {
+    fn command_enabled(command: &str) -> bool {
+        !matches!(command, "sharing_state" | "sharing_set" | "sharing_preview" | "sharing_language")
+            || faber_engine::sharing::endpoint().is_some()
+    }
     /// Gives the host the pane the window commands `site_*` and `cookie_*` ask. Set once; a second call changes nothing.
     pub fn set_pane(&self, pane: Arc<pane::Pane>) {
         let _ = self.pane.set(pane);
@@ -444,6 +451,7 @@ impl Host {
         LIST.get_or_init(|| {
             table::TABLE
                 .iter()
+                .filter(|entry| Self::command_enabled(entry.name))
                 .map(|e| CommandInfo {
                     name: e.name,
                     args: e.args.iter().map(|(arg, ty)| (camel(arg), *ty)).collect(),
@@ -463,10 +471,16 @@ impl Host {
     }
 
     pub fn kind(command: &str) -> Option<Kind> {
+        if !Self::command_enabled(command) {
+            return None;
+        }
         table::TABLE.iter().find(|e| e.name == command).map(|e| e.kind)
     }
 
     pub fn reach(command: &str) -> Option<Reach> {
+        if !Self::command_enabled(command) {
+            return None;
+        }
         table::TABLE.iter().find(|e| e.name == command).map(|e| e.reach)
     }
 

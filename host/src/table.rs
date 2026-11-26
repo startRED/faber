@@ -25,6 +25,17 @@ struct FullState {
     #[serde(rename = "antigravityModels", skip_serializing_if = "Option::is_none")]
     antigravity_models: Option<Vec<ModelInfo>>,
     version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sharing: Option<SharingState>,
+}
+
+#[derive(Serialize)]
+struct SharingState {
+    choice: Option<bool>,
+}
+
+fn sharing_state_for(sharing: &faber_engine::sharing::Sharing) -> Option<SharingState> {
+    faber_engine::sharing::endpoint().map(|_| SharingState { choice: sharing.choice() })
 }
 
 fn scope_app_state(state: &mut AppState, by: Option<&str>, family: impl Fn(&str) -> Option<String>) {
@@ -247,7 +258,7 @@ table! {
         let mut state = h.engine.state();
         state.settings = h.shell.shown_settings(std::mem::take(&mut state.settings));
         let look = look::stored(state.settings.appearance.as_ref());
-        Ok(FullState { state, look, models: lock(&h.models).clone(), antigravity_models: lock(&h.antigravity_models).clone(), version: h.shell.version() })
+        Ok(FullState { state, look, models: lock(&h.models).clone(), antigravity_models: lock(&h.antigravity_models).clone(), version: h.shell.version(), sharing: sharing_state_for(&h.sharing) })
     }
     /// Read-only bootstrap for a session-owned app renderer; never resets the person's streaming feed.
     Read Own("/by") fn app_control_state(h, by: Option<String>) -> FullState {
@@ -257,7 +268,31 @@ table! {
         scope_app_state(&mut state, by.as_deref(), |id| reach::root(id, |at| starters.get(at).cloned()));
         state.settings = h.shell.shown_settings(std::mem::take(&mut state.settings));
         let look = look::stored(state.settings.appearance.as_ref());
-        Ok(FullState { state, look, models: lock(&h.models).clone(), antigravity_models: lock(&h.antigravity_models).clone(), version: h.shell.version() })
+        Ok(FullState { state, look, models: lock(&h.models).clone(), antigravity_models: lock(&h.antigravity_models).clone(), version: h.shell.version(), sharing: None })
+    }
+    #[cfg(faber_telemetry)]
+    Read Screen fn sharing_state(h) -> SharingState {
+        Ok(SharingState { choice: h.sharing.choice() })
+    }
+    #[cfg(faber_telemetry)]
+    Write Screen fn sharing_set(h, yes: bool, language: String) -> SharingState {
+        let sharing = Arc::clone(&h.sharing);
+        let state = off("error.store.write", move || { sharing.set_choice(yes, Some(&language)).map_err(str::to_string)?; Ok::<_, String>(SharingState { choice: sharing.choice() }) }).await??;
+        if yes {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            h.sharing.schedule(&h.runtime, now, false, Arc::new(faber_engine::sharing::HttpsTransport));
+        }
+        Ok(state)
+    }
+    #[cfg(faber_telemetry)]
+    Write Screen fn sharing_language(h, language: String) -> () {
+        let sharing = Arc::clone(&h.sharing);
+        off("error.store.write", move || sharing.set_language(&language).map_err(str::to_string)).await?
+    }
+    #[cfg(faber_telemetry)]
+    Read Screen fn sharing_preview(h) -> Option<String> {
+        let sharing = Arc::clone(&h.sharing);
+        off("error.store.read", move || sharing.preview().map_err(str::to_string)).await?
     }
     /// A session renderer may open only its own conversation family, without screen privileges.
     Read Own("/id") fn app_control_open(h, id: String) -> Option<Conversation> {

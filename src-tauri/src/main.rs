@@ -921,7 +921,15 @@ fn main() {
     let is_test = cfg!(feature = "test-hooks") || hidden || std::env::var_os("FABER_DATA_DIR").is_some();
     // A refused destination must not install a writer that a later startup panic could call.
     if let Some(dir) = crash_record_dir(is_test)
-        && let Err(error) = faber_engine::crash::install_hook(dir, env!("CARGO_PKG_VERSION"), env!("FABER_COMMIT"))
+        && let Err(error) = faber_engine::crash::install_hook(
+            dir,
+            &if faber_engine::sharing::endpoint().is_some() {
+                faber_engine::sharing::build_version()
+            } else {
+                env!("CARGO_PKG_VERSION").into()
+            },
+            env!("FABER_COMMIT"),
+        )
     {
         eprintln!("Faber failed to start: {error}");
         std::process::exit(1);
@@ -1089,7 +1097,15 @@ fn main() {
             app.manage(tray::Tray::default());
             // Only the first launch gets here (a second one ends in the single-instance plugin), so only it reads the marker.
             if crash_record_dir(is_test).is_some() {
-                faber_engine::crash::start_run(&data_dir, env!("CARGO_PKG_VERSION"), env!("FABER_COMMIT"));
+                faber_engine::crash::start_run(
+                    &data_dir,
+                    &if faber_engine::sharing::endpoint().is_some() {
+                        faber_engine::sharing::build_version()
+                    } else {
+                        env!("CARGO_PKG_VERSION").into()
+                    },
+                    env!("FABER_COMMIT"),
+                );
             }
             let power: Box<dyn PowerKeepAwake> = if is_test {
                 Box::new(NoopPower)

@@ -132,6 +132,7 @@ Home recovery notes in `ui/RecoveryNotes.tsx` show a missing project folder or u
 | Browser extensions | Electron Settings > Privacy > Developer mode for extensions, then Extensions in the browser's More menu (R577). | Load, list, reload and remove unpacked extension folders. Approved folders return in the same conversation. The browser tool asks before loading a project folder. Developer profiles start without ordinary sign-ins. | `ui/SiteExtensions.tsx`, `electron/pane-extensions.ts`, `host/src/pane/extensions.rs`, `engine/src/engine/browser_extensions.rs`, `scripts/pane-extensions.test.mjs` |
 | Catalog | Sidebar tab beside Chat and Projects. | Find, install, manage and review skills, tool servers, plugins and audio runtimes. Choose Pipelines to copy a Roblox workflow into a project conversation. Audio cards show complete download size, licences, GPU memory fit and uv prerequisites before install; inconclusive integrity checks, including read/hash I/O failures, preserve files while blocking use. Interpreter snapshot retries repair incomplete metadata. It opens as a layer over the stage (the thread stays mounted beneath it) and its list and a tool's page cross-fade. | `ui/Catalog.tsx`, `ui/CatalogInventory.tsx`, `ui/CatalogPipelines.tsx`, `ui/McpServers.tsx`, `engine-projects/src/tools.rs`, `engine-projects/src/tools/runtime.rs`, `engine-projects/src/tools/runtime_tests.rs`, `engine-projects/src/tool_inventory.rs`, `tests/ui/catalog.check.ts` |
 | Report a problem | Settings > General, or the one-time recovery notice after an unclean exit or a recorded panic. | Review the exact version and technical details first; Open takes the person to the bug form and Cancel opens nothing. The crash entry adds only its kind, source file and line; Faber sends nothing. | `ui/ReportProblem.tsx`, `host/src/report.rs`, `engine-projects/src/crash.rs`; checks: `tests/ui/settings.check.ts`, `host/src/report.rs`, `engine-projects/src/crash.rs` |
+| Anonymous sharing | Only in a build with a sharing endpoint: the first question of the first start (once on an existing installation too) and a switch in Settings > Privacy. | Two equal answers, neither chosen beforehand; the switch shows the exact report that would be sent now, and saying no deletes what waited (R583, [what is sent](product/sharing.md)). | `ui/Sharing.tsx`, `engine/src/sharing.rs`; checks: `tests/ui/sharing.check.ts`, `engine/src/sharing.rs` |
 | Settings | Ctrl+,, the sidebar button, a quota line or "Details in Settings". | Five sections for Faber's settings, a layer over the shell that stays mounted beneath it. | `ui/Settings.tsx`, `ui/Accounts.tsx`, `ui/controls.tsx`, `ui/ProjectSettings.tsx`, `ui/Appearance.tsx`, `ui/draft.ts`, `tests/ui/settings.check.ts`, `tests/ui/money-words.check.ts` |
 | Right-click menus | Right-click, the Menu key or Shift+F10. | Actions depend on the target, listed below. | `ui/ContextMenu.tsx`, `ui/contextmenu.ts` |
 | Answer file review | A finished answer with saved changes in Chat or Projects. | Open Changed files to review saved differences. | `ui/AnswerChanges.tsx`, `engine-projects/src/rewind/review.rs`, `tests/ui/answer-changes.check.ts` |
@@ -185,6 +186,7 @@ Faber launches each project in its folder or conversation copy; Memory edits the
 | Step | What the person does | What is saved |
 | :--- | :--- | :--- |
 | Window opens | Nothing: the system language and Dark Room. It shows on its static first frame, before the engine answers; a start from the tray stays hidden. `start_order` (screen, Electron) holds it with a 4.5 s engine hold | Nothing |
+| Anonymous sharing | When a build has an endpoint, choose whether to share; asked once on new and existing installs | The choice in `sharing.json` (R583) |
 | Accounts | Picks the subscriptions, installs and signs in to the CLIs | `setup`: `done` on Continue, `skipped` on Skip (both go on the same way) |
 | Look | Look, text size, spacing, motion, "Do you already use AI?", an optional name | One save: `appearance`, `experience`, `userName`, and `tutorialDone: false` unless it is already true |
 | First chat | Lands on the Chat home | Nothing |
@@ -219,7 +221,7 @@ closed). Opening Settings focuses Back; native Tab order reaches the five sectio
   status word (amber only near a real limit), one row per quota window (name, share, bar with a mark at the share of the window's time gone (clock time, R481),
   reset time) and Faber's own spend today in API value ("Faber today: $1.25 in API value", the words of a reply's cost too). A missing current reading has no bar: its window row reads "No reading yet" and the card says once to check the limits with the provider (the sidebar keeps its short line and says it in the tooltip). Every note about how the figures are read sits behind one
   "Details" fold per card, including a last-30-days API value total that opens daily bars and explains unknown costs are excluded (`tests/ui/settings.check.ts`: `accounts spend days`; `engine-store/src/ledger.rs`: `spend_over_thirty_days_fills_gaps`). "Manage accounts" opens the account cards, once, at the top; an install request that fails before reporting progress leaves Try again available. After the cards, an "Auto" card with one row, "What Auto learned" (a Forget button that reads "Forgotten" for a moment: Auto forgets every nudge it took from the answers retried or kept on this PC; an error shows under the row).
-- **Privacy**: Blocked sites (one add field, up to 50 hosts, Remove per host; subdomains too), then three statements (no telemetry, history stays on this PC, CLI logins are never read).
+- **Privacy**: Blocked sites (one add field, up to 50 hosts, Remove per host; subdomains too), then three statements (sharing state, history stays on this PC, CLI logins are never read). With a configured sharing endpoint, an anonymous-sharing switch and next-report preview appear (R583).
 
 Choices that live elsewhere on purpose: model and effort (the composer, per conversation); paying with credits, moving to
 the other subscription or waiting (the quota card, just in time, per message); permission answers (the cards).
@@ -324,7 +326,8 @@ Message search keeps a word index in memory and finds matching conversations new
 | `self-changes.jsonl` | Local record of requested Faber changes, including `tools.install` and `settings.web_search` (R417). | The engine (`engine-projects/src/toolbox.rs`; `engine/tests/toolbox.rs`) |
 | `look.jsonl` | Local count of “Look around” offers and uses. | The engine (`engine-store/src/look_log.rs`; `engine/tests/look.rs`) |
 | `method/<project id>.jsonl` | Local count of corrections after a closing box says work is done. | The engine (`engine-store/src/method_log.rs`; `engine/tests/keep_going.rs`) |
-| `crashes.jsonl` | Local record of crashes and unclean exits (R421). | The shell through `engine-projects/src/crash.rs` |
+| `crashes.jsonl` | Local record of crashes and unclean exits (R421). The file is not sent; sharing reduces eligible records to the allowed fields (R583). | The shell through `engine-projects/src/crash.rs` |
+| `sharing.json` | The person's optional sharing choice and, only after yes, bounded reports and timing state; refusing deletes waiting reports (R583). | `engine/src/sharing.rs` |
 | `running.marker` | Marks a running Faber session so an unclean exit can be recorded. | The shell through `engine-projects/src/crash.rs` |
 | `panic.notice` | The time of a recorded panic, kept until the next start so the recovery note can offer Report a problem once; that start deletes it. | The panic hook through `engine-projects/src/crash.rs` |
 | `resume-after-update.json` | Conversations interrupted by an update, resumed on the next start. | `engine/src/engine/install_gate.rs` |
@@ -405,6 +408,7 @@ The screen and `faber` [command line](product/cli.md) use the command list in ho
 
 | Group | Commands |
 | :--- | :--- |
+| Anonymous sharing | `sharing_state`, `sharing_set`, `sharing_preview`, `sharing_language`: screen-only and absent without a build-time endpoint. The preview freezes the next JSON report. |
 | Saved answer review | `answer_changes` lists saved changes; `answer_change_patch` shows a saved diff. |
 | Hook previews | `hook_list` reads hook previews from user and project settings for the screen. |
 | Agent's plan and closing box / Keep going | `follow_up` sends or dismisses a follow-up offer. |
