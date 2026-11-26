@@ -171,19 +171,26 @@ pub fn make(
     std::fs::create_dir_all(home(data)).map_err(|_| "error.copy.failed")?;
     let target = copy.path.clone();
     let root = Path::new(&root);
-    // A copy interrupted during retirement stays registered here until git forgets it.
+    // A copy interrupted during retirement stays registered here until git forgets it; on a chosen drive it is still
+    // locked under this same path, so it is let go first.
+    if crate::storage::external_root_name(data) {
+        let _ = git(exec, root, &["worktree", "unlock", "--", &target]);
+    }
     let _ = git(exec, root, &["worktree", "prune"]);
     let exists = |exec: &mut dyn Executor, branch: &str| {
         git(exec, root, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_some()
     };
+    // A copy on a chosen drive is locked: while that drive is away, making or removing another copy of the project must
+    // not make git forget it (`git worktree prune` passes over locked copies).
+    let add: &[&str] = if crate::storage::external_root_name(data) { &["worktree", "add", "--lock"] } else { &["worktree", "add"] };
     let made = if exists(exec, branch) {
-        git(exec, root, &["worktree", "add", "--", &target, branch])
+        git(exec, root, &[add, &["--", target.as_str(), branch]].concat())
     } else {
         // A source branch removed since (its work merged) leaves the head the person has.
         let held =
             at.filter(|oid| git(exec, root, &["rev-parse", "--verify", "--quiet", &format!("{oid}^{{commit}}")]).as_deref() == Some(*oid));
         let start = from.filter(|from| exists(exec, from)).or(held).unwrap_or(&head);
-        git(exec, root, &["worktree", "add", "-b", branch, "--", &target, start])
+        git(exec, root, &[add, &["-b", branch, "--", target.as_str(), start]].concat())
     };
     made.map(|_| Some(copy)).ok_or("error.copy.failed")
 }
@@ -410,6 +417,9 @@ pub fn remove(exec: &mut dyn Executor, data: &Path, id: &str, copy: &WorkCopy) -
     real_path(&path).map_err(|_| "error.copy.failed")?;
     let root = Path::new(&copy.root);
     let target = copy.path.clone();
+    if crate::storage::external_root_name(data) && root.is_dir() {
+        let _ = git(exec, root, &["worktree", "unlock", "--", &target]);
+    }
     if path.exists() && root.is_dir() {
         let _ = git(exec, root, &["worktree", "remove", "--force", "--", &target]);
     }
@@ -445,12 +455,14 @@ pub fn set_aside(data: &Path, id: &str, copy: &WorkCopy) -> Option<Retirement> {
     let mut paths = RETIRING.0.lock().unwrap();
     std::fs::rename(&from, &to).ok()?;
     paths.push(from.clone());
-    Some(Retirement { from, gone: to })
+    Some(Retirement { from, gone: to, locked: crate::storage::external_root_name(data) })
 }
 
 pub struct Retirement {
     from: PathBuf,
     gone: PathBuf,
+    /// Made on a chosen drive, so git holds it locked until it is let go here.
+    locked: bool,
 }
 
 impl Retirement {
@@ -465,6 +477,9 @@ impl Retirement {
         }
         let root = Path::new(&copy.root);
         if root.is_dir() {
+            if self.locked {
+                let _ = git(exec, root, &["worktree", "unlock", "--", self.from.to_string_lossy().as_ref()]);
+            }
             let _ = git(exec, root, &["worktree", "prune"]);
             let _ = git(exec, root, &["branch", "-D", &copy.branch]);
         }

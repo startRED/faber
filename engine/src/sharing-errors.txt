@@ -180,6 +180,9 @@ error.setup.download
 error.setup.install
 error.setup.signIn
 error.setup.unsupported
+error.storage.choice
+error.storage.unreachable
+error.storage.unreadable
 error.store.corrupt
 error.store.full
 error.store.read
@@ -334,6 +337,8 @@ reason.sharedServiceDeliveryUnknown
 reason.sharedServiceStopped
 reason.silent
 reason.silent.unconfirmed
+reason.storage.default
+reason.storage.unreadable
 reason.test
 reason.turnLimit
 reason.verify.noChecks

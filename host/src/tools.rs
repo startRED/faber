@@ -20,6 +20,7 @@ fn install_error(why: InstallError) -> String {
                     | "error.tools.uvMissing"
                     | "error.tools.space"
                     | "error.tools.vram"
+                    | "error.storage.unreachable"
             ) =>
         {
             detail
@@ -39,6 +40,7 @@ mod install_errors {
             assert_eq!(install_error(InstallError::Failed(key.clone())), key);
         }
         assert_eq!(install_error(InstallError::Failed("untrusted archive detail".into())), "error.tools.install");
+        assert_eq!(install_error(InstallError::Failed("error.storage.unreachable".into())), "error.storage.unreachable");
     }
 }
 
@@ -322,8 +324,7 @@ pub(crate) async fn tools_install(h: &Host, id: String) -> Res<()> {
     // An update never ends the process in the middle of an install: the shell holds it off until this is dropped.
     let _running = h.shell.hold_install()?;
     let item = find(&id).ok_or("error.tools.unknown")?.clone();
-    let data_dir = h.data_dir.clone();
-    let store = tokio::task::spawn_blocking(move || Store::new(&data_dir)).await.map_err(|_| "error.tools.install".to_string())?;
+    let store = h.engine.tool_store();
     // FABER_SETUP_SOURCE (tests): the archive comes from that loopback server, as the CLI installs do.
     let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());
     // The project agent's install comes through the same function: the Node check, host list, digest and caps are one.
@@ -350,7 +351,10 @@ pub(crate) async fn tools_prepare_replacement(h: &Host, id: String) -> Res<Prepa
     find(&id).ok_or("error.tools.unknown")?;
     let data = h.data_dir.clone();
     tokio::task::spawn_blocking(move || {
-        let plan = Store::new(&data).capture_replacement(&id).map_err(|_| "error.tools.install".to_string())?;
+        let store = Store::new(&data);
+        let plan = store
+            .capture_replacement(&id)
+            .map_err(|_| if store.location_unavailable(&id) { "error.storage.unreachable" } else { "error.tools.install" }.to_string())?;
         Ok(PreparedReplacement { from: plan.old_commit().into(), to: plan.item().commit.clone(), enabled: plan.enabled(), plan })
     })
     .await

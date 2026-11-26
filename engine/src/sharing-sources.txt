@@ -91,6 +91,7 @@ ledger.rs
 lib.rs
 lifecycle.rs
 locale.rs
+location.rs
 locks.rs
 look.rs
 look_log.rs
@@ -199,6 +200,7 @@ startup.rs
 stdio.rs
 steer.rs
 storage.rs
+storage_choice.rs
 store.rs
 stronger.rs
 stuck.rs

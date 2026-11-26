@@ -221,11 +221,12 @@ impl Delivery {
         let plugins = self.lease.as_ref().map_or(&[][..], |lease| lease.plugins.as_slice());
         let native_intact = super::plugin_delivery::intact(root, plugins);
         for plugin in plugins {
-            let source_intact = self.catalog_root.as_ref().is_some_and(|store| super::plugins::verify_definition(store, plugin));
+            let source = self.catalog_root.as_ref().map(|store| super::location::source_root(store, &plugin.item.id));
+            let source_intact = source.as_ref().is_some_and(|store| super::plugins::verify_definition(store, plugin));
             if !native_intact || !source_intact {
                 invalid_plugins.push(plugin.item.id.clone());
                 checked.plugin = None;
-                if self.catalog_root.as_ref().is_some_and(|store| super::plugin_delivery::source_changed(store, plugin)) {
+                if source.as_ref().is_some_and(|store| super::plugin_delivery::source_changed(store, plugin)) {
                     damaged.push(plugin.item.id.clone());
                 } else {
                     io_failed = true;
@@ -279,10 +280,9 @@ impl Delivery {
             }
             let path = root.join(if item.server.is_some() { "servers" } else { "skills" }).join(&item.id);
             let runtime_intact = item.runtime.is_none()
-                || self
-                    .catalog_root
-                    .as_ref()
-                    .is_some_and(|store| super::runtime::verify_cached(&store.join("runtimes").join(&item.id), item));
+                || self.catalog_root.as_ref().is_some_and(|store| {
+                    super::runtime::verify_cached(&super::location::source_root(store, &item.id).join("runtimes").join(&item.id), item)
+                });
             let actual = if !runtime_intact {
                 Ok(String::new())
             } else if [root.clone(), path.parent().unwrap_or(root).to_path_buf(), path.clone()]
@@ -1045,10 +1045,11 @@ impl Store {
         let plugins: Vec<_> = plugins
             .into_iter()
             .filter(|plugin| {
-                if super::plugins::verify_definition(&self.root, plugin) {
+                let root = self.source_root(&plugin.item.id);
+                if super::plugins::verify_definition(&root, plugin) {
                     return true;
                 }
-                if super::plugin_delivery::source_changed(&self.root, plugin) {
+                if super::plugin_delivery::source_changed(&root, plugin) {
                     failed.insert(plugin.item.id.clone());
                     failed.extend(
                         self.resource_catalog()
@@ -1066,7 +1067,7 @@ impl Store {
             if failed.contains(&item.id) {
                 continue;
             }
-            if item.runtime.is_some() && !super::runtime::verify(&self.root.join("runtimes").join(&item.id), item) {
+            if item.runtime.is_some() && !super::runtime::verify(&self.dir(item), item) {
                 failed.insert(item.id.clone());
                 continue;
             }
@@ -1188,14 +1189,14 @@ impl Store {
                 let mut selection = Selection::default();
                 selection
                     .disabled
-                    .extend(self.items.iter().filter(|item| self.disabled().join(&item.id).exists()).map(|item| item.id.clone()));
+                    .extend(self.items.iter().filter(|item| self.disabled_copy(&item.id).exists()).map(|item| item.id.clone()));
                 return Some(selection);
             }
             Ok(m) if m.is_file() => {}
             _ => return None,
         }
         let mut selection: Selection = serde_json::from_slice(&small_file(&path)?).ok()?;
-        selection.disabled.extend(self.items.iter().filter(|item| self.disabled().join(&item.id).exists()).map(|item| item.id.clone()));
+        selection.disabled.extend(self.items.iter().filter(|item| self.disabled_copy(&item.id).exists()).map(|item| item.id.clone()));
         Some(selection)
     }
 
@@ -1307,7 +1308,7 @@ impl Store {
             return;
         }
         let Ok(_guard) = self.kits_guard() else { return };
-        for entry in std::fs::read_dir(&self.root).into_iter().flatten().flatten() {
+        for entry in self.file_roots().into_iter().flat_map(|root| std::fs::read_dir(root).into_iter().flatten().flatten()) {
             let name = entry.file_name().to_string_lossy().into_owned();
             if ![".kit-staging-", ".staging-", ".trash-"].iter().any(|prefix| name.starts_with(prefix)) {
                 continue;
@@ -1551,6 +1552,12 @@ fn read_vram(cache: &OnceLock<u64>, probe: impl FnOnce() -> Option<u64>) -> Opti
 }
 
 fn source_digest(root: &Path, item: &Item) -> io::Result<String> {
+    let id = if super::plugins::resource_source(root, item).is_some() {
+        item.id.split_once("--").map_or(item.id.as_str(), |(parent, _)| parent)
+    } else {
+        &item.id
+    };
+    let root = super::location::source_root(root, id);
     if item.runtime.is_some() {
         let dir = root.join("runtimes").join(&item.id);
         if !super::runtime::verify_cached(&dir, item) {
@@ -1558,8 +1565,8 @@ fn source_digest(root: &Path, item: &Item) -> io::Result<String> {
         }
         return digest(&dir.join("instructions"));
     }
-    if let Some(path) = super::plugins::resource_source(root, item) {
-        let relative = path.strip_prefix(root).map_err(io::Error::other)?;
+    if let Some(path) = super::plugins::resource_source(&root, item) {
+        let relative = path.strip_prefix(&root).map_err(io::Error::other)?;
         let mut parent = root.to_path_buf();
         if !std::fs::symlink_metadata(&parent)?.is_dir() {
             return Err(io::Error::other("Not a plain catalog source root"));
