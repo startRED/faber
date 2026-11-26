@@ -693,10 +693,6 @@ table! {
     Read Screen fn preview_look(h, appearance: Map<String, Value>) -> Look [Failure] {
         look::preview(&appearance)
     }
-    /// Measures the data folder and the free space on its drive, in bytes.
-    Read Free fn storage_usage(h) -> faber_engine::storage::StorageUsage {
-        h.engine.storage_usage().await
-    }
     /// A theme file comes from other people, so an appearance is checked here before anything is saved.
     Write Ask fn save_settings(h, patch: Settings) -> SavedSettings [Failure] {
         let mut patch = patch;

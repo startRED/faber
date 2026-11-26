@@ -44,18 +44,6 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   value if the save fails. R107 applies the same default to Chat. Chat uses its chosen canonical folder
   (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen
   folder. General explains the rule and offers the folder choice.
-- General ends with *Storage*, one closed fold, "Disk space Faber uses" (`ui/StorageUse.tsx`). It sits in General, not
-  Projects, because the data folder holds both areas (Chat conversations, tools, reports) and Projects holds only each
-  project's own card; copies by project are one list inside it. Opening the fold measures once (`storage_usage`, a bounded
-  read at background priority) and "Measure again" measures again; closed, the fold is not in the page and nothing runs, and
-  there is no timer. The first row is the total with the free space of that drive under it; then the kinds (conversation
-  copies, reports, tools, saved files for going back, helper transcripts, conversations, everything else) biggest first,
-  each with its size and a bar of its share, the rest last; then "Copies by project" with removed projects and loose copies
-  named. A size that could not be read says "Unknown", never 0; a scan that hit its time or file limit says the real sizes
-  may be larger. Loading keeps the old figures and says "Measuring…" in a polite status line; a failure shows its words
-  and "Try again"; no copies says so. It offers no clean-up button: the copy sweep already runs by itself at start and when
-  work pauses (the view says so), and no report trimming or sweep command is exposed to the screen. Under 600 px each bar
-  goes under its row. No new motion.
 - Reply style is one select row for both AIs in General, before the Codex fold: AI's own way (default), Short, Explained,
   My own words. My own words opens a three-line text field below the row, named by the row's label, limited to 400
   characters. Leaving the field or closing Settings (including Escape while typing) saves trimmed plain text;

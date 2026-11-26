@@ -81,9 +81,9 @@ export const money = (usd: number, digits = 2) => t('money.usd', { amount: amoun
 const unit = (value: number, name: string, digits = 0) =>
   new Intl.NumberFormat(lang(), { style: 'unit', unit: name, unitDisplay: 'short', maximumFractionDigits: digits }).format(value);
 
-/** A file size in the person's language ("1.5 MB", "1,5 GB"). */
+/** A file size in the person's language ("1.5 MB", "1,5 MB"). */
 export const bytes = (n: number) =>
-  n < 1024 ? unit(n, 'byte') : n < 1024 ** 2 ? unit(n / 1024, 'kilobyte', 1) : n < 1024 ** 3 ? unit(n / 1024 ** 2, 'megabyte', 1) : unit(n / 1024 ** 3, 'gigabyte', 1);
+  n < 1024 ? unit(n, 'byte') : n < 1024 * 1024 ? unit(n / 1024, 'kilobyte', 1) : unit(n / 1024 / 1024, 'megabyte', 1);
 
 /** A short span of time in the person's language ("45 sec", "3 min 20 sec"). */
 export const duration = (seconds: number) =>

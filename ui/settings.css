@@ -1,22 +1,6 @@
-/* General > Storage (ui/StorageUse.tsx): one row per kind or project, its size and a bar of its share. */
-.store > * + * { border-top: 1px solid var(--line); }
-.store .btn[aria-disabled='true'] { opacity: 0.4; cursor: default; }
-.store-total { font-size: var(--fs-sm); color: var(--ink); }
-.store-note { padding: 10px 16px; }
-.store-copies > .store-note { padding-top: 0; }
-.store-copies > .store-list, .store-head + .store-note { padding-top: 8px; }
-.store-head { margin: 0; padding: 12px 16px 0; font-size: var(--fs-xs); font-weight: 580; color: var(--ink-3); }
-.store-list { display: grid; gap: 10px; margin: 0; padding: 12px 16px; list-style: none; }
-.store-row { display: grid; grid-template-columns: minmax(0, 1fr) max-content minmax(80px, 160px); align-items: center; gap: 12px; font-size: var(--fs-sm); color: var(--ink-2); }
-.store-row .num { text-align: right; color: var(--ink); }
-.store .num.unknown { color: var(--ink-3); }
-.store-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
 @media (max-width: 600px) {
   div.settings { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .settings > .s-nav.nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .settings .s-version { grid-column: 1 / -1; }
   .settings > .s-main:not(.wide) { padding: 16px 12px 20px; }
-  .store-row { grid-template-columns: minmax(0, 1fr) max-content; }
-  .store-row .meter { grid-column: 1 / -1; }
 }

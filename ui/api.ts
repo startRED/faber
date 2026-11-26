@@ -762,23 +762,6 @@ export interface SavedSettings {
   settings: Settings;
   look: Look;
 }
-/** Byte counts are partial when the scan hits its limit, and null where a read failed. */
-export interface StorageUsage {
-  totalBytes: number | null;
-  freeBytes: number | null;
-  byKind: {
-    copies: number | null;
-    reports: number | null;
-    tools: number | null;
-    rewind: number | null;
-    helperTranscripts: number | null;
-    conversations: number | null;
-    rest: number | null;
-  };
-  copiesByProject: Record<string, number | null>;
-  unassignedCopyBytes: number | null;
-  partial: boolean;
-}
 export interface Choice {
   vendor: Vendor | 'auto';
   model?: string;
@@ -1225,7 +1208,6 @@ export const api = {
   previewLook: (appearance: Appearance) => invoke<Look>('preview_look', { appearance }),
   hookList: () => invoke<HookPreview[]>('hook_list'),
   saveSettings: (patch: Settings) => invoke<SavedSettings>('save_settings', { patch }),
-  storageUsage: () => invoke<StorageUsage>('storage_usage'),
   saveTheme: (appearance: Appearance, name: string) => invoke<boolean>('save_theme', { appearance, name }),
   openTheme: () => invoke<ThemeFile | null>('open_theme'),
   saveFile: (id: string, path: string) => invoke<boolean>('save_file', { id, path }),
