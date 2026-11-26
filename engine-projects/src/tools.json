@@ -274,6 +274,21 @@
       {"path":"node_modules/zod","package":"zod","version":"4.6.7","integrity":"sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==","url":"https://registry.npmjs.org/zod/-/zod-4.6.7.tgz"}
     ]}}
   ],
+  "plugins": [
+    {
+      "id": "frontend-design",
+      "job": "design",
+      "tier": "more",
+      "license": "Apache-2.0",
+      "repo": "anthropics/claude-plugins-official",
+      "commit": "0fbfda5a91f4adc311daca25acc99132f40f0b6e",
+      "path": "plugins/frontend-design",
+      "digest": "5e918d7c6fdf2b91c0d2ea3280d377928f8923d0caeff2888a51bd9290c606c9",
+      "parts": [
+        {"id": "frontend-design", "kind": "skill", "path": "skills/frontend-design", "digest": "83485963700bcf11d5bf78118facb301676b69d918fee2e45a95e7f1a2840f6c"}
+      ]
+    }
+  ],
   "runtimes": [
   {
     "id": "faster-whisper",

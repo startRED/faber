@@ -30,7 +30,7 @@ check('catalog: every shipped item resolves to its shared name in every language
   try {
     for (const locale of LANGUAGES) {
       useLanguage(locale.code);
-      for (const row of [...catalog.skills, ...catalog.servers, ...(catalog.runtimes ?? [])]) {
+      for (const row of [...catalog.skills, ...catalog.servers, ...(catalog.runtimes ?? []), ...(catalog.plugins ?? [])]) {
         const key = `catalog.name.${row.id}` as Key;
         ok(Object.hasOwn(locale.messages, key), `${locale.code}: ${row.id} has a hand-written name`);
         const name = locale.messages[key];

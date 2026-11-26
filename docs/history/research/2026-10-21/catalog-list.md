@@ -506,7 +506,7 @@ These are the versions examined, not an exhaustive survey of all npm packages. T
 
 Method: shallow clones into new empty folders, read only; nothing downloaded was run, installed or imported. Each candidate was read at the pin named below. Folder and part digests come from Faber's own `tools::digest` (sorted `path NUL length NUL bytes`) and `plugins::part_digest`, and the two passing plugins were run through the real `check_source` and `install_sources` on a local archive built from the clone (no network). Original rejections are not reversed by repackaging: a bundle that split into hook-free sub-plugins stays out.
 
-Result: two plugins pass every part, `playground` and `frontend-design` (one skill each). They are not added to the catalog yet: a shipped plugin needs `catalog.name.<id>` and `tools.<id>` hand-written in all five languages (`engine/tests/locales.rs` fails without them) and a what's-new line, and the lane was told to stop there. The prepared catalog entries and lifecycle check are in the helper's notes, not in this commit. The other 35 looked at are out. These two were published before the audit (they are in `claude-plugins-official` at the old pin `d1adba47`), but the audit only judged the twenty bundles, never them one by one. Only `champion-kit`, `claude-for-manufacturing` and `theme-examples` are new since the audit; all three are out.
+Result: `frontend-design` (one skill) passes every part and ships, with its name and description written by hand in all five languages, its catalog entry and a lifecycle check in `engine/tests/plugins.rs`; the what's-new line waits for the weekly entry (R557). `playground` (one skill) passed the file checks but stays out: two reviews (Codex and Antigravity, 2026-11-26) refused it because its skill tells the agent to run `open` on the page it made (a macOS command) and `git show` for diff reviews. Digests come from GitHub's archive of the pin with `examples/tools_pin.rs`, never from a checkout, whose line endings differ on Windows. The other 35 looked at are out. These two were published before the audit (they are in `claude-plugins-official` at the old pin `d1adba47`), but the audit only judged the twenty bundles, never them one by one. Only `champion-kit`, `claude-for-manufacturing` and `theme-examples` are new since the audit; all three are out.
 
 ### The twenty rejected candidates, re-read at the current head
 
@@ -539,8 +539,8 @@ Only `claude-for-legal` kept its pin; its blocker is unchanged. A moved pin chan
 
 | Candidate | Result | Reason |
 | :--- | :--- | :--- |
-| playground | passes, held | one skill, plain Markdown templates, manifest fields only name, description, author; no hooks, binaries, scripts or MCP; Apache-2.0 |
-| frontend-design | passes, held | one skill with `license` front matter; same checks; Apache-2.0 |
+| playground | out after review | one skill, plain Markdown templates, no hooks, binaries, scripts or MCP; Apache-2.0; but the skill tells the agent to run `open` and `git show` |
+| frontend-design | ships | one skill with `license` front matter; same checks; Apache-2.0 |
 | champion-kit (new since audit) | out | agent sets `tools` and `model`; skills set `argument-hint` (not allowed on a skill); PNG in the plugin root |
 | claude-for-manufacturing (new) | out | `.mcp.json` and Python scripts |
 | theme-examples (new) | out | 40 script/binary files |
@@ -558,11 +558,11 @@ Only `claude-for-legal` kept its pin; its blocker is unchanged. A moved pin chan
 | claude-code-setup | out | skill sets `tools`, PNG file |
 | ralph-loop | out | hooks and shell scripts |
 
-Pins for the two plugins that pass (not yet in `engine-projects/src/tools.json`; commit `0fbfda5a91f4adc311daca25acc99132f40f0b6e`):
+Pins from GitHub's archive of commit `0fbfda5a91f4adc311daca25acc99132f40f0b6e` (`examples/tools_pin.rs`):
 
 | Plugin | Folder | Folder digest | Skill part digest |
 | :--- | :--- | :--- | :--- |
-| playground | `plugins/playground` | `1440edf9cb1a612c401dbb6212fb6d26ce359816961dc0865a26d01d30c72ac5` | `d40c06af69b4882789d1070b50f4ccd52092ba2c305635a2831bcc9a9a30c603` |
-| frontend-design | `plugins/frontend-design` | `d37d6234cd8177dff7603dcbfbeff3a9bb2d1f7b13aa844ab1e104aeb766d354` | `b8a564bbbd9d26d36237f1808116698ead07c65b16a365c7e1dd716935f237c0` |
+| playground (out) | `plugins/playground` | `05040706b03c06ef7992a607bd7cda5fd3ae3b2e0d46a247c5bf727424c31497` | `2ee197a4e6e572aafc0a26c19c4fa6c4062327cc810e0c6d9563332a29c34cb2` |
+| frontend-design | `plugins/frontend-design` | `5e918d7c6fdf2b91c0d2ea3280d377928f8923d0caeff2888a51bd9290c606c9` | `83485963700bcf11d5bf78118facb301676b69d918fee2e45a95e7f1a2840f6c` |
 
 Not checked: a full read of every file in the 35 rejected candidates (a decisive blocker stops the read), any live Claude Code or Codex run, and whether the `playground` skill's `open <file>.html` step suits Faber's sessions. A one-skill plugin is a valid but thin plugin; the owner may prefer to list these as plain skills.

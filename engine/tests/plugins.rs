@@ -619,3 +619,74 @@ async fn a_codex_project_thread_carries_the_plugin_roles_and_a_chat_thread_none(
         server.retire();
     }
 }
+
+/// The shipped catalog plugins (task 941): each is one pinned skill-only folder of the official plugin repository. The
+/// source is never fetched here; a folder with the same shape stands in, and its digests replace the pins so the whole
+/// store lifecycle runs on the catalog's own ids, licence, path and part list.
+#[test]
+fn every_shipped_catalog_plugin_keeps_its_pins_and_runs_the_whole_lifecycle() {
+    let shipped = [("frontend-design", "plugins/frontend-design")];
+    let catalog = faber_engine::tools::plugins::catalog();
+    assert!(catalog.len() >= shipped.len());
+    for (id, folder) in shipped {
+        let entry = catalog.iter().find(|definition| definition.item.id == id).unwrap_or_else(|| panic!("{id} is not in the catalog"));
+        assert_eq!(entry.item.repo, "anthropics/claude-plugins-official");
+        assert_eq!(entry.item.license, "Apache-2.0");
+        assert_eq!(entry.item.path, folder);
+        assert_eq!(entry.item.commit, "0fbfda5a91f4adc311daca25acc99132f40f0b6e", "{id}: the commit the preflight read");
+        assert_eq!(entry.parts.len(), 1, "{id} is a skill-only plugin");
+        let part = &entry.parts[0];
+        assert!(part.kind == PartKind::Skill && part.id == id && part.path == format!("skills/{id}") && part.server.is_none());
+
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source");
+        let skill = format!("---\nname: {id}\ndescription: Stand-in for the pinned {id} skill.\n---\nWork carefully.\n");
+        let files = [
+            (
+                ".claude-plugin/plugin.json".to_owned(),
+                format!("{{\"name\":\"{id}\",\"description\":\"Stand-in.\",\"author\":{{\"name\":\"Fixture\"}}}}"),
+            ),
+            ("LICENSE".to_owned(), "Synthetic fixture license notice.".to_owned()),
+            (format!("skills/{id}/SKILL.md"), skill.clone()),
+        ];
+        for (name, body) in &files {
+            let path = source.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        let mut definition = entry.clone();
+        definition.item.digest = digest(&source).unwrap();
+        definition.parts[0].digest = part_digest(&source.join(&part.path)).unwrap();
+        let archive = temporary.path().join("archive.zip");
+        let mut writer = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+        for (name, body) in &files {
+            writer.start_file(format!("repo-commit/{folder}/{name}"), zip::write::SimpleFileOptions::default()).unwrap();
+            writer.write_all(body.as_bytes()).unwrap();
+        }
+        writer.finish().unwrap();
+
+        let store = Store::with_plugins(&temporary.path().join("data"), vec![], vec![definition.clone()]);
+        let resources =
+            BTreeMap::from([(id.to_owned(), definition.item.commit.clone()), (format!("{id}--{id}"), definition.item.commit.clone())]);
+        let wait = || drop(store.kit_for(Vendor::Claude, "design the screen", None, Area::Project, Permissions::FullAccess, &[]));
+        store.install_sources(&definition.item, &archive, &BTreeMap::new()).unwrap();
+        assert_eq!(store.installed_resources(), resources);
+        assert!(store.verify_plugin_sources());
+        for enabled in [false, true] {
+            wait();
+            store.set_enabled(id, enabled).unwrap();
+            assert_eq!(store.enabled(id), enabled);
+            assert_eq!(store.resource_selection().unwrap().disabled.contains(&format!("{id}--{id}")), !enabled);
+        }
+        wait();
+        store.remove(id).unwrap();
+        assert!(store.installed_resources().is_empty());
+        store.restore(id).unwrap();
+        assert_eq!(store.installed_resources(), resources);
+        assert!(store.verify_plugin_sources());
+        wait();
+        store.remove(id).unwrap();
+        store.clear_removed().unwrap();
+        assert!(store.installed().is_empty());
+    }
+}

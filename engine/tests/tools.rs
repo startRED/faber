@@ -416,12 +416,14 @@ fn curated_catalog_has_checked_metadata_locales_and_a_bounded_size() {
         .unwrap()
         .iter()
         .chain(file["servers"].as_array().unwrap())
+        .chain(file["plugins"].as_array().into_iter().flatten())
         .chain(file["runtimes"].as_array().unwrap())
         .collect();
     let items = catalog();
     assert_eq!(items.len(), entries.len(), "no item silently disappears while parsing");
     assert_eq!(file["skills"].as_array().unwrap().len(), 118, "audited skills and the pinned on-demand product demo kit");
     assert_eq!(file["servers"].as_array().unwrap().len(), 4, "only audited credential-free trees enter the catalog");
+    assert_eq!(file["plugins"].as_array().map_or(0, Vec::len), 1, "only plugins whose every part passes the preflight");
     assert_eq!(file["runtimes"].as_array().unwrap().len(), 11, "processor tools, recorded packs and advisory GPU tools are present");
     assert!(source.len() <= 128 * 1024, "metadata budget including complete runtime pins: {} bytes", source.len());
     let locales = [

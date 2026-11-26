@@ -1,5 +1,6 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
+import catalog from '../../engine-projects/src/tools.json';
 import { api, type ToolRow, type Vendor } from '../../ui/api.ts';
 import { Catalog, forgetCatalogView } from '../../ui/Catalog.tsx';
 import { LANGUAGES, catalogName, lang, t, useLanguage } from '../../ui/i18n.ts';
@@ -188,4 +189,30 @@ check('plugins: a part reaching the work log reads as its plugin name, then the 
   equal(catalogName('fixture-plugin--careful-reader'), `${catalogName('fixture-plugin')} · careful reader`);
   equal(catalogName('debug'), catalogName('debug'));
   ok(!catalogName('fixture-plugin--reader').includes('--'));
+});
+
+check('plugins: every shipped catalog plugin shows its own name, description, parts and access', async () => {
+  const shipped = catalog.plugins ?? [];
+  ok(shipped.length > 0, 'the catalog ships a plugin');
+  for (const entry of shipped) {
+    for (const locale of LANGUAGES) {
+      ok(Object.hasOwn(locale.messages, `catalog.name.${entry.id}`), `${locale.code}: ${entry.id} has a hand-written name`);
+      ok(Object.hasOwn(locale.messages, `tools.${entry.id}`), `${locale.code}: ${entry.id} has a hand-written description`);
+    }
+    const view = await panel({
+      ...fixture(), id: entry.id, job: entry.job, repo: entry.repo, license: entry.license, version: entry.commit,
+      home: `https://github.com/${entry.repo}/tree/${entry.commit}/${entry.path}`, requiresNode: false,
+      pluginParts: entry.parts.map((part) => ({ id: part.id, kind: part.kind as 'skill' })),
+    });
+    try {
+      await tap(button(view.root, 'catalog.plugins'));
+      const card = cards(view.root)[0];
+      equal(card.dataset.catalogCard, entry.id);
+      ok(card.textContent?.includes(catalogName(entry.id)), `${entry.id}: its hand-written name`);
+      await tap(card);
+      ok(view.root.textContent?.includes(t(`tools.${entry.id}` as Key)), `${entry.id}: its hand-written description`);
+      deepEqual([...view.root.querySelectorAll<HTMLElement>('[data-plugin-part]')].map((part) => part.dataset.pluginPart), entry.parts.map((part) => part.id));
+      if (entry.parts.some((part) => part.kind === 'skill')) ok(view.root.textContent?.includes(t('catalog.accessSkill')), `${entry.id}: what its skill may do`);
+    } finally { view.close(); }
+  }
 });
