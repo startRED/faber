@@ -14,6 +14,26 @@ Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 - **Catalog candidates.** Suggest a skill or tool server through an issue, with its source, license and why it belongs.
   Faber never bundles third-party tools; the catalog downloads them from their original source.
 
+## Good first contributions
+
+Start with an open issue labelled [`good first issue`](https://github.com/startRED/faber/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+or [`help wanted`](https://github.com/startRED/faber/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22).
+
+Three kinds of help need no Rust or TypeScript:
+
+- Try Faber on Linux or an Intel Mac and [report what happened](https://github.com/startRED/faber/issues/new?template=platform_report.yml).
+- Review your own language in `ui/locales/` as a native speaker, with the [translation form](https://github.com/startRED/faber/issues/new?template=translation.yml).
+- Fix a sentence in the docs.
+
+To claim an issue, comment that you are taking it. You do not need to wait for an answer before you start a small fix.
+If you stop, say so in a comment, so someone else can take it.
+
+## What to expect
+
+One maintainer reads every issue and pull request. Small, focused ones are answered first. A pull request that follows
+this page is reviewed. One that does not is sent back with a pointer to the section it missed. That is not a rejection:
+fix it and it will be reviewed. There is no promised reply time.
+
 ## Before you write code
 
 - Read the [non-goals](docs/product/README.md#non-goals) so effort does not go to something Faber will not do.
@@ -51,6 +71,8 @@ The [README](README.md#build-from-source) has the Linux packages and the full li
 4. Fill in the pull request template. Your fork's pull request runs the checks independently. A maintainer reviews it,
    and an approved one is squashed into a single commit on `phase-1-base`. You do not need `scripts/ship.mjs` or
    `scripts/land.mjs`; those are for the maintainer's own workflow.
+   First-time contributors only need the "What changed and why" and "Checks run" parts of the template; write `Maintainer`
+   under the others.
 
 A change is done when a check fails without it. When it changes what a person sees, update
 [product-map.md](docs/product-map.md) and the matching page under `docs/design/` in the same pull request.
@@ -68,6 +90,20 @@ A change is done when a check fails without it. When it changes what a person se
 - Memory is a feature. With no CLI running Faber stays under 500 MB, and the end-to-end test fails above 400 MB. A change
   to processes, long-lived state or how much the screen keeps drawn states its memory and processor cost in the pull
   request.
+
+## AI-assisted contributions
+
+Contributions made with AI help are welcome. Most of Faber is written with AI agents, and [AGENTS.md](AGENTS.md) is
+written for them. If you use an agent, point it at that file.
+
+- A person is accountable for every change. You ran the change, read every line and can explain it.
+- You answer review comments yourself, in your own words.
+- Say in the pull request which tool and model helped.
+- One problem per pull request. A new feature, or a change above roughly 300 changed lines, needs an issue the
+  maintainer agreed to first. A large pull request nobody asked for is closed with a link to this section.
+- A pull request opened by an unattended agent, with no person answering, is closed.
+- The same holds for issues: a bug report must describe something you saw happen, with the steps to repeat it.
+- Never paste credentials, tokens or private conversation content into an issue, a pull request or a log.
 
 ## Security
 

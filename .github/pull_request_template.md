@@ -1,3 +1,6 @@
+<!-- Outside contributors: fill in "What changed and why" and "Checks run", and write `Maintainer` under the other headings.
+     If an AI tool helped, read CONTRIBUTING.md (AI-assisted contributions) first and name the tool and model in the description. -->
+
 ## What changed and why
 
 <!-- One or two sentences. Title the pull request `type(scope): summary` (feat, fix, perf, docs, test, ci, refactor,

@@ -4,13 +4,15 @@
 
 <h3>
 
-[Download](#install) · [What it does](#what-works-today) · [How it works](#how-it-works) · [Roadmap](docs/product/README.md) · [Discussions](https://github.com/startRED/faber/discussions) · [Contributing](CONTRIBUTING.md)
+[Download](#install) · [What it does](#what-works-today) · [How it works](#how-it-works) · [Roadmap](docs/product/README.md) · [FAQ](#faq) · [Discussions](https://github.com/startRED/faber/discussions) · [Contributing](CONTRIBUTING.md)
 
 </h3>
 
 [![Latest release](https://img.shields.io/github/v/release/startRED/faber?style=flat-square&color=d6dc48&labelColor=141a11)](https://github.com/startRED/faber/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/startRED/faber/ci.yml?branch=main&style=flat-square&label=CI&labelColor=141a11)](https://github.com/startRED/faber/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-f3f0e8?style=flat-square&labelColor=141a11)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/startRED/faber/total?style=flat-square&label=downloads&labelColor=141a11)](https://github.com/startRED/faber/releases)
+[![Good first issues](https://img.shields.io/github/issues/startRED/faber/good%20first%20issue?style=flat-square&label=good%20first%20issues&color=d6dc48&labelColor=141a11)](https://github.com/startRED/faber/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
 
 <br />
 
@@ -20,12 +22,28 @@
 
 <br />
 
-Faber is a desktop app with a **Chat** and a **Projects** area that runs the official Claude Code and Codex
-command-line tools on the subscriptions you already pay for. Start a conversation, let the AI work in your folder and
-stay in charge: it can ask before it changes things, shows what it did and keeps your project's memory in plain files.
+**Claude Code and Codex in one desktop app, on the subscriptions you already pay for.** No API keys and no extra
+bill: Faber runs the official command-line tools unmodified, and you sign in through each tool's own flow.
 
-It aims to do anything AI can do, at commercial quality, so you never need another AI app. If you use AI every day it
-feels familiar; if you never have, you learn it by using it. It runs on Windows, macOS and Linux, with Windows first.
+It has a **Chat** area and a **Projects** area. Start a conversation, let the AI work in your folder and stay in
+charge: it can ask before it changes things, shows what it did and keeps your project's memory in plain files.
+It runs on Windows, macOS and Linux, with Windows first.
+
+The aim is one app for everything AI can do, at commercial quality. [What works today](#what-works-today) is below,
+and the [roadmap](docs/product/README.md) says what comes next.
+
+> [!NOTE]
+> Faber 1.0 is out and new builds land most days. The installers are not code-signed yet, and Linux and Intel Macs
+> need testers: [tell us what happens on yours](https://github.com/startRED/faber/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22).
+
+## Is Faber for you?
+
+- You pay for Claude Pro or Max, or ChatGPT Plus or Pro, and want both tools in one window instead of two apps or two terminals.
+- You are on Windows and tired of tools that arrive on the Mac first.
+- You want the AI to ask before it writes, and to see what it changed.
+- You do not want another API bill or another account.
+
+If you use one tool in a terminal and like it that way, you may not need Faber.
 
 ## What you get
 
@@ -156,6 +174,42 @@ Gemini through Antigravity for Projects, a live CLI compatibility manifest, then
 with routines, video, and driving desktop apps. See what is in progress and what just landed on the
 [board](https://github.com/startRED/faber/blob/board/BOARD.md).
 
+## Help Faber grow
+
+Faber is built by one person with AI agents, so every bit of outside help shows.
+
+- **Two minutes:** star the repository so other people find it, and tell us what you expected and did not get in
+  [Discussions](https://github.com/startRED/faber/discussions).
+- **Ten minutes:** install Faber on Linux or an Intel Mac and report what happens, or read your own language in the
+  app and correct it. Both are in the [help wanted](https://github.com/startRED/faber/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) list.
+- **An evening:** pick a [good first issue](https://github.com/startRED/faber/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+  One bug or one improvement per pull request, with a test that fails without it.
+- **Using an AI agent to contribute?** Welcome. Point it at [AGENTS.md](AGENTS.md) and read
+  [the rules for AI-assisted changes](CONTRIBUTING.md#ai-assisted-contributions) first.
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md), and see the [Code of Conduct](CODE_OF_CONDUCT.md). Report security
+problems privately as described in [SECURITY.md](SECURITY.md).
+
+## FAQ
+
+**Do I need an API key?** No. Faber uses the plan you already have: Claude Pro or Max, or ChatGPT Plus or Pro for
+Codex. One of them is enough.
+
+**Does Faber see my login?** No. You sign in through each tool's own flow, and Faber never reads, copies or stores
+your credentials.
+
+**Does Faber send my data anywhere?** Telemetry is off by default. Conversations and projects are files on your
+computer. The command-line tools talk to their own services exactly as they do in a terminal.
+
+**Why not the terminal, or each vendor's own app?** One window for both tools, Auto that picks the model for each
+message and says why, a review by the other AI, and project memory in plain files that outlive the app.
+
+**Why source-available and not open source?** The [license](#license) lets anyone use, change and share Faber for
+anything except a competing product, and each version becomes Apache 2.0 two years after its release.
+
+**Is it finished?** No. Version 1.0 is out, [what works today](#what-works-today) is the honest list, and the
+[roadmap](docs/product/README.md) is public.
+
 ## Repository layout
 
 | Folder | What it holds |
@@ -213,25 +267,6 @@ npm run lint && npm run typecheck && npm run docs && npm run build && cargo fmt 
 
 `node scripts/cargo.mjs t` runs only the tests that depend on the files you changed; `node scripts/cargo.mjs t --all`
 runs the full suite, including the hidden-window screen tests on Windows. Run it when the screen or the shell changes.
-
-## Contributing
-
-Bug reports, fixes, documentation and native-speaker translations are welcome. Start with
-[CONTRIBUTING.md](CONTRIBUTING.md), and see the [Code of Conduct](CODE_OF_CONDUCT.md). Report security problems
-privately as described in [SECURITY.md](SECURITY.md). Questions and ideas go to
-[Discussions](https://github.com/startRED/faber/discussions).
-
-## Star history
-
-If Faber is useful to you, a star helps other people find it.
-
-<p align="center"><a href="https://www.star-history.com/#startRED/faber&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=startRED/faber&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=startRED/faber&type=Date" />
-    <img alt="Faber's stars over time" src="https://api.star-history.com/svg?repos=startRED/faber&type=Date" width="640" />
-  </picture>
-</a></p>
 
 ## License
 
