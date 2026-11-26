@@ -62,6 +62,10 @@ The dollar and token budgets are checked before each request, side and judge sta
 
 Claude judges disable tools and settings sources. Codex judges use an ephemeral read-only session in the empty judge folder and ignore user configuration while retaining the CLI sign-in. Shell, web search, hooks and app/browser integrations are disabled. An empty MCP override alone does not clear inherited tables; ignoring user configuration excludes personal MCP servers, but system or managed servers are not independently excluded or tested. Read-only is not a guarantee of no built-in read tools; the prompt asks only for a verdict from the supplied blind text. The selected vendor, model, effort and weaker fallback coverage are saved in `results.json` and `tables.md`.
 
+## Paired project parts
+
+Each part Faber adds to a project turn, switched off one at a time in paired runs: [Paired project parts](bench-parts.md).
+
 ## Reading quality totals
 
 Cross-vendor verdict totals describe independent opinions, not completed qualification. The separate Projects total credits a Faber win or tie only with an independent verdict, a successful completed Faber side (no error or cap stop), and a passing executable proof. Every recorded Project row stays in its denominator, including failed and skipped work; Chat rows stay out. A failed plain-side proof does not erase a proven Faber result. The target is 9/10, but this count alone does not qualify a version: unrecorded requests, the full first-public set and Chat's source accuracy require their own evidence.

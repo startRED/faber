@@ -6,6 +6,7 @@ impl Core {
     /// Counts a request in flight whose cost is not known yet. A failed count closes the ledger's writes, never the
     /// person's foreground work.
     pub(super) fn begin_unbounded(&mut self, vendor: Vendor) -> Result<(), String> {
+        self.bench.call_started();
         let now = self.secs();
         if budget::start_unbounded(&mut self.ledger, vendor, now).is_err() {
             self.projects_closed = true;

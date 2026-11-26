@@ -12,6 +12,15 @@ pub const PROJECT_DETAILS: &str = concat!(
     " Change only what the request asks for; name anything else you notice instead of changing it, and say what you left out.",
     " In every project, use its existing workflow and the conversation's working folder: Faber already shares Git objects through separate worktrees, so do not make another full clone for each task. When checks are declared, use verify fast while iterating and verify full before delivery and after toolchain or installed dependency changes. Read the current project instructions before starting; preserve local edits and unique commits, never silently update the person's checkout, and keep its existing CI, required checks and permissions."
 );
+pub(crate) fn project_details(tuning: &crate::model::Tuning) -> std::borrow::Cow<'static, str> {
+    if tuning.bench_checks_off {
+        PROJECT_DETAILS.replace(" When checks are declared, use verify fast while iterating and verify full before delivery and after toolchain or installed dependency changes.", "")
+            .replace("the command you ran, verify, or look", "the command you ran, or look").into()
+    } else {
+        PROJECT_DETAILS.into()
+    }
+}
+
 /// Added to a project's own agent only, the one that is given the `offer_bigger` tool (a helper has the same project details and no such tool).
 pub const BIGGER_OFFER: &str = " When a request is small and the goal behind it is clear, do the request as asked first, then offer the larger version once with the offer_bigger tool, only if it would clearly serve that goal; the request as asked stays the default. Never hold the work for this offer. Do not ask this any other way.";
 /// Added only to a project's own agent, which can start conversations.

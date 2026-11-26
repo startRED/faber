@@ -515,6 +515,145 @@ pub fn choose_judge<'a>(plain: &str, authors: &Authors, available: &'a [&str], p
 
 // --- The report -----------------------------------------------------------------------------------------------------
 
+use faber_engine::BenchPart;
+
+pub fn parse_parts(value: &str) -> Result<Vec<BenchPart>, String> {
+    if value == "all" {
+        return Ok(BenchPart::ALL.to_vec());
+    }
+    let mut parts = Vec::new();
+    for name in value.split(',') {
+        let part = BenchPart::ALL.into_iter().find(|part| part.name() == name).ok_or_else(|| format!("unknown benchmark part: {name}"))?;
+        if parts.contains(&part) {
+            return Err(format!("duplicate benchmark part: {name}"));
+        }
+        parts.push(part);
+    }
+    Ok(parts)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Condition {
+    On,
+    Off,
+}
+
+impl Condition {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::On => "on",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn other(self) -> Self {
+        match self {
+            Self::On => Self::Off,
+            Self::Off => Self::On,
+        }
+    }
+}
+
+pub fn part_order(run_id: &str, index: usize) -> [Condition; 2] {
+    if a_side(run_id, index) == Side::Faber { [Condition::On, Condition::Off] } else { [Condition::Off, Condition::On] }
+}
+
+#[derive(Serialize)]
+pub struct PartRow {
+    pub part: &'static str,
+    pub request: String,
+    pub order: [Condition; 2],
+    pub a: Condition,
+    pub on: Option<SideResult>,
+    pub off: Option<SideResult>,
+    pub verdict: Option<Verdict>,
+    pub independent: bool,
+    pub judge_cost_usd: Option<f64>,
+    pub judge_usage: Usage,
+    pub note: Option<String>,
+}
+
+impl PartRow {
+    pub fn new(part: BenchPart, request: &str, run_id: &str, index: usize) -> Self {
+        let order = part_order(run_id, index);
+        Self {
+            part: part.name(),
+            request: request.into(),
+            order,
+            a: part_order(&format!("{run_id}-judge"), index)[0],
+            on: None,
+            off: None,
+            verdict: None,
+            independent: false,
+            judge_cost_usd: None,
+            judge_usage: Usage::default(),
+            note: None,
+        }
+    }
+
+    pub fn side(&self, condition: Condition) -> Option<&SideResult> {
+        match condition {
+            Condition::On => self.on.as_ref(),
+            Condition::Off => self.off.as_ref(),
+        }
+    }
+
+    pub fn side_mut(&mut self, condition: Condition) -> &mut Option<SideResult> {
+        match condition {
+            Condition::On => &mut self.on,
+            Condition::Off => &mut self.off,
+        }
+    }
+
+    fn verdict_for(&self, condition: Condition) -> &'static str {
+        match self.verdict.as_ref().map(|verdict| verdict.pick) {
+            Some(Pick::Tie) => "tie",
+            Some(pick) if (pick == Pick::A) == (condition == self.a) => "win",
+            Some(_) => "loss",
+            None => "not judged",
+        }
+    }
+}
+
+pub fn render_parts(rows: &[PartRow]) -> String {
+    use std::fmt::Write;
+    let mut table = String::from(concat!(
+        "Time is wall seconds. Input includes cache writes. Tokens cover recorded replies only.\n\n",
+        "| Part | Request | Condition | Ran | Time (s) | Input | Cached input | Output | Extra calls | Verdict |\n",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |\n",
+    ));
+    for row in rows {
+        for (index, condition) in row.order.into_iter().enumerate() {
+            let metrics = row.side(condition).map_or_else(
+                || "? | ? | ? | ? | ?".to_string(),
+                |side| {
+                    format!(
+                        "{:.2} | {} | {} | {} | {}",
+                        side.wall_secs,
+                        side.usage.input + side.usage.cache_write,
+                        side.usage.cache_read,
+                        side.usage.output,
+                        side.extra_calls.map_or_else(|| "?".into(), |n| n.to_string())
+                    )
+                },
+            );
+            let verdict = row.verdict_for(condition);
+            let qualification = if row.verdict.is_some() && !row.independent { " (independence unconfirmed)" } else { "" };
+            writeln!(
+                table,
+                "| {} | {} | {} | {} | {metrics} | {verdict}{qualification} |",
+                row.part,
+                row.request,
+                condition.name(),
+                index + 1
+            )
+            .expect("write to String");
+        }
+    }
+    table
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SideResult {
     pub side: Side,
@@ -539,6 +678,7 @@ pub struct SideResult {
     pub stopped_by_cap: bool,
     /// The run hit the time limit (`RUN_LIMIT`); its proof still runs, so a stop that threw away passing work shows.
     pub timed_out: bool,
+    pub extra_calls: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -974,6 +1114,209 @@ mod tests {
         assert_eq!(cap.allowance(&spent, 1.5), 0.0);
     }
 
+    async fn recorded_project(disabled: Option<BenchPart>) -> (Vec<Value>, u64) {
+        use faber_engine::model::{Area, Permissions, Project, Settings, Status, Vendor};
+        use faber_engine::proc::{Proc, Spawner};
+        use faber_engine::{Engine, EngineOptions, SendRequest};
+        use serde_json::json;
+        use std::{
+            collections::{BTreeMap, HashMap},
+            sync::{Arc, Mutex},
+            time::Duration,
+        };
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::write(project.join("AGENTS.md"), "# Project fixture\n").unwrap();
+        let state = root.path().join("state");
+        std::fs::create_dir(&state).unwrap();
+        let wire = Arc::new(Mutex::new(Vec::new()));
+        let record = wire.clone();
+        let spawn: Spawner = Arc::new(move |_, _, _| {
+            let (stdin, input) = tokio::io::duplex(65536);
+            let (mut output, stdout) = tokio::io::duplex(65536);
+            let record = record.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(input).lines();
+                let mut threads = HashMap::new();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let call: Value = serde_json::from_str(&line).unwrap();
+                    record.lock().unwrap().push(call.clone());
+                    let id = &call["id"];
+                    if id.is_null() {
+                        continue;
+                    }
+                    let params = &call["params"];
+                    let mut reply = Vec::new();
+                    let result = match call["method"].as_str() {
+                        Some("config/read") => json!({"config":{"mcp_servers":{}}}),
+                        Some("thread/start") => {
+                            let thread = format!("thread-{id}");
+                            threads.insert(thread.clone(), params["baseInstructions"].as_str().unwrap_or("").to_owned());
+                            json!({"thread":{"id":thread}, "model": params["model"]})
+                        }
+                        Some("turn/start") => {
+                            let thread = params["threadId"].as_str().unwrap();
+                            let turn = format!("turn-{id}");
+                            let prompt = threads.get(thread).map_or("", String::as_str);
+                            let input = params["input"][0]["text"].as_str().unwrap_or("");
+                            let answer = if prompt.contains("classif") {
+                                "{\"kind\":\"code\",\"difficulty\":\"easy\",\"scope\":\"tight\",\"check\":\"glance\",\"confidence\":0.95}"
+                            } else if prompt.contains("software project") {
+                                "{\"verdict\":\"clear\"}"
+                            } else if prompt.contains("at most six words") {
+                                "Project fixture"
+                            } else if input.contains("your closing box leaves work") {
+                                "Already checked."
+                            } else {
+                                "I checked the request.\n<|faber-wrap-up|>\n{\"outcome\":\"blocked\",\"did\":\"Read the project\",\"result\":\"The issue remains\",\"not_done\":\"Check the input\"}\n<|/faber-wrap-up|>"
+                            };
+                            reply.push(json!({"method":"item/agentMessage/delta","params":{"threadId":thread,"turnId":turn,"itemId":"answer","delta":answer}}));
+                            reply.push(
+                                json!({"method":"turn/completed","params":{"threadId":thread,"turn":{"id":turn,"status":"completed"}}}),
+                            );
+                            json!({"turn": {"id": turn, "status": "inProgress"}})
+                        }
+                        _ => json!({}),
+                    };
+                    reply.insert(0, json!({"id":id, "result":result}));
+                    for message in reply {
+                        if output.write_all(format!("{message}\n").as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            });
+            Ok(Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None })
+        });
+        let engine = Engine::new(
+            EngineOptions {
+                data_dir: state,
+                #[cfg(windows)]
+                chat_dir: root.path().join("chat"),
+                clis: BTreeMap::from([(Vendor::Codex, faber_engine::cli::Cli { command: "fake".into(), prefix: vec![] })]),
+                spawn,
+                windows: false,
+                claude_env_billed: false,
+                max_warm: 1,
+                idle: Duration::from_secs(120),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+        engine.set_bench_part(disabled);
+        engine.enable_ask_judge();
+        engine.set_verifier(faber_engine::verify::Verifier::real(None, None));
+        engine.note_account_events(
+            Vendor::Codex,
+            vec![faber_engine::events::EngineEvent::Signals(faber_engine::signals::Signals {
+                billing: Some(faber_engine::budget::Billing::Subscription),
+                ..Default::default()
+            })],
+        );
+        engine.set_codex_models(vec!["gpt-6-luna".into(), "gpt-6.1-sol".into()], Some("gpt-6.1-sol".into()));
+        engine.save_settings(Settings { permissions: Some(Permissions::FullAccess), ..Default::default() }).unwrap();
+        let project = engine.add_project(&project.to_string_lossy()).unwrap();
+        engine.update_project(&project, &Project { separate_copies: false, ..project.clone() }).unwrap();
+        let id = engine
+            .send(SendRequest {
+                conversation_id: None,
+                project_id: Some(project.id),
+                area: Area::Project,
+                text: "Check whether the input is valid".into(),
+                images: vec![],
+                files: vec![],
+                choice: faber_engine::router::Choice { vendor: "auto".into(), model: None, effort: None },
+            })
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if engine.open(&id).and_then(|c| c.messages.last().map(|m| m.status)) == Some(Some(Status::Done))
+                    && !engine.bench_pending_title(&id)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "the in-memory turn settles ({disabled:?}): {:?} / {}",
+                engine.open(&id).map(|c| c.messages.iter().map(|m| (m.status, m.error.clone(), m.text.clone())).collect::<Vec<_>>()),
+                serde_json::to_string(&*wire.lock().unwrap()).unwrap()
+            )
+        });
+        let calls = engine.bench_extra_calls();
+        engine.shutdown();
+        let recording = wire.lock().unwrap().clone();
+        (recording, calls)
+    }
+
+    #[tokio::test]
+    async fn part_switches_remove_only_their_own_wire_payload() {
+        let markers = [
+            (BenchPart::Persona, "Write every message the person reads"),
+            (BenchPart::Guide, "Faber\u{27}s own guide"),
+            (BenchPart::StartCard, "faber-start-card"),
+            (BenchPart::Checks, "\"name\":\"verify\""),
+            (BenchPart::Review, "\"name\":\"review\""),
+            (BenchPart::Router, "You classify a user"),
+            (BenchPart::Title, "at most six words"),
+            (BenchPart::AskJudge, "You read the first request"),
+            (BenchPart::FollowUps, "your closing box leaves work"),
+            (BenchPart::Delegation, "\"name\":\"conversation\""),
+            (BenchPart::CreativeJudge, "\"name\":\"judge_creative\""),
+        ];
+        assert_eq!(markers.len(), BenchPart::ALL.len());
+        let (baseline, calls) = recorded_project(None).await;
+        let baseline = baseline.iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+        for (part, marker) in markers {
+            assert!(baseline.contains(marker), "{part:?} missing from baseline: {baseline}");
+            let (wire, off_calls) = recorded_project(Some(part)).await;
+            let wire = wire.iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+            assert!(!wire.contains(marker), "{part:?} was still sent: {wire}");
+            if matches!(part, BenchPart::Title | BenchPart::AskJudge | BenchPart::Router | BenchPart::FollowUps) {
+                assert_eq!(off_calls + 1, calls, "{part:?}");
+            }
+        }
+    }
+    #[test]
+    fn part_rows_alternate_whats_run_and_reveal_both_verdicts() {
+        let parts = parse_parts("guide,router").unwrap();
+        assert_eq!(parts, [BenchPart::Guide, BenchPart::Router]);
+        assert!(parse_parts("guide,guide").is_err());
+        assert!(parse_parts("unknown").is_err());
+        let mut rows = vec![];
+        for part in parts {
+            for (index, request) in ["a", "b", "c"].into_iter().enumerate() {
+                let mut row = PartRow::new(part, request, "fixed", index);
+                assert_eq!(row.order[1], row.order[0].other());
+                if index == 1 {
+                    assert_eq!(row.order[0], part_order("fixed", 0)[1]);
+                }
+                row.a = Condition::Off;
+                row.verdict = parse_verdict("{\"winner\":\"A\"}");
+                row.independent = true;
+                for (condition, calls) in [(Condition::On, 2), (Condition::Off, 0)] {
+                    let mut result = side(Side::Faber, 0.1, None);
+                    result.extra_calls = Some(calls);
+                    *row.side_mut(condition) = Some(result);
+                }
+                rows.push(row);
+            }
+        }
+        let rendered = render_parts(&rows);
+        assert_eq!(rendered.matches("| guide |").count(), 6);
+        assert_eq!(rendered.matches("| router |").count(), 6);
+        assert!(rendered.contains("| 120.00 | 80 | 500 | 20 | 2 | loss |"));
+        assert!(rendered.contains("| 120.00 | 80 | 500 | 20 | 0 | win |"));
+    }
+
     fn side(which: Side, usd: f64, pass: Option<bool>) -> SideResult {
         SideResult {
             side: which,
@@ -992,6 +1335,7 @@ mod tests {
             proof: pass.map(|p| Proof { pass: p, checks: vec![Check { name: "c".into(), ok: p, detail: String::new() }] }),
             stopped_by_cap: false,
             timed_out: false,
+            extra_calls: None,
         }
     }
 

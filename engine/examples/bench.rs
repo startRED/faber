@@ -8,6 +8,7 @@
 //!     cargo run -p faber-engine --example bench -- [--dry-run] [--plain claude|codex] [--vendors claude[,codex]]
 //!         [--only id,id] [--run-id id] [--dir folder] [--cap-usd 8] [--cap-tokens 3000000] [--per-run-usd 1.5]
 //!         [--plain-model m] [--plain-effort e] [--judge-model m] [--judge-effort e] [--busy-account]
+//!         [--parts all|part,part]
 //!     --tool-definitions exports both toolbox wire formats as JSON without starting a CLI or spending quota.
 //!
 //! The pure parts (request files, the A/B deal, the verdict, what a CLI reported, the cap, the tables) are
@@ -17,6 +18,8 @@
 mod bench_quiet;
 #[path = "../../bench/inputs.rs"]
 mod inputs;
+#[path = "../../bench/parts.rs"]
+mod parts;
 #[path = "../../bench/pure.rs"]
 mod pure;
 #[path = "../../bench/workflow.rs"]
@@ -26,7 +29,7 @@ use faber_engine::cli::{Cli, find_cli};
 use faber_engine::model::{Area, Conversation, Message, Permissions, Project, Role, Settings, Status, Vendor};
 use faber_engine::proc::{self, Proc};
 use faber_engine::router::Choice;
-use faber_engine::{Engine, EngineOptions, SendRequest};
+use faber_engine::{BenchPart, Engine, EngineOptions, SendRequest};
 use inputs::copy_tree;
 use pure::{Cap, Kind, Outcome, Request, Row, Side, SideResult, Spend, Usage};
 use serde_json::json;
@@ -60,6 +63,7 @@ struct Options {
     dry_run: bool,
     busy_account: bool,
     workflow_pair: bool,
+    parts: Vec<BenchPart>,
 }
 
 impl Options {
@@ -67,6 +71,14 @@ impl Options {
         let args: Vec<String> = std::env::args().skip(1).collect();
         let workflow_pair = args.iter().any(|a| a == "--workflow-pair");
         let value = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+        let parts = if args.iter().any(|arg| arg == "--parts") {
+            if workflow_pair {
+                return Err("--parts and --workflow-pair are mutually exclusive".into());
+            }
+            pure::parse_parts(&value("--parts").ok_or("--parts needs all or a comma-separated list")?)?
+        } else {
+            vec![]
+        };
         let vendor = |name: &str| {
             [Vendor::Claude, Vendor::Codex].into_iter().find(|v| v.name() == name).ok_or_else(|| format!("{name} is claude or codex"))
         };
@@ -103,6 +115,7 @@ impl Options {
             dry_run: args.iter().any(|a| a == "--dry-run"),
             busy_account: args.iter().any(|a| a == "--busy-account"),
             workflow_pair,
+            parts,
         })
     }
 }
@@ -276,6 +289,7 @@ fn failed(side: Side, secs: f64, error: impl Into<String>) -> SideResult {
         proof: None,
         stopped_by_cap: false,
         timed_out: false,
+        extra_calls: None,
     }
 }
 
@@ -360,6 +374,7 @@ async fn run_plain(options: &Options, cli: &Cli, request: &Request, work: &Work,
         proof: None,
         stopped_by_cap: outcome.error.as_deref().is_some_and(|e| e.contains("max_budget")),
         timed_out: run.timed_out,
+        extra_calls: None,
     }
 }
 
@@ -416,7 +431,14 @@ mod cost_tests {
 
 /// Waits for the reply to settle: it ended and Faber's checks on it ended (or a project has none to run), or it needs the
 /// person. Ledger costs arrive at completed work boundaries; internal and auxiliary calls already in flight can overshoot.
-async fn settle(engine: &Engine, id: &str, project: bool, allowance: f64, baseline: (f64, u64)) -> (Option<Conversation>, bool) {
+async fn settle(
+    engine: &Engine,
+    id: &str,
+    project: bool,
+    allowance: f64,
+    baseline: (f64, u64),
+    bench_parts: bool,
+) -> (Option<Conversation>, bool) {
     let started = Instant::now();
     let (mut quiet, mut capped): (Option<(String, Instant)>, bool) = (None, false);
     while started.elapsed() < RUN_LIMIT {
@@ -436,6 +458,9 @@ async fn settle(engine: &Engine, id: &str, project: bool, allowance: f64, baseli
         }
         if capped || reply.needs_you || matches!(reply.status, Some(Status::Error | Status::Stopped)) || !project {
             return (Some(conversation), capped);
+        }
+        if bench_parts && engine.bench_pending_title(id) {
+            continue;
         }
         match reply.checks.as_ref().map(|k| k.state) {
             Some(faber_engine::model::ChecksState::Passed | faber_engine::model::ChecksState::NeedsYou) => {
@@ -480,6 +505,7 @@ fn logging_spawner(log: PathBuf) -> proc::Spawner {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_faber(
     clis: &BTreeMap<Vendor, Cli>,
     request: &Request,
@@ -488,6 +514,7 @@ async fn run_faber(
     allowance: f64,
     billed: bool,
     paired: Option<&Choice>,
+    bench_trial: Option<Option<BenchPart>>,
 ) -> SideResult {
     let started = Instant::now();
     let state = root.join(&request.id).join("faber").join("state");
@@ -510,6 +537,10 @@ async fn run_faber(
         Ok(engine) => engine,
         Err(error) => return failed(Side::Faber, started.elapsed().as_secs_f64(), error.to_string()),
     };
+    if let Some(disabled) = bench_trial {
+        engine.set_bench_part(disabled);
+        engine.enable_ask_judge();
+    }
     let baseline = ledger_snapshot(&engine.ledger());
     // What the app's shell gives the engine: the native git for separate copies, and the verifier for the checks.
     engine.set_git(Arc::new(|| {
@@ -575,7 +606,7 @@ async fn run_faber(
             files: vec![],
             choice: paired.cloned().unwrap_or_else(|| Choice { vendor: "auto".into(), model: None, effort: None }),
         })?;
-        Ok::<_, String>((id.clone(), settle(&engine, &id, request.kind == Kind::Project, allowance, baseline).await))
+        Ok::<_, String>((id.clone(), settle(&engine, &id, request.kind == Kind::Project, allowance, baseline, bench_trial.is_some()).await))
     }
     .await;
     let wall = started.elapsed().as_secs_f64();
@@ -638,6 +669,7 @@ async fn run_faber(
                 stopped_by_cap: capped,
                 // Still answering when the time limit came.
                 timed_out: last.is_some_and(|m| m.status == Some(Status::Streaming)),
+                extra_calls: None,
             }
         }
     };
@@ -645,6 +677,7 @@ async fn run_faber(
     // The engine's processes end with it; give Windows a moment to release the folders before the next step reads them.
     tokio::time::sleep(Duration::from_millis(500)).await;
     side.cost_usd = pure::ledger_cost(baseline, ledger_snapshot(&engine.ledger()));
+    side.extra_calls = bench_trial.map(|_| engine.bench_extra_calls());
     side
 }
 
@@ -913,6 +946,9 @@ async fn main() -> Result<(), Failure> {
         return Ok(());
     }
     let mut options = Options::read()?;
+    if !options.parts.is_empty() {
+        return parts::run(options).await;
+    }
     if options.workflow_pair {
         return workflow::run(&options).await;
     }
@@ -1016,7 +1052,7 @@ async fn main() -> Result<(), Failure> {
                 write_checkpoint(&root, &options, &rows, &row, &spent)?;
                 return Err(error.into());
             }
-            run_faber(&clis, request, &work, &root, options.cap.allowance(&spent, options.per_run_usd), false, None).await
+            run_faber(&clis, request, &work, &root, options.cap.allowance(&spent, options.per_run_usd), false, None, None).await
         };
         accounts.worked(&options.vendors);
         spent.add(&faber.usage, faber.cost_usd);

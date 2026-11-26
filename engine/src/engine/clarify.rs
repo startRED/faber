@@ -86,6 +86,9 @@ impl Core {
     /// Starts the judge for a conversation's first request; None when it does not apply or cannot run. The answer is the
     /// judge's raw line, or None when it failed.
     pub(super) fn ask_judge(&mut self, id: &str, text: &str, from_person: bool) -> Option<tokio::sync::oneshot::Receiver<Option<String>>> {
+        if self.bench.off(BenchPart::AskJudge) {
+            return None;
+        }
         if !self.convs.get(id).is_some_and(|c| wanted(c, text, from_person)) {
             return None;
         }

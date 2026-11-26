@@ -283,7 +283,7 @@ impl Core {
             },
         );
         let (me, name, gate) = (self.me.clone(), name.to_string(), self.kit_check_gate.clone());
-        let kept = (area == Area::Project && name == owner)
+        let kept = (area == Area::Project && name == owner && !self.bench.off(BenchPart::StartCard))
             .then(|| self.convs.get(owner).and_then(|c| c.project_id.as_deref()))
             .flatten()
             .map(|project| (self.store.kept_decisions_reader(project), self.store.approved_learning_reader(project)));

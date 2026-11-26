@@ -120,7 +120,11 @@ impl Core {
 
     /// Whether a project conversation on `vendor` offers the helper tool.
     pub(super) fn offers_helper(&self, area: Area, vendor: Vendor) -> Helper {
-        if area == Area::Project && self.opts.clis.contains_key(&vendor) { Helper::Offers } else { Helper::Off }
+        if area == Area::Project && self.opts.clis.contains_key(&vendor) && !self.bench.off(BenchPart::Delegation) {
+            Helper::Offers
+        } else {
+            Helper::Off
+        }
     }
 
     /// The agent called the helper tool. A helper that cannot start answers the call at once with why, so the agent goes on alone.

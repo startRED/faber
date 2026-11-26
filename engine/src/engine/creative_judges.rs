@@ -46,7 +46,8 @@ impl Drop for Judges {
 impl Core {
     pub(super) fn creative_call(&mut self, conv: &str, sid: u64, call: String, input: &serde_json::Value) {
         let refuse = |c: &Self, message: &str| c.answer_toolbox(conv, sid, &call, false, message.into());
-        if self.closing
+        if self.bench.off(BenchPart::CreativeJudge)
+            || self.closing
             || self.installing
             || self.convs.get(conv).is_none_or(|c| c.area != Area::Project || c.stopped)
             || self.live.get(conv).is_none_or(|l| l.sid != sid || l.permissions == Permissions::Isolated)

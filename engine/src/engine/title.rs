@@ -56,7 +56,7 @@ fn clean(text: &str) -> String {
 impl Core {
     pub(super) fn track_title(&mut self, id: &str) {
         // A replaced router must not introduce unrelated model calls into its recorded CLI session.
-        if self.opts.ask.is_some() {
+        if self.opts.ask.is_some() || self.bench.off(BenchPart::Title) {
             return;
         }
         let Some(c) = self.convs.get(id) else { return };

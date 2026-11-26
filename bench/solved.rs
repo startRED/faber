@@ -121,6 +121,7 @@ mod tests {
             proof: pass.map(|pass| Proof { pass, checks: vec![] }),
             stopped_by_cap: false,
             timed_out,
+            extra_calls: None,
         }
     }
 

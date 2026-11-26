@@ -84,7 +84,7 @@ impl Core {
         let (sid, permissions) = (l.sid, l.permissions);
         let area = self.convs.get(conv).map_or(Area::Chat, |c| c.area);
         let prepared = verify::level(&input).and_then(|level| {
-            if !self.offers_verify(area, permissions) {
+            if self.bench.off(BenchPart::Checks) || !self.offers_verify(area, permissions) {
                 return Err("Faber's checks run only in full access");
             }
             self.verify_request(conv, level)

@@ -424,7 +424,7 @@ impl Core {
     pub(super) fn route_for(&mut self, id: &str, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<RouteAnswer> {
         self.sent_draft(id);
         let (tx, rx) = oneshot::channel();
-        if self.route_profiles(only).len() <= 1 {
+        if self.bench.off(BenchPart::Router) || self.route_profiles(only).len() <= 1 {
             let _ = tx.send(None);
             return rx;
         }
@@ -502,6 +502,9 @@ impl Core {
 
     /// Asks the fastest cheap connected model once, in a session that reads and runs nothing.
     fn ask_router(&mut self, prompt: String) -> (Option<oneshot::Receiver<Option<String>>>, Option<Stop>, crate::act::Actor) {
+        if self.bench.off(BenchPart::Router) {
+            return (None, None, crate::act::Actor::Faber);
+        }
         if let Some(ask) = &self.opts.ask {
             let (tx, rx) = oneshot::channel();
             let answer = ask(prompt);
@@ -533,6 +536,9 @@ impl Core {
 
     /// A router session waiting for its question: a thread on the running Codex process, or a Claude process of its own.
     fn open_router(&mut self) -> Option<Spare> {
+        if self.bench.off(BenchPart::Router) {
+            return None;
+        }
         let router = ROUTER.into_iter().find(|(vendor, model, _)| {
             self.opts.clis.contains_key(vendor)
                 && (*vendor != Vendor::Codex || self.codex_models.iter().any(|m| m == model))

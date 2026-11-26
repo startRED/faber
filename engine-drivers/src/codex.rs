@@ -1464,33 +1464,35 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         params.insert("ephemeral".into(), true.into());
     } else {
         // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
-        let mut words = persona(&PersonaInput { name: t.user_name.as_deref(), tuning: &t.tuning, research: t.research });
-        if area == Area::Project {
-            words.push_str(crate::persona::PROJECT_DETAILS);
-            if matches!(t.helper, crate::helper::Helper::Is | crate::helper::Helper::Reviewer) {
-                words.push_str(" As a helper, return an ordinary report without a faber-wrap-up block.");
+        if !t.tuning.bench_persona_off {
+            let mut words = persona(&PersonaInput { name: t.user_name.as_deref(), tuning: &t.tuning, research: t.research });
+            if area == Area::Project {
+                words.push_str(&crate::persona::project_details(&t.tuning));
+                if matches!(t.helper, crate::helper::Helper::Is | crate::helper::Helper::Reviewer) {
+                    words.push_str(" As a helper, return an ordinary report without a faber-wrap-up block.");
+                }
+                if t.helper == crate::helper::Helper::Offers {
+                    words.push_str(crate::helper::HELPERS);
+                }
+                if t.progress {
+                    words.push_str(crate::persona::BIGGER_OFFER);
+                }
+                if t.progress && t.tuning.assumptions {
+                    words.push_str(crate::persona::ASSUMPTIONS);
+                }
+                if t.leads {
+                    words.push_str(crate::persona::LEADS);
+                }
             }
-            if t.helper == crate::helper::Helper::Offers {
-                words.push_str(crate::helper::HELPERS);
+            if let Some(instructions) = &t.group_instructions {
+                words.push_str("\n\nThe person's instructions for this chat group:\n");
+                words.push_str(instructions);
             }
-            if t.progress {
-                words.push_str(crate::persona::BIGGER_OFFER);
+            if t.permissions == Permissions::Isolated {
+                words.push_str("\n\nIn run_command, search files with rg PATTERN . or rg PATTERN FILE. Use -t TYPE to filter file types. With no path, rg can read the empty input stream. If Git exclude metadata cannot be read, retry rg with --no-ignore-exclude.");
             }
-            if t.progress && t.tuning.assumptions {
-                words.push_str(crate::persona::ASSUMPTIONS);
-            }
-            if t.leads {
-                words.push_str(crate::persona::LEADS);
-            }
+            params.insert("developerInstructions".into(), words.into());
         }
-        if let Some(instructions) = &t.group_instructions {
-            words.push_str("\n\nThe person's instructions for this chat group:\n");
-            words.push_str(instructions);
-        }
-        if t.permissions == Permissions::Isolated {
-            words.push_str("\n\nIn run_command, search files with rg PATTERN . or rg PATTERN FILE. Use -t TYPE to filter file types. With no path, rg can read the empty input stream. If Git exclude metadata cannot be read, retry rg with --no-ignore-exclude.");
-        }
-        params.insert("developerInstructions".into(), words.into());
         if t.permissions != Permissions::Isolated {
             apply_tuning(&mut params, &t.tuning);
         }
@@ -1527,16 +1529,24 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         if t.verify {
             let tools = params.entry("dynamicTools").or_insert_with(|| json!([]));
             if let Some(tools) = tools.as_array_mut() {
-                tools.push(crate::verify::codex_tool());
+                if !t.tuning.bench_checks_off {
+                    tools.push(crate::verify::codex_tool());
+                }
                 tools.push(crate::map::codex_tool());
             }
         }
         if t.progress {
             let tools = params.entry("dynamicTools").or_insert_with(|| json!([]));
             if let Some(tools) = tools.as_array_mut() {
-                tools.push(crate::review::codex_tool());
+                if !t.tuning.bench_review_off {
+                    tools.push(crate::review::codex_tool());
+                }
                 tools.extend(crate::progress::codex_tools());
-                tools.extend(crate::toolbox::codex_tools());
+                tools.extend(
+                    crate::toolbox::codex_tools()
+                        .into_iter()
+                        .filter(|tool| !t.tuning.bench_creative_off || tool["name"] != crate::toolbox::CREATIVE),
+                );
             }
         }
     }

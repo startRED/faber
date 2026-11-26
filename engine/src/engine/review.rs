@@ -126,7 +126,7 @@ impl Core {
         let Some(live) = self.live.get(conv) else { return };
         let (sid, own, session) = (live.sid, live.vendor, live.session.clone());
         let reply = |text: &str| session.helper_reply(&call, true, text.into());
-        if self.convs.get(conv).is_none_or(|c| c.area != Area::Project) {
+        if self.bench.off(BenchPart::Review) || self.convs.get(conv).is_none_or(|c| c.area != Area::Project) {
             reply("Next: stop (unavailable)");
             return;
         }

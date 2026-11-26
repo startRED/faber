@@ -244,7 +244,7 @@ impl Core {
     pub(super) fn guide_for(&self, vendor: Vendor, area: Area, permissions: Permissions) -> crate::guide::Guide {
         use crate::guide::Guide;
         let language = self.screen_language();
-        if permissions == Permissions::Isolated {
+        if permissions == Permissions::Isolated || self.bench.off(BenchPart::Guide) {
             return Guide::Off;
         }
         // Every session can read a file Faber points to, so the folder is written for all of them; only without it do the words go.

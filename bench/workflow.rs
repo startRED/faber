@@ -354,7 +354,7 @@ pub(super) async fn run(options: &Options) -> Result<(), Failure> {
             treatment.prompt.push('\n');
             treatment.prompt.push_str(GUIDANCE);
         }
-        let mut side = run_faber(&clis, &treatment, &work, side_root, allowance, false, Some(&choice)).await;
+        let mut side = run_faber(&clis, &treatment, &work, side_root, allowance, false, Some(&choice), None).await;
         let proof_error = if side.ok && side.folder.is_some() {
             match prove_scoped(&node, &work, &side, side_root, &inputs).await {
                 Ok(proof) => {

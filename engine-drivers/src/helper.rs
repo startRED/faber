@@ -154,6 +154,13 @@ impl Tools {
 /// Faber's MCP server, which holds the tools the session offers. Claude Code sends its JSON-RPC messages inside
 /// `mcp_message` control requests.
 pub fn mcp(message: &Value, tools: Tools) -> Mcp {
+    mcp_with(message, tools, &Default::default())
+}
+
+pub(crate) fn mcp_with(message: &Value, tools: Tools, tuning: &crate::model::Tuning) -> Mcp {
+    let enabled = |name: &Value| {
+        !(tuning.bench_review_off && name == crate::review::NAME || tuning.bench_creative_off && name == crate::toolbox::CREATIVE)
+    };
     let rpc = message["id"].clone();
     let answer = |result: Value| Mcp::Answer(json!({ "jsonrpc": "2.0", "id": rpc, "result": result }));
     match message["method"].as_str().unwrap_or_default() {
@@ -189,9 +196,10 @@ pub fn mcp(message: &Value, tools: Tools) -> Mcp {
                 list.extend(crate::progress::mcp_tools());
                 list.extend(crate::toolbox::mcp_tools());
             }
+            list.retain(|tool| enabled(&tool["name"]));
             answer(json!({ "tools": list }))
         }
-        "tools/call" if let Some(tool) = called(&message["params"]["name"], tools) => {
+        "tools/call" if let Some(tool) = called(&message["params"]["name"], tools).filter(|_| enabled(&message["params"]["name"])) => {
             let meta = &message["params"]["_meta"]["claudecode/toolUseId"];
             // The tool call's id came in `_meta` on every CLI recorded (2.1.296); without it a fresh id tells calls apart, since the
             // JSON-RPC ids start again in every process and a resumed conversation would reuse them.

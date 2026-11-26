@@ -65,7 +65,7 @@ fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
         helper: launch.helper == crate::helper::Helper::Offers,
         browse: launch.browse,
         conversation: launch.conversations,
-        verify: launch.verify,
+        verify: launch.verify && !launch.tuning.bench_checks_off,
         // The map only reads files: it goes where the checks go.
         map: launch.verify,
         progress: launch.progress,
@@ -466,36 +466,44 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         }
     }
     if launch.instructions.is_none() && !aside {
-        args.push("--append-system-prompt".into());
-        let mut words = persona(&PersonaInput { name: launch.user_name.as_deref(), tuning: &launch.tuning, research: launch.research });
-        if launch.area == Area::Project {
-            words.push_str(crate::persona::PROJECT_DETAILS);
-            if matches!(launch.helper, crate::helper::Helper::Is | crate::helper::Helper::Reviewer) {
-                words.push_str(" As a helper, return an ordinary report without a faber-wrap-up block.");
+        let mut words = String::new();
+        if !launch.tuning.bench_persona_off {
+            words = persona(&PersonaInput { name: launch.user_name.as_deref(), tuning: &launch.tuning, research: launch.research });
+            if launch.area == Area::Project {
+                words.push_str(&crate::persona::project_details(&launch.tuning));
+                if matches!(launch.helper, crate::helper::Helper::Is | crate::helper::Helper::Reviewer) {
+                    words.push_str(" As a helper, return an ordinary report without a faber-wrap-up block.");
+                }
+                if let Some(card) = &tools.start_card {
+                    words.push_str("\n\n");
+                    words.push_str(card);
+                }
+                if launch.helper == crate::helper::Helper::Offers {
+                    words.push_str(crate::helper::HELPERS);
+                }
+                if launch.progress {
+                    words.push_str(crate::persona::BIGGER_OFFER);
+                }
+                if launch.progress && launch.tuning.assumptions {
+                    words.push_str(crate::persona::ASSUMPTIONS);
+                }
+                if launch.leads {
+                    words.push_str(crate::persona::LEADS);
+                }
             }
-            if let Some(card) = &tools.start_card {
-                words.push_str("\n\n");
-                words.push_str(card);
+            if let Some(instructions) = &launch.group_instructions {
+                words.push_str("\n\nThe person's instructions for this chat group:\n");
+                words.push_str(instructions);
             }
-            if launch.helper == crate::helper::Helper::Offers {
-                words.push_str(crate::helper::HELPERS);
-            }
-            if launch.progress {
-                words.push_str(crate::persona::BIGGER_OFFER);
-            }
-            if launch.progress && launch.tuning.assumptions {
-                words.push_str(crate::persona::ASSUMPTIONS);
-            }
-            if launch.leads {
-                words.push_str(crate::persona::LEADS);
-            }
-        }
-        if let Some(instructions) = &launch.group_instructions {
-            words.push_str("\n\nThe person's instructions for this chat group:\n");
-            words.push_str(instructions);
+        } else if launch.area == Area::Project
+            && let Some(card) = &tools.start_card
+        {
+            words.push_str(card);
         }
         // Catalog context travels in the current user turn: resumed CLIs can retain the original system prompt.
-        args.push(words);
+        if !words.is_empty() {
+            args.extend(["--append-system-prompt".into(), words]);
+        }
         // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser.
         // The catalog's servers join it in the same config, where Faber offers its tools.
         if !servers.is_empty() {
@@ -1186,7 +1194,7 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                                     && msg["request"]["message"]["method"] == "tools/call"
                                     && msg["request"]["message"]["params"]["name"] == crate::helper::TEAM_NAME {
                                     crate::helper::Mcp::Answer(crate::helper::mcp_result(&msg["request"]["message"]["id"], false, "Nobody can answer: decide yourself.", &[]))
-                                } else if offered { crate::helper::mcp(&msg["request"]["message"], tools) } else {
+                                } else if offered { crate::helper::mcp_with(&msg["request"]["message"], tools, &opts.launch.tuning) } else {
                                     crate::helper::Mcp::Answer(json!({"jsonrpc":"2.0","id":msg["request"]["message"]["id"],"error":{"code":-32601,"message":"No such server"}}))
                                 };
                                 match step {

@@ -36,6 +36,8 @@ mod archive;
 mod aside;
 mod auto;
 mod auto_archive;
+mod bench_switches;
+pub use bench_switches::BenchPart;
 mod browse;
 mod browser_extensions;
 mod by_itself;
@@ -547,6 +549,7 @@ struct Core {
     next_wait_timer: u64,
     background_pending: bool,
     opts: EngineOptions,
+    bench: bench_switches::BenchSwitches,
     store: Arc<Store>,
     saves: save::Saves,
     emit: Emit,
@@ -845,6 +848,7 @@ impl Engine {
                     next_wait_timer: 0,
                     background_pending: false,
                     opts,
+                    bench: Default::default(),
                     chat_dir,
                     store: Arc::new(store),
                     saves: Default::default(),
@@ -3973,6 +3977,7 @@ impl Core {
                         .is_some_and(|m| m.self_check)
                 });
                 let before = nudge::Before { self_check: check_asked, model_bar: model_bar_offered };
+                let checks = !self.bench.off(BenchPart::Checks);
                 let mut looked = None;
                 let mut offered = None;
                 if let Some(m) = self.turn(conv) {
@@ -4006,7 +4011,8 @@ impl Core {
                     }
                     (m.nudge, m.self_check) = match nudge::of(m, area, &can_run, before) {
                         Some(nudge::Offer::Rung(rung)) => (Some(rung), false),
-                        Some(nudge::Offer::SelfCheck) => (None, true),
+                        Some(nudge::Offer::SelfCheck) if checks => (None, true),
+                        Some(nudge::Offer::SelfCheck) => (None, false),
                         None => (None, false),
                     };
                     m.look = crate::look::of(m);
@@ -5448,6 +5454,7 @@ impl Core {
             return Err("error.conversationGone".into());
         }
         self.begin_unbounded(pick.vendor)?;
+        self.bench.primary_started();
         self.flush_trailer(id, true);
         self.count_correction(id);
         if let Some(t) = self.transfers.get_mut(id).filter(|t| t.reply == reply_id) {
@@ -5823,11 +5830,12 @@ impl Core {
         // Codex keeps dynamic tools with its thread; register project capabilities once and gate calls by the live mode.
         let tool_mode = if pick.vendor == Vendor::Codex && area == Area::Project { Permissions::FullAccess } else { permissions };
         let browse = self.offers_browser(area, tool_mode);
-        let conversations = siblings::offers(area);
+        let conversations = siblings::offers(area) && !self.bench.off(BenchPart::Delegation);
         // Only the person's own project conversation leads a team: a team member or a goal's fix never starts one of its own.
         let leads = conversations && self.convs.get(conv).is_some_and(|c| c.started_by.is_none() && c.goal_fix.is_none());
         let verify = self.offers_verify(area, tool_mode);
         let progress = area == Area::Project;
+        let launch_tuning = self.bench.launch_tuning(tuning.clone());
         let identity = crate::proc::ConversationIdentity::new(conv)?;
         self.rewind_session_started(conv, sid, cwd_used.clone());
         let session = match pick.vendor {
@@ -5891,7 +5899,7 @@ impl Core {
                         user_name,
                         flags,
                         // The live session keeps `tuning` without them, so its reuse check reads the settings alone.
-                        tuning: Tuning { protected: protected.clone(), ..tuning.clone() },
+                        tuning: Tuning { protected: protected.clone(), ..launch_tuning },
                         tools: project_tools,
                         subagents: subagents.clone(),
                     },
@@ -5938,7 +5946,7 @@ impl Core {
                             user_name,
                             permissions,
                             leave_plan,
-                            tuning: Tuning { protected: protected.clone(), ..tuning.clone() },
+                            tuning: Tuning { protected: protected.clone(), ..launch_tuning },
                             subagents: subagents.clone(),
                         },
                         sink,

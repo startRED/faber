@@ -137,6 +137,9 @@ fn closing_input(base: &str, memory: &crate::project::memory::MemoryList) -> Str
 impl Core {
     /// One bounded wake, through the ordinary metered continuation path. All project-note reads run off the lock.
     pub(super) fn request_conclusion(&mut self, conv: &str) {
+        if self.bench.off(BenchPart::FollowUps) {
+            return;
+        }
         let Some(c) = self.convs.get(conv).filter(|c| c.area == Area::Project) else { return };
         let pending = c.messages.iter().any(|m| !m.fold_kept.is_empty());
         if !pending && !self.can_request_conclusion(conv) {

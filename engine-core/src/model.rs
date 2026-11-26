@@ -2117,6 +2117,10 @@ pub struct Tuning {
     /// session at its start. Claude Code's file tools are denied them in every mode and Codex's guarded sandboxes keep them
     /// read-only; empty from `Settings::tuning`.
     pub protected: Vec<std::path::PathBuf>,
+    pub bench_persona_off: bool,
+    pub bench_review_off: bool,
+    pub bench_creative_off: bool,
+    pub bench_checks_off: bool,
 }
 
 impl Settings {
@@ -2129,7 +2133,7 @@ impl Settings {
             reply_style_text: self.reply_style_text.as_deref().map(clean_reply_style_text).unwrap_or_default(),
             language: self.language.clone(),
             assumptions: self.show_assumptions == Some(true),
-            protected: vec![],
+            ..Tuning::default()
         }
     }
 }

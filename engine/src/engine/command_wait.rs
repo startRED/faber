@@ -130,7 +130,9 @@ impl Core {
         {
             live.session.close();
         }
-        if let Some(c) = self.convs.get(conv) {
+        if !self.bench.off(BenchPart::FollowUps)
+            && let Some(c) = self.convs.get(conv)
+        {
             let sent = self.send_by_itself(conv, by_itself::command_wake_text(c).into(), Wake::of("wake.commandDone"));
             if sent.is_ok() {
                 return;
