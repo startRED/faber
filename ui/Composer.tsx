@@ -101,6 +101,18 @@ interface Inlined {
   name: string;
   block: string;
 }
+/** The event that brings an element picked in Faber's browser to the composer of its conversation; the composer that takes
+ * it sets `taken`. */
+export const PAGE_PICK = 'faber:page-pick';
+export interface PagePick {
+  conversationId: string;
+  /** The thumbnail's name. */
+  name: string;
+  /** The words written into the message. */
+  block: string;
+  image?: { mediaType: string; base64: string };
+  taken?: boolean;
+}
 // The name a picture came with. A draft keeps only the media type and the data, so the name waits here, by the picture itself,
 // and is still found when a rejected message puts its draft back.
 const called = new WeakMap<object, string>();
@@ -417,6 +429,38 @@ export function Composer(props: Props) {
   };
   document.addEventListener('faber:piece-fill', fillPiece);
   onCleanup(() => document.removeEventListener('faber:piece-fill', fillPiece));
+  // Something the person picked in Faber's browser (`ui/Site.tsx`) comes in as a small text file does: its words written into
+  // the message, with a thumbnail that takes them out again, and its picture beside them when it has one.
+  const takePick = (event: Event) => {
+    const detail = (event as CustomEvent<PagePick>).detail;
+    if (!detail || detail.conversationId !== props.draftKey || typeof detail.block !== 'string' || !alive || !attachmentsReady() || props.locked) return;
+    // The message's attachment limit holds when the pick comes in, not only at Send: one over it is refused, and said so.
+    // Two bytes more for the blank line that separates it from words already in the draft.
+    const size = new TextEncoder().encode(detail.block).length + (draft().text ? 2 : 0) + (detail.image ? Math.ceil(detail.image.base64.length / 4) * 3 : 0);
+    const held = attachmentSizes().reduce((n, file) => n + file.size, 0) + readingBytes;
+    const refused = refusedAttachment([{ name: detail.name, size }], held);
+    detail.taken = true;
+    if (refused !== undefined) {
+      setAttachmentReadError(failureText({ key: 'error.attachmentTooLarge', detail: refused }));
+      return;
+    }
+    setAttachmentReadError(undefined);
+    batch(() => {
+      let added: Inlined = { name: detail.name, block: detail.block };
+      editDraft((d) => {
+        added = { name: detail.name, block: `${d.text ? '\n\n' : ''}${detail.block}` };
+        const image = detail.image ? { mediaType: detail.image.mediaType, base64: detail.image.base64 } : undefined;
+        if (image) called.set(image, detail.name);
+        return { ...d, text: d.text + added.block, images: image ? [...d.images, image] : d.images };
+      });
+      setInlined((all) => [...all, added]);
+    });
+    warmed = false;
+    field?.focus();
+    field?.setSelectionRange(field.value.length, field.value.length);
+  };
+  document.addEventListener(PAGE_PICK, takePick);
+  onCleanup(() => document.removeEventListener(PAGE_PICK, takePick));
   const keepEditingFocus = (event: MouseEvent) => {
     if (event.button === 0 && historyMode()) event.preventDefault();
   };

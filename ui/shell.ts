@@ -24,6 +24,9 @@ interface ElectronShell {
 
 const electron = (globalThis as { faberShell?: ElectronShell }).faberShell;
 export const hasBrowserExtensions = electron !== undefined;
+/** Pick mode in Faber's browser (`site_pick`) lives in the host's pane, which only the Electron shell uses; Tauri's own pane
+ * has no such command, so its screen shows no button for it. */
+export const hasPagePick = electron !== undefined;
 
 /** Electron buffers DOMStorage writes; do not leave drafts and the last thread waiting for its commit timer. */
 export function flushStorage(): void {
