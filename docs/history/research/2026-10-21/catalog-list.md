@@ -501,3 +501,68 @@ Registry metadata was checked on 2026-11-04. No candidate below passes R253, whi
 | [mcp-debugger](https://registry.npmjs.org/mcp-debugger/1.0.0), debugging | 1.0.0 | Excluded: declares four dependencies and the catalog count check in `engine/tests/tools.rs` also records its lack of project path containment. |
 
 These are the versions examined, not an exhaustive survey of all npm packages. The existing `chrome-devtools` server and catalog counts remain unchanged; no server was approved for Chat under R373.
+
+## 2026-11-26: plugin recheck under the delivery preflight (task 941)
+
+Method: shallow clones into new empty folders, read only; nothing downloaded was run, installed or imported. Each candidate was read at the pin named below. Folder and part digests come from Faber's own `tools::digest` (sorted `path NUL length NUL bytes`) and `plugins::part_digest`, and the two passing plugins were run through the real `check_source` and `install_sources` on a local archive built from the clone (no network). Original rejections are not reversed by repackaging: a bundle that split into hook-free sub-plugins stays out.
+
+Result: two plugins pass every part, `playground` and `frontend-design` (one skill each). They are not added to the catalog yet: a shipped plugin needs `catalog.name.<id>` and `tools.<id>` hand-written in all five languages (`engine/tests/locales.rs` fails without them) and a what's-new line, and the lane was told to stop there. The prepared catalog entries and lifecycle check are in the helper's notes, not in this commit. The other 35 looked at are out. These two were published before the audit (they are in `claude-plugins-official` at the old pin `d1adba47`), but the audit only judged the twenty bundles, never them one by one. Only `champion-kit`, `claude-for-manufacturing` and `theme-examples` are new since the audit; all three are out.
+
+### The twenty rejected candidates, re-read at the current head
+
+Only `claude-for-legal` kept its pin; its blocker is unchanged. A moved pin changes the file listing, not the verdict, except where noted.
+
+| Candidate | New pin | Blocking part now | Verdict |
+| :--- | :--- | :--- | :--- |
+| code-lsp-plugins | claude-plugins-official `0fbfda5a91f4adc311daca25acc99132f40f0b6e` | every `*-lsp` plugin manifest still declares `lspServers` with an external binary (`clangd`, ...) | out |
+| code-modernization | same | `hooks/hooks.json` and 64 script/hook files | out |
+| security-guidance | same | `hooks/hooks.json`, Python hook files | out |
+| security-scan-team (claude-security) | same | `hooks/hooks.json`, shell/Python/JS files | out |
+| stitch-skills | `75f4696f162000fb69fca6a31489b5b21d47a506` | `allowed-tools` still set in 17 skill files | out |
+| trailofbits-security-lenses | `149d7b21f4067765b82e67029730b42d228ef4b4` | `plugins/fp-check/hooks/hooks.json` prompt hook still present; the hook-free sub-plugins are repackaging | out |
+| document-skills-office | anthropics/skills `e4bb5d960d87126ff3b3a8af1a104b7db67560ba` | licence changed to Apache-2.0 (the old blocker is gone), but docx/pdf/pptx/xlsx ship `scripts/*.py` | out |
+| knowledge-work-plugins | `5e504ae11498f2b8daa30d86b7dab97b2ecd8092` | hosted `.mcp.json` endpoints (small-business and others) | out |
+| financial-services | `3e32c2287dcb637c184c01cc0ad82d6af7e9bb0f` | hosted MCP endpoints and `hooks/hooks.json` | out |
+| legal-practice-plugins | `4a6c651889c97cc9140580363c73e0eb17379c2b` (unchanged) | hosted MCP and hooks as before | out |
+| unity-agent-plugin | `70acf739a1614cc443f839ee311ee30966bb67b6` | skills restructured, but shell scripts ship, piped-installer guidance remains and the licence is the Unity Companion Licence | out |
+| universal-modder | `a34eae75732d7fd5e7810abde188063e72829525` | `hooks/hooks.json` and `hooks/add-to-path.sh` | out |
+| elevenlabs-skills | `f828f8ee766036225b64c618fac1202337f5b486` | `agents/SKILL.md` still runs `npx -y @elevenlabs/cli@latest` and `npm install -g` | out |
+| expo-skills | `6d0506afe7df9334b60ad4b1ceb35969836f01a0` | the hook is gone (a real change), but `.mcp.json` and `mcp.json` still point at the hosted `mcp.expo.dev` endpoint | out |
+| flutter-skills | `ff6d472ee66dbed566c4500edee460c94fde0a02` | manifest runs the `dart` binary as MCP; `.agents/hooks.json` Stop hooks | out |
+| android-skills | `7f7b21730a605d112ca9f79b6e40105ce7b670ee` | `devtools/android-cli` skill installs a tool; folder far over a plain skill set | out |
+| firebase-mcp-and-skills | `99954a30898bb5ddc8152ee10e124dc3b4106bf7` | `.mcp.json` now pins `firebase-tools@15.32.1` but runs `npx -y firebase-tools@... mcp --dir .`, not the one portable `npx -y pkg@version` form | out |
+| render-skills-and-tools | `841f4e3f857f85c86719ca392aecd3a29c7df164` | `hooks/hooks.json`, `auto-approve-render.sh`, hosted MCP | out |
+| sentry-plugin | `1b082a07d1a8149cf8a50596dd609fd1edf8f7df` | manifest `mcpServers` is the hosted `mcp.sentry.dev` endpoint | out |
+| posthog-skills-and-mcp | `724804d15f80474cdbd090aef940da2eb76a83ab` | `skills/posthog/all/hooks/hooks.json` and `skill-reminder.sh` | out |
+
+### Other plugins in `claude-plugins-official` at `0fbfda5a91f4adc311daca25acc99132f40f0b6e`
+
+| Candidate | Result | Reason |
+| :--- | :--- | :--- |
+| playground | passes, held | one skill, plain Markdown templates, manifest fields only name, description, author; no hooks, binaries, scripts or MCP; Apache-2.0 |
+| frontend-design | passes, held | one skill with `license` front matter; same checks; Apache-2.0 |
+| champion-kit (new since audit) | out | agent sets `tools` and `model`; skills set `argument-hint` (not allowed on a skill); PNG in the plugin root |
+| claude-for-manufacturing (new) | out | `.mcp.json` and Python scripts |
+| theme-examples (new) | out | 40 script/binary files |
+| cwc-makers | out | command sets `disable-model-invocation`; command flashes firmware and downloads a tarball with `curl` |
+| feature-dev | out | agents set `tools`, `model`, `color` |
+| pr-review-toolkit | out | agents set `model`, `color`; command sets `allowed-tools` |
+| commit-commands | out | commands set `allowed-tools` and use `!` shell expansion |
+| code-simplifier | out | agent sets `model` |
+| agent-sdk-dev | out | agents set `model` |
+| code-review | out | command sets `allowed-tools` and `disable-model-invocation` |
+| claude-md-management | out | skill sets `tools`, command sets `allowed-tools`, PNG files |
+| mcp-tunnels | out | command sets `allowed-tools` |
+| mcp-server-dev | out | skills set `version` (not allowed) |
+| project-artifact | out | skill sets `user-invocable` |
+| claude-code-setup | out | skill sets `tools`, PNG file |
+| ralph-loop | out | hooks and shell scripts |
+
+Pins for the two plugins that pass (not yet in `engine-projects/src/tools.json`; commit `0fbfda5a91f4adc311daca25acc99132f40f0b6e`):
+
+| Plugin | Folder | Folder digest | Skill part digest |
+| :--- | :--- | :--- | :--- |
+| playground | `plugins/playground` | `1440edf9cb1a612c401dbb6212fb6d26ce359816961dc0865a26d01d30c72ac5` | `d40c06af69b4882789d1070b50f4ccd52092ba2c305635a2831bcc9a9a30c603` |
+| frontend-design | `plugins/frontend-design` | `d37d6234cd8177dff7603dcbfbeff3a9bb2d1f7b13aa844ab1e104aeb766d354` | `b8a564bbbd9d26d36237f1808116698ead07c65b16a365c7e1dd716935f237c0` |
+
+Not checked: a full read of every file in the 35 rejected candidates (a decisive blocker stops the read), any live Claude Code or Codex run, and whether the `playground` skill's `open <file>.html` step suits Faber's sessions. A one-skill plugin is a valid but thin plugin; the owner may prefer to list these as plain skills.
