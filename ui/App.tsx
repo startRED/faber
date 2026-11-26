@@ -1910,7 +1910,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       } : undefined}
       agent={sideAgent()}
       site={sideSite()}
-      runApp={current()?.area === 'project' && current()?.id === sideSite()?.conversationId}
       visual={sideVisual()}
       aside={sideAside() && { conversation: current(), options: options() }}
       file={sideFile()}

@@ -93,7 +93,6 @@ mod report_hold;
 mod research;
 mod resume_cut;
 mod rewind;
-pub mod run_app;
 mod save;
 mod session;
 mod settings_change;
@@ -741,7 +740,6 @@ struct Core {
     /// When each running reply last heard from its CLI, and the one check that looks for silence (`silence.rs`).
     heard: HashMap<String, silence::Heard>,
     after_pictures: HashMap<String, pictures::PictureTask>,
-    apps: Vec<run_app::Run>,
     listening: bool,
     /// When the silence check last looked (`silence.rs`).
     looked: f64,
@@ -945,7 +943,6 @@ impl Engine {
                     goals: Default::default(),
                     heard: HashMap::new(),
                     after_pictures: HashMap::new(),
-                    apps: Vec::new(),
                     listening: false,
                     looked: 0.0,
                     draft_routes: HashMap::new(),
@@ -1960,7 +1957,6 @@ impl Engine {
             if c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && c.running_item(conv).is_some()) {
                 return Err("error.project.busy".into());
             }
-            c.stop_apps(run_app::STOP_HELD, |run| run.project == id)?;
             projects.retain(|p| p.id != id);
             c.store.save_projects(&projects).map_err(|_| "error.store.write".to_string())?;
             c.goals.loaded = None;
@@ -2034,13 +2030,8 @@ impl Engine {
     }
     pub fn shutdown(&self) {
         let flights = {
-            let _inside = self.runtime.enter();
             let mut core = self.core.lock().unwrap_or_else(|e| e.into_inner());
             core.closing = true;
-            if let Err(reason) = core.stop_apps(run_app::STOP_HELD, |_| true) {
-                eprintln!("faber: shutdown could not confirm app exit ({reason})");
-            }
-            core.apps.clear();
             core.after_pictures.clear();
             for heard in core.heard.values_mut() {
                 heard.pictures = None;
@@ -6634,7 +6625,6 @@ impl Core {
         }
         if let Some(old) = self.draft.take() {
             self.draft_routes.remove(&old);
-            self.stop_removed_app(&old);
             self.kit_checks.retain(|_, check| check.owner != old);
             if let Some(l) = self.retire(&old) {
                 l.session.close();
@@ -6686,7 +6676,6 @@ impl Core {
         const FAILED: &str = "error.chat.deleteFailed";
         self.store.recover_group_move().map_err(|_| FAILED)?;
         self.rewind_delete_allowed(id)?;
-        self.stop_conversation_app(id)?;
         let mut groups_before = None;
         if let Ok(mut groups) = self.store.chat_groups() {
             let before = groups.clone();
@@ -6748,7 +6737,6 @@ impl Core {
             return Err(FAILED.into());
         }
         self.heard.remove(id);
-        self.stop_removed_app(id);
         self.after_pictures.remove(id);
         self.titles.remove(id);
         self.kit_checks.retain(|_, check| check.owner != id);

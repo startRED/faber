@@ -462,13 +462,6 @@ export interface Conversation {
   rewindNotice?: string;
   rewindSummary?: string;
 }
-
-export type RunAppView =
-  | { phase: 'idle' | 'starting' | 'stopping' }
-  | { phase: 'confirm'; command: string; scripts: [string, string][]; seen: string }
-  | { phase: 'running'; url: string }
-  | { phase: 'notice'; reason: string; output: string }
-  | { phase: 'stopFailed'; output: string };
 /** The tokens a conversation's own agent holds, and the window they are counted against. */
 export interface ContextFill {
   used: number;
@@ -1356,10 +1349,6 @@ export const api = {
   saveNotesSeen: (id: number) => invoke<void>('save_notes_seen', { id }),
   projectCopies: (projectId: string, on: boolean) => invoke<void>('project_copies', { projectId, on }),
   projectProof: (projectId: string) => invoke<ProofView>('project_proof', { projectId }),
-  runAppStart: (id: string) => invoke<RunAppView>('run_app_start', { id }),
-  runAppConfirm: (id: string, seen: string) => invoke<RunAppView>('run_app_confirm', { id, seen }),
-  runAppStatus: (id: string) => invoke<RunAppView>('run_app_status', { id }),
-  runAppStop: (id: string) => invoke<RunAppView>('run_app_stop', { id }),
   projectGoals: (projectId: string) => invoke<GoalsView>('project_goals', { projectId }),
   projectGoalsAuto: (projectId: string, on: boolean) => invoke<GoalsView>('project_goals_auto', { projectId, on }),
   projectGoalAdd: (projectId: string, words: string, check: string) => invoke<GoalsView>('project_goal_add', { projectId, words, check }),

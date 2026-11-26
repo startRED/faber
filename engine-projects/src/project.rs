@@ -16,7 +16,6 @@ pub use faber_engine_store::project_memory as memory;
 pub mod proof;
 pub mod remote;
 pub use faber_engine_store::project_rules as rules;
-pub mod run_app;
 
 use crate::model::Project;
 pub use crate::model::{Extra, FolderState, ProcessId, valid_id};

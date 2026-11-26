@@ -314,15 +314,6 @@ reason.route.code.medium
 reason.route.poetry.easy
 reason.route.research.easy
 reason.routing
-reason.runApp.busy
-reason.runApp.copyPending
-reason.runApp.exited
-reason.runApp.launch
-reason.runApp.managerMissing
-reason.runApp.managerUnsupported
-reason.runApp.missing
-reason.runApp.noUrl
-reason.runApp.stopFailed
 reason.setup.blocked
 reason.setup.checksum
 reason.setup.connection

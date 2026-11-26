@@ -94,10 +94,6 @@ fn the_command_line_lists_every_command_anything_but_the_screen_may_send() {
     }
     let kept = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
     assert!(kept == now, "cli/commands.json is not the table's exported commands: run this test with FABER_WRITE_COMMANDS=1");
-    for name in ["run_app_start", "run_app_confirm", "run_app_status", "run_app_stop"] {
-        let app_command = Host::exported().find(|command| command.name == name).unwrap();
-        assert_eq!(app_command.reach, "person", "{name} is reserved for the person");
-    }
     for screen_only in [
         "state",
         "open",
