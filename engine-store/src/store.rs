@@ -392,6 +392,9 @@ fn temporary_flag(text: &str) -> Option<String> {
     serde_json::from_str::<Flag>(text).ok().filter(|flag| flag.temporary).map(|flag| flag.id)
 }
 
+pub(crate) const CONVERSATIONS_DIR: &str = "conversations";
+pub(crate) const TRANSCRIPTS_DIR: &str = "child-transcripts";
+
 impl Store {
     pub fn data_roots() -> Vec<PathBuf> {
         let mut roots = DATA_ROOTS.lock().unwrap_or_else(|e| e.into_inner());
@@ -405,7 +408,7 @@ impl Store {
 
     /// A store that writes through `disk`, so tests can make writes fail.
     pub fn with_disk(data_dir: &Path, disk: Arc<dyn Disk>) -> Self {
-        let conversations = data_dir.join("conversations");
+        let conversations = data_dir.join(CONVERSATIONS_DIR);
         let _ = fs::create_dir_all(&conversations);
         let data_root =
             Arc::new(data_dir.canonicalize().unwrap_or_else(|_| std::path::absolute(data_dir).unwrap_or_else(|_| data_dir.to_path_buf())));
@@ -416,7 +419,7 @@ impl Store {
         }
         Store {
             _data_root: data_root,
-            transcripts: crate::transcript::TranscriptStore::with_disk(data_dir.join("child-transcripts"), disk.clone()),
+            transcripts: crate::transcript::TranscriptStore::with_disk(data_dir.join(TRANSCRIPTS_DIR), disk.clone()),
             search: crate::search::Search::new(conversations.clone()),
             conversations,
             side_chats: data_dir.join("side-chats"),
@@ -574,6 +577,13 @@ impl Store {
         let list = self.listed();
         self.keep_list(false);
         list
+    }
+
+    /// Storage attribution can reuse the in-memory row without loading conversation bodies or writing the list.
+    pub fn cached_conversation_project(&self, id: &str) -> Option<String> {
+        let rows = self.summaries.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (_, index) = rows.get(&self.file(id))?;
+        (index.row.id == id).then(|| index.row.project_id.clone()).flatten()
     }
 
     /// The registered work copy and state for a same-project row just found by `list`.
