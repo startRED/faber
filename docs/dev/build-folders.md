@@ -61,6 +61,14 @@ artifacts into memory. No desktop-app process or idle timer is added. Rust maint
 
 The legacy `%TEMP%\faber-target` root remains covered by the same hourly sweep and its own separate 24 GB cap.
 
+`node scripts/space.mjs` (`--json` for a machine) reports, and removes nothing: every build folder with its size, last
+use and the protection that keeps it (the main checkout's own, leased, used in the last half hour or two hours), one
+sentence on which protection holds the folders over the 24 GB budget, and every registered worktree with its branch,
+whether its work is on `origin/phase-1-base` (an ancestor, or every file it changed is the same there), whether it is
+clean, its age and a verdict. Only a clean worktree whose work is on the base and that nobody touched for a week would
+go; the main checkout and locked worktrees stay; a read that fails says "unknown", never "would go". A removal is a
+later step, after the owner reads the list (his answer 11 of 2026-11-25). Its checks are `scripts/space.test.mjs`.
+
 ## The build coordinator
 
 `scripts/cargo.mjs` is the one door every local Cargo command goes through, so it also coordinates the lanes. Nothing
