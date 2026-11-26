@@ -43,6 +43,10 @@ pub trait Home: Send + Sync + 'static {
     }
     /// Checks a destination against the latest browser settings before the pane changes tabs or loads it.
     fn check_navigation(&self, url: String) -> BoxFuture<'_, Result<(), String>>;
+    /// The block list to enforce for the lifetime of an automatic capture.
+    fn capture_blocked_hosts(&self) -> BoxFuture<'_, Option<Vec<String>>> {
+        Box::pin(async { None })
+    }
     /// A conversation's tabs; none for one that is gone or never had a page.
     fn tabs(&self, conversation: String) -> BoxFuture<'_, Option<Tabs>>;
     /// Does `step` to a conversation's tabs and answers them with the tab it concerns.
@@ -109,6 +113,10 @@ impl Home for EngineHome {
             .await
             .unwrap_or_else(|| Err("error.browser.invalidHost".into()))
         })
+    }
+
+    fn capture_blocked_hosts(&self) -> BoxFuture<'_, Option<Vec<String>>> {
+        self.with(|engine| Some(engine.settings().blocked_hosts.unwrap_or_default()))
     }
 
     fn tabs(&self, conversation: String) -> BoxFuture<'_, Option<Tabs>> {

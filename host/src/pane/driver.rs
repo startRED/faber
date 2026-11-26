@@ -10,14 +10,15 @@ pub const PARKED: (f64, f64) = (-20_000.0, -20_000.0);
 /// The size a view has while parked, and the size the agent's pages load at: a common laptop window, in logical pixels.
 pub const PARKED_SIZE: (f64, f64) = (1280.0, 800.0);
 
-/// The two views the pane has. They share one private profile: the second is the agent's tab while the person has another
-/// tab of the same conversation in front, never shown, and it closes with the first.
+/// The person's and agent's views share one private profile. The capture view has its own disposable profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum View {
     /// The one the person sees, placed over the running column.
     Main,
     /// The agent's tab behind.
     Behind,
+    /// A parked view used once for an automatic picture.
+    Capture,
 }
 
 impl View {
@@ -26,6 +27,7 @@ impl View {
         match self {
             View::Main => "site",
             View::Behind => "site-agent",
+            View::Capture => "site-capture",
         }
     }
 }
@@ -84,6 +86,8 @@ pub trait Driver: Send + Sync + 'static {
     fn place(&self, view: View, place: Place) -> Res<()>;
     /// Starts loading `url` in `view`. The page's end comes later as [`ViewEvent::Finished`].
     fn load(&self, view: View, url: String) -> BoxFuture<'_, Res<()>>;
+    /// Waits for the capture page to load, restricting its requests to local, unblocked hosts.
+    fn load_capture(&self, url: String, blocked_hosts: Vec<String>) -> BoxFuture<'_, Res<()>>;
     /// One DevTools Protocol command on `view`'s page, answered with its result.
     fn call(&self, view: View, method: &'static str, params: Value) -> BoxFuture<'_, Res<Value>>;
     /// Clears every cookie, storage and cache of `view`'s profile, so the page signs out of everything.

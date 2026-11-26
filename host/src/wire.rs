@@ -104,7 +104,7 @@ pub enum Order {
     },
 }
 
-/// The two views the browser pane has.
+/// The views the browser pane has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PaneView {
@@ -112,6 +112,8 @@ pub enum PaneView {
     Main,
     /// The agent's tab behind.
     Behind,
+    /// A parked view used once for an automatic picture.
+    Capture,
 }
 
 /// What the host asks of a view of the browser pane. Positions are in the screen's logical pixels, relative to the window's
@@ -133,6 +135,8 @@ pub enum PaneOp {
     Park,
     /// Starts loading `url`. Answers `null` once the load is started.
     Load { url: String },
+    /// Loads an automatic capture, enforcing the current blocked hosts on every request.
+    LoadCapture { url: String, blocked_hosts: Vec<String> },
     /// One DevTools Protocol command on the view's page; answers its result.
     Call { method: String, params: Value },
     /// Clears every cookie, storage and cache of the view's profile. Answers `null`.

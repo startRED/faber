@@ -10,7 +10,7 @@ import { type BrowserWindow, type Rectangle, type Session, session, type WebCont
 import { allowedRequest, allowedUrl, CALLS, plainProfile } from './panerules.ts';
 import { PaneExtensions } from './pane-extensions.ts';
 
-type Name = 'main' | 'behind';
+type Name = 'main' | 'behind' | 'capture';
 
 /** What the host orders (`Order::Pane`). */
 export type PaneOrder = { kind: 'pane'; id?: number; view: Name } & (
@@ -19,6 +19,7 @@ export type PaneOrder = { kind: 'pane'; id?: number; view: Name } & (
   | { op: 'place'; x: number; y: number; width: number; height: number }
   | { op: 'park' }
   | { op: 'load'; url: string }
+  | { op: 'loadCapture'; url: string; blockedHosts: string[] }
   | { op: 'call'; method: string; params?: unknown }
   | { op: 'clear' }
 );
@@ -63,7 +64,10 @@ type Entry = {
   loading: boolean;
   loadingUrl: string;
   navigation: number;
+  capture?: CapturePolicy;
 };
+
+type CapturePolicy = { origin?: string; blockedHosts: readonly string[] };
 
 /** A profile in use: the session behind it and the views on it. */
 type Held = { session: Promise<Session>; users: Set<object>; development?: string };
@@ -72,7 +76,7 @@ function isOrder(value: unknown): value is PaneOrder {
   const order = value as { kind?: unknown; view?: unknown; op?: unknown; id?: unknown } | null;
   return (
     order?.kind === 'pane' &&
-    (order.view === 'main' || order.view === 'behind') &&
+    (order.view === 'main' || order.view === 'behind' || order.view === 'capture') &&
     typeof order.op === 'string' &&
     (order.id === undefined || typeof order.id === 'number')
   );
@@ -99,16 +103,28 @@ function guard(profile: Session, saw: (contents: WebContents, line: string) => v
   profile.setPermissionCheckHandler(() => false);
   profile.setDevicePermissionHandler(() => false);
   profile.setSpellCheckerEnabled(false);
+  guardRequests(profile, permits);
+  profile.on('will-download', (event, item, contents) => {
+    event.preventDefault();
+    saw(contents, `download blocked: ${item.getFilename().slice(0, 80)}`);
+  });
+}
+
+function guardRequests(profile: Session, permits?: (url: string) => boolean): void {
   profile.webRequest.onBeforeRequest(({ url }, callback) => {
     const allowed = permits
       ? permits(url) && (url.startsWith('chrome-extension:') || allowedRequest(url))
       : allowedRequest(url);
     callback({ cancel: !allowed });
   });
-  profile.on('will-download', (event, item, contents) => {
-    event.preventDefault();
-    saw(contents, `download blocked: ${item.getFilename().slice(0, 80)}`);
-  });
+}
+
+function captureUrl(address: string, blockedHosts: readonly string[]): URL | undefined {
+  if (!/^https?:\/\/[^/\\]/i.test(address) || /[\u0000-\u001f\u007f-\u009f]/.test(address) || !allowedUrl(address)) return;
+  const url = new URL(address);
+  const host = url.hostname;
+  if (url.username || url.password || !['localhost', '127.0.0.1', '[::1]'].includes(host)) return;
+  if (!blockedHosts.some((entry) => host === entry || host.endsWith(`.${entry}`))) return url;
 }
 
 /** An address as the host may hear it: host and path, without its query, fragment or sign-in part, and without path parts that look like an id or a token. */
@@ -142,7 +158,7 @@ export class Pane {
   private readonly spare: Session[] = [];
   private slots = 0;
   /** Counts the opens and closes of a view, so an open that was overtaken by a close never makes its view. */
-  private readonly epoch: Record<Name, number> = { main: 0, behind: 0 };
+  private readonly epoch: Record<Name, number> = { main: 0, behind: 0, capture: 0 };
 
   constructor(host: PaneHost) {
     this.host = host;
@@ -215,6 +231,7 @@ export class Pane {
     // A Map may lose the entry it is on while it is walked.
     this.close('main');
     this.close('behind');
+    this.close('capture');
   }
 
   private run(order: PaneOrder): Promise<unknown> {
@@ -228,6 +245,9 @@ export class Pane {
       }
       case 'load':
         return this.load(order.view, order.url);
+      case 'loadCapture':
+        if (order.view !== 'capture') throw new Error('not a capture view');
+        return this.load(order.view, order.url, order.blockedHosts);
       case 'call':
         if (order.method === 'Faber.extensionMode') {
           const params = order.params as { enabled?: unknown } | null;
@@ -260,7 +280,7 @@ export class Pane {
   }
 
   /** A session for a profile the host just named: the one already on it, or a wiped spare, or a new one. */
-  private profile(name: string, development?: string): Held {
+  private profile(name: string, development?: string, capture?: CapturePolicy): Held {
     const known = this.held.get(name);
     if (known) return known;
     let pending: Promise<Session>;
@@ -268,10 +288,13 @@ export class Pane {
       pending = this.extensions.acquire(development);
     } else {
       // A name without `persist:` is a profile in memory only.
+      const permits = capture && ((url: string) => capture.origin !== undefined && captureUrl(url, capture.blockedHosts) !== undefined);
       let made = this.spare.pop();
       if (!made) {
         made = session.fromPartition(`faber-pane-slot-${++this.slots}`);
-        guard(made, this.saw);
+        guard(made, this.saw, permits);
+      } else {
+        guardRequests(made, permits);
       }
       pending = Promise.resolve(made);
     }
@@ -282,11 +305,13 @@ export class Pane {
 
   private async open(name: Name, profile: string, development?: string): Promise<void> {
     if (!plainProfile(profile)) throw new Error('the profile name is not valid');
+    const capture: CapturePolicy | undefined = name === 'capture' ? { blockedHosts: [] } : undefined;
+    if (capture && (development !== undefined || this.held.has(profile))) throw new Error('capture requires its own profile');
     if (development !== undefined) profile = 'development:' + this.extensions.scope(development);
     // A view opened again replaces the one before: an open the host gave up on may still have made it.
     this.close(name);
     const mine = this.epoch[name];
-    const held = this.profile(profile, development);
+    const held = this.profile(profile, development, capture);
     const claim = {};
     held.users.add(claim);
     try {
@@ -312,7 +337,7 @@ export class Pane {
         },
       });
       const contents = view.webContents;
-      const entry: Entry = { name, profile, development, claim, view, contents, bounds: PARKED, open: true, loading: false, loadingUrl: '', navigation: 0 };
+      const entry: Entry = { name, profile, development, claim, view, contents, bounds: PARKED, open: true, loading: false, loadingUrl: '', navigation: 0, capture };
       this.views.set(name, entry);
       this.guard(entry);
       view.setBounds(PARKED);
@@ -345,7 +370,7 @@ export class Pane {
 
   /** Everything a view refuses, reports or survives; all silent, since the host's rules decided what is worth a word. */
   private tell(entry: Entry, event: ViewNote): void {
-    if (entry.open) this.host.note({ kind: 'paneEvent', view: entry.name, event });
+    if (entry.open && entry.name !== 'capture') this.host.note({ kind: 'paneEvent', view: entry.name, event });
   }
 
   private guard(entry: Entry): void {
@@ -358,8 +383,14 @@ export class Pane {
     });
     contents.on('will-attach-webview', (event) => event.preventDefault());
     // Only web pages load, whoever starts the navigation (the page, a redirect, the back button).
+    const { capture } = entry;
+    const permits = (url: string, main = true) => {
+      if (!capture) return allowedUrl(url);
+      const local = captureUrl(url, capture.blockedHosts);
+      return capture.origin !== undefined && local !== undefined && (!main || local.origin === capture.origin);
+    };
     const refuse = (event: { url: string; isMainFrame: boolean; preventDefault: () => void }) => {
-      if (event.isMainFrame && !allowedUrl(event.url)) {
+      if ((capture || event.isMainFrame) && !permits(event.url, event.isMainFrame)) {
         event.preventDefault();
       }
     };
@@ -368,7 +399,7 @@ export class Pane {
     contents.on('will-frame-navigate', refuse);
     contents.on('did-start-navigation', (details) => {
       if (!details.isMainFrame || details.isSameDocument) return;
-      if (!allowedUrl(details.url)) {
+      if (!permits(details.url)) {
         // A navigation the events above could not see (started from the browser's side): ended before it commits.
         if (!details.url.startsWith('about:') && !details.url.startsWith('chrome-error:')) contents.stop();
         return;
@@ -437,12 +468,21 @@ export class Pane {
     for (const entry of this.views.values()) if (entry.open) entry.view.setBounds(entry.bounds);
   }
 
-  private async load(name: Name, url: string): Promise<void> {
+  private async load(name: Name, url: string, blockedHosts?: string[]): Promise<void> {
     if (!allowedUrl(url)) throw new Error("only web pages open in Faber's browser");
     const epoch = this.epoch[name];
     await this.opening.get(name);
     if (this.epoch[name] !== epoch) throw new Error('the browser closed');
     const entry = this.need(name);
+    if (entry.capture) {
+      if (!Array.isArray(blockedHosts)) throw new Error('missing capture block list');
+      const parsed = captureUrl(url, blockedHosts);
+      if (!parsed) throw new Error('capture requires an unblocked local app');
+      entry.capture.blockedHosts = blockedHosts;
+      entry.capture.origin = parsed.origin;
+      await entry.contents.loadURL(url);
+      return;
+    }
     // The page's end comes later as `finished`; a load that fails is reported there too.
     void entry.contents.loadURL(url).catch(() => {});
   }
@@ -492,6 +532,7 @@ export class Pane {
     if (!entry) return;
     this.views.delete(name);
     entry.open = false;
+    if (entry.capture) delete entry.capture.origin;
     const { contents, view } = entry;
     try {
       if (contents.debugger.isAttached()) contents.debugger.detach();

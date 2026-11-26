@@ -81,20 +81,28 @@ impl Core {
                     page.picked = picked;
                     // A picture that cannot be kept only leaves the card without one. Each size's picture is the call's
                     // with the size's place after it (`<call>-s1`), so the screen asks for it like any other.
-                    let pictures = std::iter::once((call.clone(), page.shot.as_ref().or(page.picture.as_ref())))
-                        .chain(page.looks.iter().enumerate().map(|(n, look)| (format!("{call}-s{}", n + 1), look.picture.as_ref())));
-                    let mut kept = false;
-                    for (id, picture) in pictures {
-                        if let (Some(picture), Some(name)) = (picture, browser::picture_name(&id)) {
-                            kept |= std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(dir.join(name), picture)).is_ok();
+                    let (owner, conversation, id) = (me.clone(), conv.clone(), call.clone());
+                    let saved = tokio::task::spawn_blocking(move || {
+                        if let Some(core) = owner.upgrade() {
+                            let core = core.lock().unwrap_or_else(|e| e.into_inner());
+                            if core.live.get(&conversation).is_some_and(|l| l.sid == sid) {
+                                let pictures = std::iter::once((id.clone(), page.shot.as_ref().or(page.picture.as_ref()))).chain(
+                                    page.looks.iter().enumerate().map(|(n, look)| (format!("{id}-s{}", n + 1), look.picture.as_ref())),
+                                );
+                                for (id, picture) in pictures {
+                                    if let (Some(picture), Some(name)) = (picture, browser::picture_name(&id)) {
+                                        let _ = keep_picture(&dir, &name, picture, true);
+                                    }
+                                }
+                            }
                         }
-                    }
-                    if kept {
-                        browser::trim_pictures(&dir, browser::MAX_PICTURES_BYTES);
-                    }
+                        page
+                    })
+                    .await
+                    .unwrap_or_default();
                     // The agent sees each size's picture too (the owner, 2026-10-19), in the order of its lines; a page that is
                     // the person's turn has none.
-                    (true, browser::result_text(&page), browser::look_pictures(&page))
+                    (true, browser::result_text(&saved), browser::look_pictures(&saved))
                 }
                 Ok(Err(why)) => (false, format!("Faber's browser did not do it: {why}."), Vec::new()),
                 Err(_) => (
@@ -138,6 +146,21 @@ impl Core {
         let path = self.opts.data_dir.join("attachments").join(conv).join(browser::picture_name(call)?);
         path.is_file().then_some(path)
     }
+}
+
+/// All browser picture writers hold Core's lock so the budget and conversation deletion cannot race a write.
+pub(super) fn keep_picture(dir: &Path, name: &str, picture: &[u8], tool_picture: bool) -> std::io::Result<bool> {
+    use std::io::Write as _;
+    if picture.is_empty() || !browser::picture_room(dir, name, picture.len() as u64, browser::MAX_PICTURES_BYTES, tool_picture)? {
+        return Ok(false);
+    }
+    let answers = dir.join(browser::ANSWER_PICTURES_DIR);
+    let dir = if tool_picture { dir } else { answers.as_path() };
+    std::fs::create_dir_all(dir)?;
+    let mut file = tempfile::NamedTempFile::new_in(dir)?;
+    file.write_all(picture)?;
+    file.persist(dir.join(name))?;
+    Ok(true)
 }
 
 /// What the person does to the tabs of a conversation's browser.

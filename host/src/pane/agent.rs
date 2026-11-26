@@ -727,6 +727,26 @@ impl Drop for Abort {
 pub struct PaneBrowser(pub Arc<Pane>);
 
 impl Browser for PaneBrowser {
+    fn capture_local(&self, url: String) -> Pin<Box<dyn Future<Output = Option<Vec<u8>>> + Send>> {
+        let main = self.0.clone();
+        Box::pin(async move {
+            let url = faber_engine::browser::local_app_url(&url)?;
+            checked(url.as_str()).ok()?;
+            let _slot = main.picture_gate.lock().await;
+            let blocked_hosts = main.home.capture_blocked_hosts().await?;
+            faber_engine::browser::check_blocked_url(url.as_str(), &blocked_hosts).ok()?;
+            let pane = Pane::made(&main.driver, &main.home, &main.runtime, super::View::Capture, Duration::ZERO, None, Default::default());
+            // Arm cleanup before opening: even a cancelled open cannot leave a parked view behind.
+            crate::lock(&pane.state).open = true;
+            let _close = super::Unfinished { pane: &pane, armed: true };
+            pane.driver.open(pane.view, Pane::new_profile()).await.ok()?;
+            pane.driver.load_capture(url.to_string(), blocked_hosts).await.ok()?;
+            let (page, href) = pane.read(None, 0, false).await.ok()?;
+            let drawn = faber_engine::browser::local_app_url(&href)?;
+            (drawn.origin() == url.origin()).then_some(page.picture).flatten()
+        })
+    }
+
     fn supports_extensions(&self) -> bool {
         self.0.supports_extensions()
     }

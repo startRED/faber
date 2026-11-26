@@ -18,6 +18,59 @@ const A: &str = "https://example.org/a";
 const B: &str = "https://example.org/b";
 
 #[tokio::test]
+async fn pictures_use_one_parked_view_and_leave_the_persons_page_and_focus_alone() {
+    let (pane, fake, home) = world();
+    assert!(pane.site_open("c".into(), A.into()).await.unwrap());
+    let previous = fake.log().len();
+    let browser = PaneBrowser(pane);
+    let local = "http://localhost:4321/";
+    *crate::lock(&home.blocked_hosts) = vec!["127.0.0.1".into()];
+    assert_eq!(browser.capture_local(local.into()).await.as_deref(), Some(b"jpeg".as_slice()));
+    let log = fake.log();
+    assert!(log[previous].starts_with("open site-capture "));
+    assert!(log[previous..].contains(&format!("load site-capture {local}")));
+    assert!(log[previous..].contains(&"capture blocked hosts: 127.0.0.1".to_string()));
+    assert_eq!(log.last().map(String::as_str), Some("close site-capture"));
+    assert!(log[previous..].iter().all(|line| !line.starts_with("place ")));
+    assert!(fake.calls_of("Emulation.setFocusEmulationEnabled").is_empty());
+    assert_eq!(crate::lock(&fake.urls)["site"], A);
+    assert!(crate::lock(&home.tabs).values().all(|tabs| tabs.tabs.iter().all(|tab| tab.url != local)));
+    let clips = fake.calls_of("Page.captureScreenshot");
+    assert_eq!(clips.len(), 1);
+    assert_eq!(clips[0]["clip"]["width"].as_f64(), Some(PARKED_SIZE.0));
+    assert_eq!(clips[0]["clip"]["height"].as_f64(), Some(PARKED_SIZE.1));
+}
+
+#[tokio::test]
+async fn pictures_skip_non_local_blocked_failed_and_cancelled_loads() {
+    let (pane, fake, home) = world();
+    let browser = PaneBrowser(pane);
+    let local = "http://localhost:4321/";
+    *crate::lock(&home.blocked_hosts) = vec!["localhost".into()];
+    assert_eq!(browser.capture_local(A.into()).await, None);
+    assert_eq!(browser.capture_local(local.into()).await, None);
+    assert!(fake.log().is_empty());
+
+    crate::lock(&home.blocked_hosts).clear();
+    fake.fail_load.store(true, Ordering::Relaxed);
+    assert_eq!(browser.capture_local(local.into()).await, None);
+    assert!(fake.calls_of("Page.captureScreenshot").is_empty());
+    assert_eq!(fake.log().last().map(String::as_str), Some("close site-capture"));
+
+    fake.fail_load.store(false, Ordering::Relaxed);
+    *crate::lock(&fake.hang) = Some("Page.captureScreenshot");
+    let mut capture = browser.capture_local(local.into());
+    tokio::select! {
+        biased;
+        _ = &mut capture => panic!("capture should be in flight"),
+        _ = std::future::ready(()) => {}
+    }
+    assert_eq!(fake.calls_of("Page.captureScreenshot").len(), 1);
+    drop(capture);
+    assert_eq!(fake.logged("close site-capture"), 2);
+}
+
+#[tokio::test]
 async fn blocked_sites_refuse_cards_app_panes_and_agent_loads_before_tabs_or_driver_changes() {
     let (pane, fake, home) = world();
     *crate::lock(&home.blocked_hosts) = vec!["bank.example".into()];
@@ -145,6 +198,11 @@ impl Driver for Fake {
         })
     }
 
+    fn load_capture(&self, url: String, blocked_hosts: Vec<String>) -> BoxFuture<'_, Res<()>> {
+        crate::lock(&self.log).push(format!("capture blocked hosts: {}", blocked_hosts.join(", ")));
+        self.load(View::Capture, url)
+    }
+
     fn call(&self, view: View, method: &'static str, params: Value) -> BoxFuture<'_, Res<Value>> {
         Box::pin(async move {
             if !crate::lock(&self.open).contains(view.label()) {
@@ -184,6 +242,10 @@ impl FakeHome {
 }
 
 impl Home for FakeHome {
+    fn capture_blocked_hosts(&self) -> BoxFuture<'_, Option<Vec<String>>> {
+        Box::pin(async { Some(crate::lock(&self.blocked_hosts).clone()) })
+    }
+
     fn check_navigation(&self, url: String) -> BoxFuture<'_, Result<(), String>> {
         Box::pin(async move { faber_engine::browser::check_blocked_url(&url, &crate::lock(&self.blocked_hosts)).map_err(str::to_string) })
     }

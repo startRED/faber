@@ -15,6 +15,7 @@ impl Engine {
 impl Core {
     /// Every completion path meets here, even when the turn ran no automatic checks.
     pub(super) fn turn_ended(&mut self, conv: &str) {
+        self.finish_answer_pictures(conv);
         if self.live.get(conv).is_some_and(|l| l.turn.is_some())
             || self.compacts.contains_key(conv)
             || self.compactions.contains_key(conv)

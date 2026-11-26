@@ -31,7 +31,7 @@ const sessions = [];
 const session = { fromPartition() {
   const held = Object.assign(new EventEmitter(), {
     setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, setDevicePermissionHandler() {}, setSpellCheckerEnabled() {},
-    webRequest: { onBeforeRequest() {} }, clearData: async () => {}, clearAuthCache: async () => {},
+    webRequest: { onBeforeRequest(listener) { this.request = listener; } }, clearData: async () => {}, clearAuthCache: async () => {},
     clearHostResolverCache: async () => {}, closeAllConnections: async () => {},
   });
   sessions.push(held);
@@ -46,6 +46,43 @@ registerHooks({ resolve(specifier, context, next) {
   return next(url, context);
 } });
 const { Pane } = await import('../electron/pane.ts');
+
+test('capture filters subframe navigations and every resource, and a reused normal profile gets its usual guard', async () => {
+  let view;
+  const notes = [];
+  const window = { isDestroyed: () => false, contentView: { addChildView(value) { view = value; }, removeChildView() {} } };
+  const pane = new Pane({ window: () => window, note: (note) => notes.push(note) });
+  async function order(id, view, fields) {
+    pane.order({ kind: 'pane', id, view, ...fields });
+    while (!notes.some((note) => note.id === id)) await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(notes.find((note) => note.id === id), { kind: 'paneAnswer', id, ok: null });
+  }
+  await order(1, 'capture', { op: 'open', profile: 'test-capture' });
+  const captureSession = view.session;
+  const blockedRequest = (url, resourceType) => {
+    let cancelled;
+    view.session.webRequest.request({ url, resourceType }, (answer) => { cancelled = answer.cancel; });
+    return cancelled;
+  };
+  assert.equal(blockedRequest('http://localhost:4321/', 'subFrame'), true);
+  await order(2, 'capture', { op: 'loadCapture', url: 'http://localhost:4321/', blockedHosts: ['127.0.0.1'] });
+  for (const url of ['https://example.org/', 'http://127.0.0.1:4321/', 'http://ipc.localhost/', 'data:text/html,frame', 'http://user@localhost:4321/']) {
+    for (const type of ['mainFrame', 'subFrame', 'image', 'xhr']) assert.equal(blockedRequest(url, type), true, `${type}: ${url}`);
+    for (const event of ['will-redirect', 'will-frame-navigate']) {
+      let cancelled = false;
+      view.webContents.emit(event, { url, isMainFrame: false, preventDefault() { cancelled = true; } });
+      assert.equal(cancelled, true, `${event}: ${url}`);
+    }
+  }
+  assert.equal(blockedRequest('http://[::1]:4322/style.css', 'stylesheet'), false);
+  pane.order({ kind: 'pane', view: 'capture', op: 'close' });
+  assert.equal(blockedRequest('http://localhost:4321/style.css', 'stylesheet'), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  await order(3, 'main', { op: 'open', profile: 'test-main' });
+  assert.equal(view.session, captureSession);
+  assert.equal(blockedRequest('https://example.org/', 'image'), false);
+  pane.closeAll();
+});
 
 test('the blank document starts before opening the DevTools session', async () => {
   let finish;

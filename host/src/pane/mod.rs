@@ -64,6 +64,8 @@ pub struct Pane {
     noted: tokio::sync::watch::Sender<u64>,
     /// Held from a navigation to the last read of its page, so two calls never read each other's page.
     opening: tokio::sync::Mutex<()>,
+    /// Only one short-lived capture view can be open in the shell.
+    picture_gate: tokio::sync::Mutex<()>,
     extension_gate: Arc<tokio::sync::Mutex<()>>,
     /// The person is looking at the pane: it is theirs until they go back.
     looking: tokio::sync::watch::Sender<bool>,
@@ -238,6 +240,7 @@ impl Pane {
             loads: tokio::sync::watch::channel((0, 0)).0,
             noted: tokio::sync::watch::channel(0).0,
             opening: tokio::sync::Mutex::new(()),
+            picture_gate: tokio::sync::Mutex::new(()),
             extension_gate,
             looking: tokio::sync::watch::channel(false).0,
             acting: tokio::sync::Mutex::new(()),

@@ -79,6 +79,7 @@ mod move_chat;
 mod overload;
 mod parked;
 mod pick_up;
+mod pictures;
 mod plan;
 mod pr_watch;
 mod quiet_child;
@@ -735,6 +736,7 @@ struct Core {
     goals: goals::Watch,
     /// When each running reply last heard from its CLI, and the one check that looks for silence (`silence.rs`).
     heard: HashMap<String, silence::Heard>,
+    after_pictures: HashMap<String, pictures::PictureTask>,
     listening: bool,
     /// When the silence check last looked (`silence.rs`).
     looked: f64,
@@ -937,6 +939,7 @@ impl Engine {
                     watched: HashMap::new(),
                     goals: Default::default(),
                     heard: HashMap::new(),
+                    after_pictures: HashMap::new(),
                     listening: false,
                     looked: 0.0,
                     draft_routes: HashMap::new(),
@@ -2011,6 +2014,10 @@ impl Engine {
         let flights = {
             let mut core = self.core.lock().unwrap_or_else(|e| e.into_inner());
             core.closing = true;
+            core.after_pictures.clear();
+            for heard in core.heard.values_mut() {
+                heard.pictures = None;
+            }
             core.saves.flights.clone()
         };
         flights.wait();
@@ -6711,6 +6718,8 @@ impl Core {
             self.list_changed();
             return Err(FAILED.into());
         }
+        self.heard.remove(id);
+        self.after_pictures.remove(id);
         self.titles.remove(id);
         self.kit_checks.retain(|_, check| check.owner != id);
         self.saves.completed.lock().unwrap_or_else(|e| e.into_inner()).remove(id);

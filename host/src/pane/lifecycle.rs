@@ -108,6 +108,7 @@ impl Pane {
         let pane = match view {
             View::Main => Some(self.clone()),
             View::Behind => self.behind.clone(),
+            View::Capture => None,
         };
         if let Some(pane) = pane {
             pane.heard(event);

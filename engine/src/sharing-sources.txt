@@ -125,6 +125,7 @@ permissions.rs
 person.rs
 persona.rs
 pick_up.rs
+pictures.rs
 pieces.rs
 pipe.rs
 place.rs

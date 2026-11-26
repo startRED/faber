@@ -41,7 +41,8 @@ const EVERY: Duration = Duration::from_secs(30);
 
 /// The last word of a running reply's CLI.
 pub(super) struct Heard {
-    turn: String,
+    pub(super) turn: String,
+    pub(super) pictures: Option<pictures::TurnPictures>,
     /// The process that runs the reply: one that replaced it is another reply's.
     sid: u64,
     at: f64,
@@ -71,7 +72,17 @@ impl Core {
         let Some((turn, sid)) = self.live.get(conv).and_then(|l| Some((l.turn.clone()?, l.sid))) else { return };
         self.command_waits.remove(conv);
         let at = self.secs();
-        self.heard.insert(conv.to_string(), Heard { turn, sid, at, cut: false, search_requested: false, quiet: None });
+        // Draining or steering can admit the next reply before the previous one's ordinary end hook.
+        let pictures = if let Some(heard) = self.heard.get_mut(conv).filter(|h| h.turn == turn) {
+            heard.pictures.take()
+        } else {
+            if self.heard.contains_key(conv) {
+                self.turn_ended(conv);
+            }
+            self.after_pictures.remove(conv);
+            self.start_answer_pictures(conv, &turn)
+        };
+        self.heard.insert(conv.to_string(), Heard { turn, pictures, sid, at, cut: false, search_requested: false, quiet: None });
         if std::mem::replace(&mut self.listening, true) {
             return;
         }

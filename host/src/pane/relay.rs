@@ -19,6 +19,7 @@ pub fn view_of(view: View) -> PaneView {
     match view {
         View::Main => PaneView::Main,
         View::Behind => PaneView::Behind,
+        View::Capture => PaneView::Capture,
     }
 }
 
@@ -27,6 +28,7 @@ pub fn view_named(view: PaneView) -> View {
     match view {
         PaneView::Main => View::Main,
         PaneView::Behind => View::Behind,
+        PaneView::Capture => View::Capture,
     }
 }
 
@@ -232,6 +234,10 @@ impl Driver for Relay {
 
     fn load(&self, view: View, url: String) -> BoxFuture<'_, Res<()>> {
         Box::pin(async move { self.ask(view, PaneOp::Load { url }).await.map(drop) })
+    }
+
+    fn load_capture(&self, url: String, blocked_hosts: Vec<String>) -> BoxFuture<'_, Res<()>> {
+        Box::pin(async move { self.ask(View::Capture, PaneOp::LoadCapture { url, blocked_hosts }).await.map(drop) })
     }
 
     fn call(&self, view: View, method: &'static str, params: Value) -> BoxFuture<'_, Res<Value>> {

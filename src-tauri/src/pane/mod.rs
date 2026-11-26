@@ -119,6 +119,9 @@ pub struct Pane {
     loads: tokio::sync::watch::Sender<(u64, u64)>,
     /// Held from a navigation to the last read of its page, so two calls never read each other's page.
     opening: tokio::sync::Mutex<()>,
+    /// The disposable picture view has only one slot.
+    #[cfg(windows)]
+    picture_gate: tokio::sync::Mutex<()>,
     /// The person is looking at the pane: it is theirs until they go back.
     looking: tokio::sync::watch::Sender<bool>,
     /// Held while an action of the agent changes the page: the person takes the pane only when it is over.
@@ -281,6 +284,25 @@ impl Drop for Unfinished<'_> {
     }
 }
 
+#[cfg(windows)]
+struct CloseCapture {
+    webview: Webview,
+    profile: Option<tempfile::TempDir>,
+}
+
+#[cfg(windows)]
+impl Drop for CloseCapture {
+    fn drop(&mut self) {
+        let profile = self.profile.take();
+        let webview = self.webview.clone();
+        // Tauri dispatches close asynchronously off the main thread. Keep the private directory through native close.
+        let _ = self.webview.run_on_main_thread(move || {
+            let _ = webview.close();
+            drop(profile);
+        });
+    }
+}
+
 /// Runs `then` once no action of the agent is changing the page, and keeps further ones out while it runs.
 async fn when_idle<T>(acting: &tokio::sync::Mutex<()>, then: impl FnOnce() -> T) -> T {
     let _idle = acting.lock().await;
@@ -377,6 +399,8 @@ impl Pane {
             state: Mutex::default(),
             loads: tokio::sync::watch::channel((0, 0)).0,
             opening: tokio::sync::Mutex::new(()),
+            #[cfg(windows)]
+            picture_gate: tokio::sync::Mutex::new(()),
             looking: tokio::sync::watch::channel(false).0,
             acting: tokio::sync::Mutex::new(()),
             rounding: tokio::sync::Mutex::new(()),
@@ -1812,6 +1836,61 @@ impl Pane {
 }
 
 impl Browser for PaneBrowser {
+    #[cfg(windows)]
+    fn capture_local(&self, url: String) -> Pin<Box<dyn Future<Output = Option<Vec<u8>>> + Send>> {
+        let main = self.0.clone();
+        Box::pin(async move {
+            use faber_engine::browser::local_app_url;
+            let url = local_app_url(&url)?;
+            if !allowed(&url) {
+                return None;
+            }
+            let _slot = main.picture_gate.lock().await;
+            let blocked_hosts = main.app.state::<crate::Faber>().engine.settings().blocked_hosts.unwrap_or_default();
+            if !capture_request_allowed(url.as_str(), &blocked_hosts) {
+                return None;
+            }
+            let window = main.app.get_window("main")?;
+            // Sharing the pane's WebView2 environment would share its in-private profile and sign-ins.
+            let profile = tempfile::tempdir().ok()?;
+            let pane = Pane::made(main.app.clone(), "site-capture", Duration::ZERO, None);
+            let blank = Url::parse("about:blank").ok()?;
+            let origin = url.origin();
+            let allowed_origin = origin.clone();
+            let permits = move |address: &str| capture_request_allowed(address, &blocked_hosts);
+            let navigation_permits = permits.clone();
+            let (loaded, mut finished) = tokio::sync::watch::channel(false);
+            let builder = WebviewBuilder::new(pane.label, WebviewUrl::External(blank))
+                .incognito(true)
+                .data_directory(profile.path().to_path_buf())
+                .focused(false)
+                .on_navigation(move |next| {
+                    next.as_str() == "about:blank" || (next.origin() == allowed_origin && navigation_permits(next.as_str()))
+                })
+                .on_download(|_, _| false)
+                .on_new_window(|_, _| NewWindowResponse::Deny)
+                .on_page_load(move |_, page| {
+                    if page.event() == PageLoadEvent::Finished && page.url().origin() == origin {
+                        loaded.send_replace(true);
+                    }
+                });
+            let webview = window.add_child(builder, PARKED, SIZE).ok()?;
+            let _close = CloseCapture { webview: webview.clone(), profile: Some(profile) };
+            crate::lock(&pane.state).webview = Some(webview.clone());
+            native::quiet_capture(&webview, permits).await.ok()?.ok()?;
+            pane.call("Page.setInterceptFileChooserDialog", json!({ "enabled": true, "cancel": true })).await.ok()?;
+            webview.navigate(url.clone()).ok()?;
+            finished.wait_for(|loaded| *loaded).await.ok()?;
+            let tree = pane.call("Page.getFrameTree", json!({})).await.ok()?;
+            let frame = &tree["frameTree"]["frame"];
+            if !frame["unreachableUrl"].is_null() || local_app_url(frame["url"].as_str()?)?.origin() != url.origin() {
+                return None;
+            }
+            let (page, href) = pane.read(None, 0).await.ok()?;
+            (local_app_url(&href)?.origin() == url.origin()).then_some(page.picture).flatten()
+        })
+    }
+
     fn act(&self, conversation: String, tab: String, request: Request) -> Pin<Box<dyn Future<Output = Result<Page, String>> + Send>> {
         let pane = self.0.clone();
         if let Request::App(input) = request {
@@ -1825,9 +1904,26 @@ impl Browser for PaneBrowser {
     }
 }
 
+#[cfg(windows)]
+fn capture_request_allowed(address: &str, blocked: &[String]) -> bool {
+    use faber_engine::browser::{check_blocked_url, local_app_url};
+    local_app_url(address).is_some() && check_blocked_url(address, blocked).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn capture_policy_allows_only_local_unblocked_requests() {
+        let blocked = ["127.0.0.1".into()];
+        assert!(capture_request_allowed("http://localhost:4321/", &blocked));
+        assert!(capture_request_allowed("https://[::1]:4322/style.css", &blocked));
+        for address in ["http://127.0.0.1:4321/", "https://example.org/", "http://ipc.localhost/", "data:text/html,frame"] {
+            assert!(!capture_request_allowed(address, &blocked), "{address}");
+        }
+    }
 
     #[cfg(feature = "test-hooks")]
     #[test]

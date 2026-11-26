@@ -22,6 +22,89 @@ fn answer<T>(slot: &Slot<T>, result: Result<T, String>) {
     }
 }
 
+/// An unattended page may reach only local, unblocked pages and may not raise dialogs or ask for permissions or credentials.
+#[cfg(windows)]
+pub fn quiet_capture(
+    webview: &tauri::Webview,
+    permits: impl Fn(&str) -> bool + Clone + Send + 'static,
+) -> oneshot::Receiver<Result<(), String>> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_PERMISSION_STATE_DENY, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL, COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
+        ICoreWebView2_10, ICoreWebView2_22,
+    };
+    use webview2_com::{
+        BasicAuthenticationRequestedEventHandler, NavigationStartingEventHandler, PermissionRequestedEventHandler,
+        WebResourceRequestedEventHandler, take_pwstr,
+    };
+    use windows_core::{Interface, PWSTR};
+    let (tx, rx) = oneshot::channel();
+    let tx = Arc::new(Mutex::new(Some(tx)));
+    let failed = tx.clone();
+    let queued = webview.with_webview(move |platform| {
+        let permission = PermissionRequestedEventHandler::create(Box::new(|_, args| {
+            // SAFETY: WebView2 gives this handler live arguments on the owning thread.
+            if let Some(args) = args {
+                unsafe { args.SetState(COREWEBVIEW2_PERMISSION_STATE_DENY)? };
+            }
+            Ok(())
+        }));
+        let auth = BasicAuthenticationRequestedEventHandler::create(Box::new(|_, args| {
+            // SAFETY: as above, with credentials always refused.
+            if let Some(args) = args {
+                unsafe { args.SetCancel(true)? };
+            }
+            Ok(())
+        }));
+        // SAFETY: Tauri runs this closure on the owning thread; WebView2 retains the handlers while the view lives.
+        let result = (|| unsafe {
+            let core = platform.controller().CoreWebView2()?;
+            core.Settings()?.SetAreDefaultScriptDialogsEnabled(false)?;
+            core.add_PermissionRequested(&permission, &mut 0)?;
+            core.cast::<ICoreWebView2_10>()?.add_BasicAuthenticationRequested(&auth, &mut 0)?;
+            let frames_permitted = permits.clone();
+            let navigation = NavigationStartingEventHandler::create(Box::new(move |_, args| {
+                if let Some(args) = args {
+                    args.SetCancel(true)?;
+                    let mut uri = PWSTR::null();
+                    args.Uri(&mut uri)?;
+                    if frames_permitted(&take_pwstr(uri)) {
+                        args.SetCancel(false)?;
+                    }
+                }
+                Ok(())
+            }));
+            core.add_FrameNavigationStarting(&navigation, &mut 0)?;
+            let denied = platform.environment().CreateWebResourceResponse(
+                None,
+                403,
+                &HSTRING::from("Blocked"),
+                &HSTRING::from("Content-Length: 0\r\nCache-Control: no-store\r\n"),
+            )?;
+            let requests = WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
+                if let Some(args) = args {
+                    let mut uri = PWSTR::null();
+                    if args.Request().and_then(|request| request.Uri(&mut uri)).is_err() || !permits(&take_pwstr(uri)) {
+                        args.SetResponse(&denied)?;
+                    }
+                }
+                Ok(())
+            }));
+            core.add_WebResourceRequested(&requests, &mut 0)?;
+            core.cast::<ICoreWebView2_22>()?.AddWebResourceRequestedFilterWithRequestSourceKinds(
+                &HSTRING::from("*"),
+                COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
+            )?;
+            Ok::<_, windows_core::Error>(())
+        })();
+        answer(&tx, result.map_err(|e| e.message()));
+    });
+    if let Err(e) = queued {
+        answer(&failed, Err(e.to_string()));
+    }
+    rx
+}
+
 /// Test builds only: read the actual profile's private-mode flag on its owning thread.
 #[cfg(all(windows, feature = "test-hooks"))]
 pub fn test_private(webview: &tauri::Webview) -> oneshot::Receiver<Result<bool, String>> {
