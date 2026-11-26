@@ -13,6 +13,17 @@ import { store } from './running.ts';
 
 const checksOnBoot = import.meta.env.MODE === 'test' && new URLSearchParams(location.search).has('checks');
 
+// The window starts hidden and shows once a frame is on screen. The static first frame (ui/index.html) is that frame, so
+// the shell hears it now, before anything below waits for the host: a slow engine start no longer leaves the window to
+// the shell's failsafe (3.3 s in 41 of the owner's 59 shown starts, 2026-11-25). The timer covers a hidden window whose
+// frames wait to be shown. A conversation id the answer carries waits for the real screen, which listens for it.
+let ready: Promise<string | null> | undefined;
+const firstFrame = () => {
+  ready ??= api.screenReady().catch(() => null);
+};
+requestAnimationFrame(() => requestAnimationFrame(firstFrame));
+setTimeout(firstFrame, 150);
+
 // Only a test build (`vite build --mode test`) carries the screen's checks; a production build drops this line.
 if (import.meta.env.MODE === 'test') {
   await import('../tests/ui/crash.ts');
@@ -72,16 +83,11 @@ if (import.meta.env.MODE === 'test') await import('../tests/ui/index.ts');
 // numbers of this screen start again from 1 whatever the clock does (R161 step 7).
 void api.sitePark(0).catch(() => {});
 
-// The window starts hidden: it shows once the first frame is painted, so there is never an empty one. The timer covers a
-// page whose frames wait for a window that is not shown; the shell's own failsafe covers a page that never gets here.
-let told = false;
-const painted = () => {
-  if (told) return;
-  told = true;
-  void api.screenReady().then((id) => { if (id) window.dispatchEvent(new CustomEvent('faber:show-conversation', { detail: id })); }).catch(() => {});
-};
-requestAnimationFrame(() => requestAnimationFrame(painted));
-setTimeout(painted, 150);
+// The real screen is mounted: the conversation the shell asked to show (a notice clicked before the window opened) opens now.
+firstFrame();
+void ready?.then((id) => {
+  if (id) window.dispatchEvent(new CustomEvent('faber:show-conversation', { detail: id }));
+});
 
 // Checks own their App fixtures: start after the shared bootstrap, without a second App changing their language or state.
 if (import.meta.env.MODE === 'test' && checksOnBoot) {

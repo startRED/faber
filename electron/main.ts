@@ -339,6 +339,7 @@ function relay(): void {
       const own = windowCommands.get(command);
       if (own) return { ok: (await own(given)) ?? null };
       if (!host) throw new Error('error.host.notReady');
+      await testmode.hostHeld();
       const ok = await host.call(command, given);
       startup.hostAnswered();
       return { ok: ['media_grant', 'media_grant_web'].includes(command) ? `${MEDIA_ORIGIN}/${String(ok)}` : ok };

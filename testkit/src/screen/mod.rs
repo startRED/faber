@@ -32,6 +32,7 @@ pub mod sentinel;
 pub mod settings;
 pub mod setup;
 pub mod shell;
+pub mod start_order;
 pub mod streaming;
 pub mod thread_order;
 pub mod thread_scroll;
@@ -67,6 +68,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(approve_plan::scenarios())
         .chain(projects::scenarios())
         .chain(shell::scenarios())
+        .chain(start_order::scenarios())
         .chain(review::scenarios())
         .chain(settings::scenarios())
         .chain(setup::scenarios())
@@ -144,6 +146,7 @@ pub const SOLO: &[(&str, &str)] = &[
     (app::CREATIVE_WORKLOG[1], "processor, memory"),
     (app::CREATIVE_WORKLOG[2], "processor, memory"),
     (performance::NAME, "processor, memory, scheduling and layout timing"),
+    (start_order::NAME, "times the start: which mark shows the window and when the host answers"),
     (agent_history::NAME, "subagent-history screen scenario samples process-tree memory and CPU"),
     (helper_both::CLAUDE, "helper round samples process-tree memory"),
     (helper_both::CODEX, "helper round samples process-tree memory"),

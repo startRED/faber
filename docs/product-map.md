@@ -184,7 +184,7 @@ Faber launches each project in its folder or conversation copy; Memory edits the
 
 | Step | What the person does | What is saved |
 | :--- | :--- | :--- |
-| Window opens | Nothing: the system language and Dark Room | Nothing |
+| Window opens | Nothing: the system language and Dark Room. It shows on its static first frame, before the engine answers; a start from the tray stays hidden. `start_order` (screen, Electron) holds it with a 4.5 s engine hold | Nothing |
 | Accounts | Picks the subscriptions, installs and signs in to the CLIs | `setup`: `done` on Continue, `skipped` on Skip (both go on the same way) |
 | Look | Look, text size, spacing, motion, "Do you already use AI?", an optional name | One save: `appearance`, `experience`, `userName`, and `tutorialDone: false` unless it is already true |
 | First chat | Lands on the Chat home | Nothing |

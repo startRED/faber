@@ -26,6 +26,23 @@ export function reportBlockedVisualNavigation(url: string, frame: WebFrameMain |
   }
 }
 
+/** How long a test run holds the host's answers (`--test-host-hold=<ms>`, at most 30 s); 0 outside a test run. */
+const hold = (() => {
+  if (!testing) return 0;
+  const ms = Number(process.argv.find((arg) => arg.startsWith('--test-host-hold='))?.slice('--test-host-hold='.length));
+  return Number.isInteger(ms) && ms > 0 && ms <= 30_000 ? ms : 0;
+})();
+
+/**
+ * In a test run started with `--test-host-hold=<ms>`, every answer of the host waits until that long after the start, as
+ * a slow engine start on a real profile does (25 s on the owner's, 2026-11-25), so a check can prove the window does not
+ * wait for the host. Otherwise nothing waits.
+ */
+export function hostHeld(): Promise<void> | undefined {
+  const left = hold - performance.now();
+  return left > 0 ? new Promise((resolve) => setTimeout(resolve, left)) : undefined;
+}
+
 /** Called before the app is ready, when Chromium still takes switches and paths. */
 export function prepare(): void {
   const port = env('FABER_CDP_PORT');
