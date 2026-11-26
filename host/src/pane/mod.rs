@@ -24,7 +24,6 @@ pub mod firefox;
 mod home;
 mod lifecycle;
 mod person;
-mod pick;
 pub mod relay;
 mod rules;
 #[cfg(test)]

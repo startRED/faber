@@ -74,7 +74,6 @@ import './find.check.ts';
 import './search-messages.check.ts';
 import './review-answer.check.ts';
 import './run.check.ts';
-import './point-and-ask.check.ts';
 import './shortcuts.check.ts';
 import './terminal-sessions.check.ts';
 import './review-motion.check.ts';

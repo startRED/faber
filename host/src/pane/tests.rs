@@ -101,8 +101,6 @@ struct Fake {
     /// A method whose call never answers.
     hang: Mutex<Option<&'static str>>,
     fail_load: AtomicBool,
-    /// What the page answers to pick mode's wait.
-    pick: Mutex<Value>,
 }
 
 impl Fake {
@@ -143,8 +141,6 @@ impl Fake {
                     json!({ "ok": false, "why": "control", "seen": ["Buy now"] })
                 } else if expression.contains("kind: 'fits'") {
                     json!({ "wider": 0, "cut": [], "x": 0, "y": 0 })
-                } else if expression.contains("\"kind\":\"pick\"") {
-                    crate::lock(&self.pick).clone()
                 } else if expression.contains("href: String(location.href)") {
                     json!({ "turn": "", "href": url, "url": url, "title": "Fake page", "text": "Hello", "x": 0, "y": 0 })
                 } else {
@@ -584,61 +580,6 @@ async fn the_page_takes_the_corners_of_the_card_once_per_change() {
         fake.calls_of("Page.addScriptToEvaluateOnNewDocument")[2]["source"].as_str().unwrap().contains("const r = 0;"),
         "an odd radius is square"
     );
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_pick_on_the_persons_page_comes_back_masked_and_with_a_picture_only_when_nothing_secret_is_in_it() {
-    let (pane, fake, _) = world();
-    assert_eq!(pane.site_pick("c".into(), true).await.unwrap(), json!({ "ended": true }), "no page, no pick mode");
-    open(&pane, "c", "t1", A).await;
-    assert_eq!(pane.site_pick("c".into(), true).await.unwrap(), json!({ "ended": true }), "a page out of sight is not the person's");
-    pane.park(7, 0);
-    assert!(pane.place(7, 1, 0.0, 0.0, 400.0, 300.0).await);
-    assert_eq!(pane.site_pick("d".into(), true).await.unwrap(), json!({ "ended": true }), "only the conversation whose page it is");
-    *crate::lock(&fake.pick) = json!({ "ok": true, "waiting": true });
-    assert_eq!(pane.site_pick("c".into(), true).await.unwrap(), json!({ "waiting": true }));
-    let waits = fake.calls_of("Runtime.evaluate");
-    assert_eq!(waits.last().unwrap()["awaitPromise"], true, "the page answers once the person picks or the wait ends");
-    let picked = |text: &str, secret: bool, near: &[&str], href: &str| {
-        json!({ "ok": true, "turn": "", "picked": {
-        "role": "button", "name": "Save", "text": text, "selector": "#save", "secret": secret, "near": near, "href": href,
-        "rect": [10, 20, 80, 30], "x": 0, "y": 100, "vw": 800, "vh": 600,
-    } })
-    };
-    *crate::lock(&fake.pick) = picked("Save changes", false, &[], &format!("{A}#top"));
-    let answer = pane.site_pick("c".into(), true).await.unwrap();
-    assert_eq!(
-        answer["picked"],
-        json!({ "role": "button", "name": "Save", "text": "Save changes", "selector": "#save", "page": A }),
-        "no query"
-    );
-    assert!(answer["picture"].is_string(), "a plain button comes with its picture");
-    let clip = fake.calls_of("Page.captureScreenshot").last().unwrap()["clip"].clone();
-    assert_eq!(
-        (clip["x"].as_f64(), clip["y"].as_f64(), clip["width"].as_f64(), clip["scale"].as_f64()),
-        (Some(10.0), Some(120.0), Some(80.0), Some(2.0)),
-        "only its own box, scrolled"
-    );
-    let shots = fake.calls_of("Page.captureScreenshot").len();
-    let late = format!("{} sk-live-4eC39HqLyjWDarjtT1zdp7dc", "a".repeat(185));
-    *crate::lock(&fake.pick) = picked(&late, false, &[], A);
-    let answer = pane.site_pick("c".into(), true).await.unwrap();
-    assert_eq!(
-        answer["picked"]["text"],
-        format!("{} [secret hidden]", "a".repeat(185)).chars().take(200).collect::<String>(),
-        "masked whole, then cut"
-    );
-    assert!(answer["picture"].is_null(), "a picture would show the key");
-    *crate::lock(&fake.pick) = picked("[hidden]", true, &[], A);
-    assert!(pane.site_pick("c".into(), true).await.unwrap()["picture"].is_null(), "nor a password field");
-    *crate::lock(&fake.pick) = picked("Save", false, &["ghp_16C7e42F292c6912E7710c838347Ae178B4a"], A);
-    assert!(pane.site_pick("c".into(), true).await.unwrap()["picture"].is_null(), "nor a field beside it that holds a key");
-    *crate::lock(&fake.pick) = picked("Save", false, &[], B);
-    let other = pane.site_pick("c".into(), true).await.unwrap();
-    assert!(other["picked"].is_object() && other["picture"].is_null(), "another document than the view's: words, never its pixels");
-    assert_eq!(fake.calls_of("Page.captureScreenshot").len(), shots);
-    assert_eq!(pane.site_pick("c".into(), false).await.unwrap(), json!({ "ended": true }));
-    assert!(fake.calls_of("Runtime.evaluate").last().unwrap()["expression"].as_str().unwrap().contains("\"kind\":\"unpick\""));
 }
 
 #[tokio::test(start_paused = true)]
