@@ -26,6 +26,25 @@ pub fn native_path(path: &Path) -> String {
     if let Some(unc) = raw.strip_prefix("\\\\?\\UNC\\") { format!("\\\\{unc}") } else { raw.strip_prefix("\\\\?\\").unwrap_or(&raw).into() }
 }
 
+/// Whether two spellings name one folder. Windows ignores a verbatim prefix, case and which slash separates the parts;
+/// elsewhere paths compare as they are.
+pub fn same_path(a: &Path, b: &Path) -> bool {
+    if cfg!(windows) { windows_key(a) == windows_key(b) } else { a == b }
+}
+
+/// Whether `path` is `folder` or inside it, by the same identity as [`same_path`].
+pub fn path_within(path: &Path, folder: &Path) -> bool {
+    if !cfg!(windows) {
+        return path.starts_with(folder);
+    }
+    let (path, folder) = (windows_key(path), windows_key(folder));
+    path == folder || path.strip_prefix(&folder).is_some_and(|rest| rest.starts_with('\\'))
+}
+
+fn windows_key(path: &Path) -> String {
+    native_path(path).replace('/', "\\").trim_end_matches('\\').to_lowercase()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invocation {
     pub cwd: PathBuf,
@@ -364,6 +383,23 @@ pub fn config_overrides(keys: &[u8]) -> Result<Vec<String>, GitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn path_identity_follows_the_platform() {
+        assert!(same_path(Path::new("/data/copies/a"), Path::new("/data/copies/a")));
+        assert!(path_within(Path::new("/data/copies/a/nested"), Path::new("/data/copies/a")));
+        assert!(!path_within(Path::new("/data/copies/another"), Path::new("/data/copies/a")));
+        #[cfg(windows)]
+        {
+            assert!(same_path(Path::new(r"\\?\C:\Data\Copies\A"), Path::new(r"c:\data\copies\a\")));
+            assert!(same_path(Path::new("C:/Data/Copies/A"), Path::new(r"C:\DATA\COPIES\A")));
+            assert!(path_within(Path::new(r"\\?\C:\DATA\copies\a\nested"), Path::new(r"c:\data\Copies\A")));
+            assert!(path_within(Path::new(r"C:\x"), Path::new(r"C:\")));
+            assert!(!path_within(Path::new(r"C:\data\copies\another"), Path::new(r"C:\DATA\copies\a")));
+        }
+        #[cfg(not(windows))]
+        assert!(!same_path(Path::new("/data/Copies/a"), Path::new("/data/copies/a")));
+    }
 
     #[tokio::test(start_paused = true)]
     async fn maintenance_retains_unconfirmed_children_until_the_owned_tree_is_gone() {

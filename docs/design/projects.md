@@ -131,7 +131,10 @@ the first message reaches the CLI. The agent starts in the same place of the cop
 repository. The copy is made outside the engine's lock and in a blocking task of the shell, so a slow checkout holds
 neither the screen nor the other conversations. Nothing polls: a copy is removed when its conversation is deleted, and
 once at start (`Engine::sweep_copies`) when it is clean and every file its branch changed is the same in the person's
-branch or its upstream, which a merge, a fast-forward and a squash all satisfy. Uncommitted changes, or commits no other
+branch or its upstream, which a merge, a fast-forward and a squash all satisfy. The sweep judges each copy alone, so a
+finished copy leaves while other conversations run: one stays while its conversation runs, starts or is sent to, while a
+rewind admission, recovery or final scan, a side question or an unfinished check covers its folder, and when moving it
+aside fails. Uncommitted changes, or commits no other
 branch holds, refuse the delete with `error.copy.unsaved` until the person discards them: the row's × then asks once more,
 "Discard changes?", with the reason as its label and tooltip, and only that click discards. The topbar crumb adds
 "› faber/…", the branch, in the extra-small data font and the crumb's quiet ink, cut before the title is; the copy's

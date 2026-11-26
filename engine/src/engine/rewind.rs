@@ -430,6 +430,25 @@ impl Engine {
         Ok(preview)
     }
 
+    /// Test synchronization: holds the same admission as restore and redo without touching history files.
+    #[doc(hidden)]
+    pub fn rewind_admission_guard(&self, id: &str) -> Result<impl Drop, String> {
+        self.rewind_admission(id).map(|(guard, _, _)| guard)
+    }
+
+    /// Test synchronization: marks a final scan as running over `folder` until the guard drops, as `try_seal_rewind` does.
+    #[doc(hidden)]
+    pub fn rewind_sealing_guard(&self, folder: &Path) -> impl Drop {
+        struct Sealing(Engine, PathBuf);
+        impl Drop for Sealing {
+            fn drop(&mut self) {
+                self.0.with(|c| c.rewind.sealing.remove(&self.1));
+            }
+        }
+        self.with(|c| c.rewind.sealing.insert(folder.to_path_buf()));
+        Sealing(self.clone(), folder.to_path_buf())
+    }
+
     fn rewind_admission(&self, id: &str) -> Result<(Admission, Arc<Mutex<History>>, Conversation), String> {
         self.with(|c| {
             c.load(id).ok_or("error.conversationGone")?;
@@ -594,6 +613,11 @@ impl Core {
             )
             .collect()
     }
+    /// Whether a final scan runs over any part of `folder`; it does not stop a send, only what would remove the folder.
+    pub(super) fn rewind_sealing_in(&self, folder: &Path) -> bool {
+        self.rewind.sealing.iter().any(|root| overlap(root, folder))
+    }
+
     pub(super) fn rewind_blocked(&self, id: &str) -> bool {
         if self.rewind.recovery_failed {
             return true;

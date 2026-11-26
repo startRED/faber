@@ -8,10 +8,12 @@ use faber_engine::model::{Area, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::project::git::{Executor, GitError, Invocation, Output};
 use faber_engine::router::Choice;
+use faber_engine::store::Store;
+use faber_engine::verify::{Level, Request, Runner, Spec, Started, Verifier};
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
@@ -35,6 +37,8 @@ struct Repo {
     on_add: Option<Box<dyn FnOnce() + Send>>,
     /// Runs once while git reads a copy's status.
     on_status: Option<Box<dyn FnOnce() + Send>>,
+    before_branch_delete: Option<Box<dyn FnOnce() + Send>>,
+    on_branch_lookup: Option<Box<dyn FnOnce() + Send>>,
     calls: Vec<Vec<String>>,
 }
 
@@ -50,6 +54,13 @@ impl Executor for Git {
         }
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let mut repo = self.0.lock().unwrap();
+        if matches!(args.as_slice(), ["branch", "-D", _])
+            && let Some(hook) = repo.before_branch_delete.take()
+        {
+            drop(repo);
+            hook();
+            repo = self.0.lock().unwrap();
+        }
         repo.calls.push(args.iter().map(|a| a.to_string()).collect());
         let say = |text: &str| Ok(Output { success: true, stdout: text.as_bytes().to_vec() });
         let no = || Ok(Output { success: false, stdout: vec![] });
@@ -65,10 +76,18 @@ impl Executor for Git {
             ["symbolic-ref", "--quiet", "--short", "HEAD"] => say(&std::fs::read_to_string(call.cwd.join(".branch")).unwrap_or_default()),
             ["rev-parse", "--path-format=absolute", "--git-common-dir"] => say(&format!("{}\n", repo.root.join(".git").display())),
             ["rev-parse", "--verify", "--quiet", r] if r.starts_with("refs/heads/faber/") => {
+                if let Some(hook) = repo.on_branch_lookup.take() {
+                    hook();
+                }
                 let name = r.trim_start_matches("refs/heads/");
-                let made = repo.calls.iter().any(|c| c.iter().any(|a| a == name) && c.first().is_some_and(|a| a == "worktree"));
-                let gone = repo.calls.iter().any(|c| c.first().is_some_and(|a| a == "branch") && c.iter().any(|a| a == name));
-                if made && !gone { say(&format!("{HEAD}\n")) } else { no() }
+                let exists = repo.calls.iter().rev().find_map(|c| match c.as_slice() {
+                    [worktree, add, new, branch, ..] if worktree == "worktree" && add == "add" && new == "-b" && branch == name => {
+                        Some(true)
+                    }
+                    [cmd, delete, branch] if cmd == "branch" && delete == "-D" && branch == name => Some(false),
+                    _ => None,
+                });
+                if exists == Some(true) { say(&format!("{HEAD}\n")) } else { no() }
             }
             ["rev-parse", "--verify", "--quiet", "HEAD"] => say(&format!(
                 "{}
@@ -223,6 +242,295 @@ async fn a_running_copy_keeps_its_rebuildable_folders_during_the_startup_sweep()
     s.engine.sweep_copies();
     assert_eq!(std::fs::read_to_string(target.join("keep")).unwrap(), "still in use");
     s.engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_merged_idle_copy_is_retired_while_another_conversation_runs() {
+    let s = setup();
+    let idle = sent(&s.engine, ask(&s.project, "Finished work")).await;
+    let idle_copy = s.engine.open(&idle).unwrap().copy.unwrap();
+    agent_started_in(&s.cwds, Path::new(&idle_copy.path)).await;
+    s.engine.shutdown();
+
+    s.git.lock().unwrap().merged = true;
+    std::fs::create_dir_all(s._folder.path().join(".git/objects")).unwrap();
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
+    let running = sent(&engine, ask(&s.project, "Keep working")).await;
+    let running_copy = engine.open(&running).unwrap().copy.unwrap();
+    agent_started_in(&s.cwds, Path::new(&running_copy.path)).await;
+    engine.sweep_copies();
+
+    assert!(!Path::new(&idle_copy.path).exists(), "the idle copy has already merged");
+    assert_eq!(engine.open(&idle).unwrap().copy, Some(idle_copy), "the conversation can still resume");
+    assert!(Path::new(&running_copy.path).is_dir(), "the active copy stays even when merged");
+    assert!(!s.git.lock().unwrap().calls.iter().any(|args| args.first().is_some_and(|arg| arg == "maintenance")));
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn an_archived_idle_copy_with_unmerged_work_stays() {
+    let s = setup();
+    let id = sent(&s.engine, ask(&s.project, "Keep my changes")).await;
+    let copy = s.engine.open(&id).unwrap().copy.unwrap();
+    s.engine.archive(&id, true).unwrap();
+    s.engine.shutdown();
+
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
+    engine.sweep_copies();
+
+    assert!(s.git.lock().unwrap().calls.iter().any(|args| args.starts_with(&["merge-base".into(), "--is-ancestor".into()])));
+    assert_eq!(engine.open(&id).unwrap().copy.as_ref(), Some(&copy));
+    assert!(Path::new(&copy.path).is_dir(), "archiving does not authorize discarding unique work");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_copy_that_gets_a_message_during_the_sweep_stays() {
+    let s = setup();
+    let id = sent(&s.engine, ask(&s.project, "Finished work")).await;
+    let copy = s.engine.open(&id).unwrap().copy.unwrap();
+    s.engine.shutdown();
+
+    let marker = Path::new(&copy.path).join("target/cache");
+    std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+    std::fs::write(&marker, "original copy").unwrap();
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
+    let active = engine.clone();
+    let more = SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "One more change") };
+    {
+        let mut repo = s.git.lock().unwrap();
+        repo.merged = true;
+        repo.on_status = Some(Box::new(move || assert_eq!(active.send(more).unwrap(), id)));
+    }
+    engine.sweep_copies();
+
+    let repo = s.git.lock().unwrap();
+    assert!(repo.on_status.is_none(), "the message arrived while Git was checking the copy");
+    assert!(!repo.calls.iter().any(|args| args.starts_with(&["branch".into(), "-D".into()])));
+    drop(repo);
+    assert_eq!(std::fs::read_to_string(marker).unwrap(), "original copy", "the message keeps the original copy in place");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_message_during_copy_retirement_recreates_it_after_branch_deletion() {
+    let s = setup();
+    let id = sent(&s.engine, ask(&s.project, "Finished work")).await;
+    let expected = s.engine.open(&id).unwrap().copy.unwrap();
+    agent_started_in(&s.cwds, Path::new(&expected.path)).await;
+    s.engine.shutdown();
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
+    let sending = engine.clone();
+    let git = s.git.clone();
+    let request = SendRequest { conversation_id: Some(id.clone()), ..ask(&s.project, "Continue after merge") };
+    let (looked_up, lookup) = mpsc::channel();
+    let (observed, result) = mpsc::channel();
+    {
+        let mut repo = s.git.lock().unwrap();
+        repo.merged = true;
+        repo.before_branch_delete = Some(Box::new(move || {
+            git.lock().unwrap().on_branch_lookup = Some(Box::new(move || {
+                let _ = looked_up.send(());
+            }));
+            sending.send(request).unwrap();
+            observed.send(lookup.recv_timeout(Duration::from_secs(1)).is_ok()).unwrap();
+        }));
+    }
+    engine.sweep_copies();
+    assert!(!result.try_recv().unwrap(), "the old branch was consulted before it was deleted");
+    ready(&engine, &id).await;
+    assert_eq!(engine.open(&id).unwrap().copy, Some(expected));
+    engine.shutdown();
+}
+
+async fn merged_idle_copy(s: &Setup) -> faber_engine::model::Conversation {
+    let id = sent(&s.engine, ask(&s.project, "Finished work")).await;
+    let conversation = s.engine.open(&id).unwrap();
+    agent_started_in(&s.cwds, Path::new(&conversation.copy.as_ref().unwrap().path)).await;
+    s.engine.shutdown();
+    s.git.lock().unwrap().merged = true;
+    Store::new(s.data.path()).get(&id).unwrap()
+}
+
+#[tokio::test]
+async fn a_merged_copy_that_cannot_be_set_aside_keeps_its_build_folders() {
+    let s = setup();
+    let mut conversation = merged_idle_copy(&s).await;
+    conversation.updated_at = 1;
+    Store::new(s.data.path()).save_checked(&conversation).unwrap();
+    let copy = conversation.copy.unwrap();
+    let target = Path::new(&copy.path).join("target");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::write(target.join("keep"), "cache").unwrap();
+    let blocked = target.parent().unwrap().with_file_name(format!(".gone-{}", conversation.id));
+    std::fs::write(blocked, "rename blocked").unwrap();
+    s.git.lock().unwrap().ignored = true;
+
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
+    engine.sweep_copies();
+    assert!(s.git.lock().unwrap().calls.iter().any(|args| args.get(1).is_some_and(|arg| arg == "--is-ancestor")));
+    assert!(target.join("keep").is_file());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_copy_being_made_by_branch_here_is_not_an_orphan() {
+    let s = setup();
+    let source = merged_idle_copy(&s).await;
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
+    let sweeping = engine.clone();
+    s.git.lock().unwrap().on_add = Some(Box::new(move || sweeping.sweep_copies()));
+    let id = engine.branch_here(&source.id, &source.messages[0].id).unwrap();
+    let copy = engine.open(&id).unwrap().copy.unwrap();
+    assert!(Path::new(&copy.path).is_dir(), "the fork keeps the copy it just made");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_copy_where_an_aside_starts_during_the_sweep_stays() {
+    let s = setup();
+    let conversation = merged_idle_copy(&s).await;
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
+    let asking = engine.clone();
+    let id = conversation.id;
+    let asking_id = id.clone();
+    let path = PathBuf::from(conversation.copy.unwrap().path);
+    s.git.lock().unwrap().on_status = Some(Box::new(move || {
+        asking.ask_aside(&asking_id, "Where did you make the change?", None).unwrap();
+    }));
+    engine.sweep_copies();
+    assert!(engine.asides(&id).iter().any(|aside| aside.state == "running"));
+    assert!(path.is_dir(), "the aside still owns this working folder");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_copy_reserved_for_rewind_is_not_retired() {
+    let s = setup();
+    let conversation = merged_idle_copy(&s).await;
+    let path = PathBuf::from(conversation.copy.unwrap().path);
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
+    let restoring = engine.rewind_admission_guard(&conversation.id).unwrap();
+    engine.sweep_copies();
+    assert!(path.is_dir(), "restore and redo keep their working folder while admission is held");
+    drop(restoring);
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_copy_under_a_final_rewind_scan_is_not_retired() {
+    let s = setup();
+    let conversation = merged_idle_copy(&s).await;
+    let path = PathBuf::from(conversation.copy.unwrap().path);
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
+    let sealing = engine.rewind_sealing_guard(&path);
+    engine.sweep_copies();
+    assert!(path.is_dir(), "the closed session's final scan still reads this folder");
+    drop(sealing);
+    engine.shutdown();
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn a_merged_copy_with_different_windows_path_casing_is_retired() {
+    let s = setup();
+    let mut conversation = merged_idle_copy(&s).await;
+    let copy = conversation.copy.as_mut().unwrap();
+    let path = PathBuf::from(&copy.path);
+    copy.path.make_ascii_uppercase();
+    assert_ne!(path, Path::new(&copy.path));
+    Store::new(s.data.path()).save_checked(&conversation).unwrap();
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
+    engine.sweep_copies();
+    assert!(!path.exists());
+
+    // The next message makes the copy again at the same folder and keeps it, though the record spelled it otherwise.
+    s.git.lock().unwrap().merged = false;
+    let started = s.cwds.lock().unwrap().len();
+    let more = SendRequest { conversation_id: Some(conversation.id.clone()), ..ask(&s.project, "One more change") };
+    assert_eq!(engine.send(more).unwrap(), conversation.id);
+    let again =
+        || s.cwds.lock().unwrap()[started..].iter().any(|cwd| cwd.canonicalize().is_ok_and(|cwd| cwd == path.canonicalize().unwrap()));
+    support::until("the follow-up never started in the recreated copy", || path.is_dir() && again()).await;
+    let attached = engine.open(&conversation.id).unwrap().copy.unwrap();
+    assert_eq!(Path::new(&attached.path), path, "the recreated copy is attached, not dropped as a stray");
+    assert!(!s.git.lock().unwrap().calls.iter().any(|args| args.starts_with(&["worktree".into(), "remove".into()])));
+    assert!(path.is_dir());
+    engine.shutdown();
+}
+
+#[derive(Default)]
+struct UnconfirmedCheck(tokio::sync::Notify);
+
+impl Runner for UnconfirmedCheck {
+    fn start(&self, _: &Spec) -> std::io::Result<Started> {
+        let (closed, confirmed) = tokio::sync::watch::channel(false);
+        drop(closed);
+        self.0.notify_one();
+        Ok(Started {
+            stdout: Box::new(tokio::io::empty()),
+            stderr: Box::new(tokio::io::empty()),
+            exit: Box::pin(std::future::pending()),
+            confirmed: Some(confirmed),
+            throttle: None,
+            peak: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn leftover_retired_copy_removals_recheck_sweep_admission() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let s = setup();
+    let copies = faber_engine::project::copy::home(s.data.path());
+    let gone = [copies.join(".gone-one"), copies.join(".gone-two")];
+    for path in &gone {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    let reads = AtomicUsize::new(0);
+    let verifier =
+        Verifier::new(Arc::new(UnconfirmedCheck::default())).with_guard(Arc::new(move || reads.fetch_add(1, Ordering::Relaxed) >= 3));
+    s.engine.set_verifier(Arc::new(verifier));
+    s.engine.sweep_copies();
+    assert_eq!(gone.iter().filter(|p| p.is_dir()).count(), 1, "the second removal waits for the next sweep");
+    s.engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_copy_with_an_unconfirmed_check_process_is_kept() {
+    unconfirmed_check_keeps_the_copy(|nested| nested.to_path_buf()).await;
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn a_check_folder_spelled_another_way_on_windows_keeps_the_copy() {
+    let spell = |nested: &Path| PathBuf::from(format!(r"\\?\{}", faber_engine::project::git::native_path(nested)).to_uppercase());
+    unconfirmed_check_keeps_the_copy(spell).await;
+}
+
+/// A check stopped without proof its processes ended, run in a folder inside the copy spelled by `spell`.
+async fn unconfirmed_check_keeps_the_copy(spell: impl Fn(&Path) -> PathBuf) {
+    let s = setup();
+    let conversation = merged_idle_copy(&s).await;
+    let path = PathBuf::from(conversation.copy.unwrap().path);
+    std::fs::create_dir(path.join("nested")).unwrap();
+    let nested = spell(&path.join("nested"));
+    let check = Arc::new(UnconfirmedCheck::default());
+    let verifier = Arc::new(Verifier::new(check.clone()));
+    let request =
+        Request { folder: nested.clone(), level: Some(Level::Full), commands: vec!["node check.js".into()], ..Request::default() };
+    let ending = verifier.start(&tokio::runtime::Handle::current(), nested.clone(), "check", Level::Full, std::future::ready(request));
+    tokio::time::timeout(support::DEADLINE, check.0.notified()).await.unwrap();
+    assert!(verifier.stop(&nested, "check"));
+    ending.await;
+    assert!(verifier.idle() && verifier.unknown_in(&path));
+
+    let engine = start(&s.data, &s.cwds, Git(s.git.clone()));
+    engine.set_verifier(verifier);
+    engine.sweep_copies();
+    assert!(path.is_dir(), "a stopped check may still be writing in the copy");
+    engine.shutdown();
 }
 
 #[tokio::test]

@@ -58,6 +58,12 @@ pub(super) struct Asking {
     unsent: bool,
 }
 
+impl Asking {
+    pub(super) fn conversation(&self) -> &str {
+        &self.conv
+    }
+}
+
 /// While an answer streams, the thread (up to 50 turns) goes to the screen at most this often; its end always goes.
 const STREAM_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
 

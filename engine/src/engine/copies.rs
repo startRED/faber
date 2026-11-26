@@ -1,9 +1,9 @@
 //! A project conversation's own copy (R201, `crate::project::copy`): made before its first turn starts and used as
-//! the agent's folder from then on, removed with the conversation, and removed once at start when its work is merged.
+//! the agent's folder from then on, removed with the conversation, and retired in an idle sweep when its work is merged.
 //! Git runs outside the engine's lock, since a checkout can take seconds; the lock only reads what to do and records it.
 use super::*;
 use crate::project::copy::{self, WorkCopy};
-use crate::project::git::Executor;
+use crate::project::git::{Executor, same_path};
 
 /// Opens a git runner. The shell gives the real one; without one (tests, a PC without git) every project conversation
 /// works in the project folder, as before copies.
@@ -18,6 +18,30 @@ impl Drop for Sweep {
         if let Some(core) = self.0.upgrade() {
             core.lock().unwrap_or_else(|e| e.into_inner()).copy_sweeps.finish();
         }
+    }
+}
+
+enum SweepAction {
+    Stop,
+    Skip,
+    Busy,
+    Kept,
+    Retire(copy::Retirement),
+}
+
+#[derive(Default)]
+struct SweepCounts {
+    retired: usize,
+    kept_unmerged: usize,
+    kept_busy: usize,
+}
+
+impl SweepCounts {
+    fn log(self) {
+        eprintln!(
+            "faber: copy sweep retired {}, kept {} without a confirmed merge, kept {} busy",
+            self.retired, self.kept_unmerged, self.kept_busy
+        );
     }
 }
 
@@ -112,14 +136,24 @@ impl Engine {
     }
 
     fn branch_as(&self, req: BranchRequest, here: bool) -> Result<String, String> {
-        let made = Self::make_copy(self.with(|c| c.copy_plan_branch(&req)))?;
+        let plan = self.with(|c| {
+            let plan = c.copy_plan_branch(&req)?;
+            c.copying.insert(plan.id.clone(), Held { reply: String::new(), tail: None });
+            Some(plan)
+        });
+        let copying = plan.as_ref().map(|plan| plan.id.clone());
+        let made = Self::make_copy(plan);
         let (result, stray) = self.with(|c| {
+            if let Some(id) = copying {
+                c.copying.remove(&id);
+            }
+            let made = made?;
             let id = made.as_ref().map(|(id, _)| id.clone());
             let result = c.branch(req, made.clone(), here);
             // A branch refused before its conversation existed leaves the copy behind.
             let stray = made.filter(|_| id.is_some_and(|id| !c.convs.contains_key(&id)));
-            (result, stray)
-        });
+            Ok::<_, String>((result, stray))
+        })?;
         self.drop_copy(stray);
         result
     }
@@ -183,7 +217,7 @@ impl Engine {
             std::thread::scope(|scope| {
                 let result = std::thread::Builder::new().name("project-storage".into()).spawn_scoped(scope, || {
                     let _runtime = self.runtime.enter();
-                    self.sweep_project_storage();
+                    self.sweep_project_storage().log();
                 });
                 if let Ok(worker) = result {
                     let _ = worker.join();
@@ -194,70 +228,117 @@ impl Engine {
         }
     }
 
-    fn sweep_project_storage(&self) {
+    fn sweep_project_storage(&self) -> SweepCounts {
         let _finish = Sweep(Arc::downgrade(&self.core));
+        let mut counts = SweepCounts::default();
         // Linux has no background class here yet: the sweep keeps its normal priority there.
         #[cfg(any(windows, target_os = "macos"))]
         let _background = faber_winproc::background_thread();
-        let Some((run, data)) = self.with(|c| c.git.clone().map(|run| (run, c.opts.data_dir.clone()))) else { return };
-        let Some(mut exec) = run() else { return };
-        for id in copy::found(&data) {
-            if !self.with(|c| c.project_storage_idle()) {
+        let Some((run, data)) = self.with(|c| c.git.clone().map(|run| (run, c.opts.data_dir.clone()))) else { return counts };
+        let Some(mut exec) = run() else { return counts };
+        if !self.with(|c| c.copy_sweep_allowed()) {
+            return counts;
+        }
+        for id in copy::found(&data, || self.with(|c| c.copy_sweep_allowed())) {
+            if !self.with(|c| c.copy_sweep_allowed()) {
                 break;
             }
-            let known = data.join("conversations").join(format!("{id}.json")).exists() || self.with(|c| c.convs.contains_key(&id));
-            if !known {
+            let saved = data.join("conversations").join(format!("{id}.json"));
+            let known = |c: &Core| c.copying.contains_key(&id) || c.convs.contains_key(&id) || saved.exists();
+            if !self.with(|c| known(c)) {
                 // A conversation is deleted only once its copy is saved or the person said so: what is left is removed.
-                if let Some(orphan) = copy::orphan(&mut *exec, &data, &id) {
+                if let Some(orphan) = copy::orphan(&mut *exec, &data, &id)
+                    && self.with(|c| c.copy_sweep_allowed() && !known(c))
+                {
                     let _ = copy::remove(&mut *exec, &data, &id, &orphan);
                 }
                 continue;
             }
-            // Idle: no CLI open there (it would hold the folder), nothing running, waiting for a route or queued.
-            let idle = |c: &mut Core| match c.copy_state(&id) {
-                Some((copy, false, _)) if !c.live.contains_key(&id) => Some(copy),
-                _ => None,
+            // Every writer in this copy counts, including ones outside the conversation's main session.
+            let state = |c: &mut Core| {
+                let (record, busy, mark) = c.copy_state(&id)?;
+                let busy = busy
+                    || c.live.contains_key(&id)
+                    || !c.session_idle(&id)
+                    || c.rewind_blocked(&id)
+                    // A closed session's final rewind scan still reads this folder.
+                    || c.rewind_sealing_in(Path::new(&record.path))
+                    || c.asking.values().any(|a| a.conversation() == id)
+                    || c.verifier.as_ref().is_some_and(|verifier| verifier.active_in(Path::new(&record.path)));
+                Some((record, busy, mark))
             };
-            let Some(record) = self.with(idle) else { continue };
-            // Set aside under the lock while still idle, so a message sent meanwhile makes the copy again instead of
-            // starting its agent in a folder being deleted.
-            if copy::merged(&mut *exec, &record) && self.with(|c| idle(c).is_some() && copy::set_aside(&data, &id)) {
-                let _ = copy::retire(&mut *exec, &data, &id, &record);
+            let Some((record, busy, mark)) = self.with(state) else { continue };
+            if busy {
+                counts.kept_busy += 1;
                 continue;
             }
-            if let Some((_, false, mark)) = self.with(|c| c.copy_state(&id))
-                && mark.1 != 0
-            {
+            let merged = copy::merged(&mut *exec, &record);
+            let unchanged = |current: &(WorkCopy, bool, (usize, u64))| !current.1 && current.2 == mark && current.0 == record;
+            // Recheck and register the rename in the same lock that admits new sends.
+            let action = self.with(|c| {
+                if !c.copy_sweep_allowed() {
+                    SweepAction::Stop
+                } else {
+                    match state(c) {
+                        None => SweepAction::Skip,
+                        Some(current) if !unchanged(&current) => SweepAction::Busy,
+                        Some(_) if merged => copy::set_aside(&data, &id, &record).map_or(SweepAction::Busy, SweepAction::Retire),
+                        Some(_) => SweepAction::Kept,
+                    }
+                }
+            });
+            match action {
+                SweepAction::Stop => break,
+                SweepAction::Skip => continue,
+                SweepAction::Busy => {
+                    counts.kept_busy += 1;
+                    continue;
+                }
+                SweepAction::Kept => counts.kept_unmerged += 1,
+                SweepAction::Retire(retirement) => {
+                    if retirement.finish(&mut *exec, &record).is_ok() {
+                        counts.retired += 1;
+                    } else {
+                        counts.kept_busy += 1;
+                    }
+                    continue;
+                }
+            }
+            if mark.1 != 0 {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
                 let age = now.saturating_sub(Duration::from_millis(mark.1));
                 copy::cleanup(&mut *exec, &data, &id, &record, age, false, |remove| {
                     self.with(|c| {
-                        if c.copy_state(&id).is_some_and(|(copy, busy, current)| !busy && current == mark && copy == record)
-                            && !c.live.contains_key(&id)
-                        {
+                        if c.copy_sweep_allowed() && state(c).as_ref().is_some_and(unchanged) {
                             remove();
                         }
                     });
                 });
             }
         }
-        let roots = self.with(|c| c.store.projects().into_iter().map(|p| PathBuf::from(p.path)).collect::<Vec<_>>());
-        crate::project::maintenance::run(&mut *exec, &roots, || self.with(|c| c.project_storage_idle()));
+        let roots = self
+            .with(|c| c.project_storage_idle().then(|| c.store.projects().into_iter().map(|p| PathBuf::from(p.path)).collect::<Vec<_>>()));
+        if let Some(roots) = roots {
+            crate::project::maintenance::run(&mut *exec, &roots, || self.with(|c| c.project_storage_idle()));
+        }
+        counts
     }
 }
 
 impl Core {
-    fn project_storage_idle(&self) -> bool {
+    fn copy_sweep_allowed(&self) -> bool {
         !self.closing
             && self.agent_installs == 0
-            && self.goals.running.is_empty()
             && self.copying.is_empty()
             && self.verifier.as_ref().is_none_or(|v| v.idle() && !v.game_in_front())
-            && self.convs.keys().all(|id| self.session_idle(id))
+    }
+
+    fn project_storage_idle(&self) -> bool {
+        self.copy_sweep_allowed() && self.goals.running.is_empty() && self.convs.keys().all(|id| self.session_idle(id))
     }
 
     fn start_copy_sweep(&mut self) -> bool {
-        self.git.is_some() && self.project_storage_idle() && self.copy_sweeps.begin(std::time::Instant::now())
+        self.git.is_some() && self.copy_sweep_allowed() && self.copy_sweeps.begin(std::time::Instant::now())
     }
 
     pub(super) fn schedule_copy_sweep(&mut self) {
@@ -271,7 +352,7 @@ impl Core {
         let engine = Engine { core, runtime: self.opts.runtime.clone() };
         let result = std::thread::Builder::new().name("project-storage".into()).spawn(move || {
             let _runtime = engine.runtime.enter();
-            engine.sweep_project_storage();
+            engine.sweep_project_storage().log();
         });
         if result.is_err() {
             self.copy_sweeps.finish();
@@ -469,7 +550,7 @@ impl Core {
     /// Records a copy on its conversation; one that no longer fits (another send got there first) comes back to be removed.
     pub(super) fn attach_copy(&mut self, id: &str, copy: WorkCopy) -> Made {
         match self.convs.get_mut(id) {
-            Some(c) if c.copy.as_ref().map_or(c.messages.is_empty(), |had| had.path == copy.path) => {
+            Some(c) if c.copy.as_ref().map_or(c.messages.is_empty(), |had| same_path(Path::new(&had.path), Path::new(&copy.path))) => {
                 c.copy = Some(copy);
                 self.goals.at.remove(id);
                 None

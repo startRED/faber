@@ -526,21 +526,12 @@ impl Verifier {
 
     /// Only checks whose folders overlap can write into a restore's range.
     pub fn active_in(&self, folder: &Path) -> bool {
-        self.running
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .values()
-            .any(|r| r.folder.starts_with(folder) || folder.starts_with(&r.folder))
-            || self.unknown_in(folder)
+        self.running.lock().unwrap_or_else(|e| e.into_inner()).values().any(|r| overlaps(&r.folder, folder)) || self.unknown_in(folder)
     }
 
     /// A native check without process-tree completion proof remains a possible writer.
     pub fn unknown_in(&self, folder: &Path) -> bool {
-        self.unknown
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-            .is_none_or(|folders| folders.iter().any(|p| p.starts_with(folder) || folder.starts_with(p)))
+        self.unknown.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_none_or(|folders| folders.iter().any(|p| overlaps(p, folder)))
     }
 
     fn remember_unknown(&self, folder: &Path) {
@@ -889,6 +880,11 @@ fn result(command: &str, ran: &run::Ran, root: &str) -> CheckResult {
     }
     let summary = if ran.timed_out { format!("did not finish in {} minutes", DEADLINE.as_secs() / 60) } else { report.summary };
     CheckResult { command: command.into(), verdict, millis, failures: if verdict == Verdict::Passed { vec![] } else { failures }, summary }
+}
+
+/// Folders stored with another Windows spelling (case, a verbatim prefix) still overlap.
+fn overlaps(a: &Path, b: &Path) -> bool {
+    crate::project::git::path_within(a, b) || crate::project::git::path_within(b, a)
 }
 
 #[cfg(test)]
@@ -1624,6 +1620,16 @@ mod tests {
         }
         assert!(verifier.unknown.lock().unwrap().is_none(), "saturation releases the bounded list");
         assert!(verifier.active_in(Path::new("elsewhere")), "an unrelated range stays blocked after saturation");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_unknown_check_folder_spelled_another_way_on_windows_still_overlaps() {
+        let verifier = Verifier::new(Arc::new(passing()));
+        verifier.remember_unknown(Path::new(r"\\?\C:\Data\COPIES\abc\nested"));
+        assert!(verifier.unknown_in(Path::new(r"c:\data\copies\ABC")));
+        assert!(verifier.active_in(Path::new("C:/Data/Copies/abc")));
+        assert!(!verifier.unknown_in(Path::new(r"C:\data\copies\abcd")));
     }
 
     #[test]

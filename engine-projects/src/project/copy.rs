@@ -8,14 +8,18 @@
 //! hooks, no filters. A copy lives in Faber's data folder, `copies/<conversation id>`, so the project's own tools never
 //! find a second checkout inside it, and the name says which conversation it belongs to without reading any record.
 //!
-//! A copy goes when its conversation is deleted, and at start when its work is in the person's branch (or that branch's
-//! upstream) and nothing is left uncommitted. Uncommitted changes, or commits no other branch holds, are never deleted
-//! without the person saying so ([`unsaved`]).
+//! A copy goes when its conversation is deleted, or when an idle sweep confirms its work is in the person's branch (or
+//! that branch's upstream) and nothing is left uncommitted. Uncommitted changes, or commits no other branch holds, are
+//! never deleted without the person saying so ([`unsaved`]).
 
-use super::git::{Executor, Invocation, native_path, valid_oid};
+use super::git::{Executor, Invocation, native_path, same_path, valid_oid};
 use super::lease::real_path;
 pub use crate::model::WorkCopy;
 use std::path::{Path, PathBuf};
+use std::sync::{Condvar, Mutex};
+
+// A turn remaking a copy waits off the engine lock until its old branch has been retired.
+static RETIRING: (Mutex<Vec<PathBuf>>, Condvar) = (Mutex::new(Vec::new()), Condvar::new());
 
 /// The folder that holds every conversation's copy.
 pub fn home(data: &Path) -> PathBuf {
@@ -152,6 +156,10 @@ pub fn make(
     }
     let base = git(exec, cwd, &["symbolic-ref", "--quiet", "HEAD"]).filter(|r| r.starts_with("refs/heads/"));
     let path = home(data).join(id);
+    {
+        let (paths, changed) = &RETIRING;
+        drop(changed.wait_while(paths.lock().unwrap(), |paths| paths.contains(&path)).unwrap());
+    }
     let copy = WorkCopy { path: path.to_string_lossy().into_owned(), branch: branch.to_string(), root: root.clone(), sub, base };
     // No folder on the way may be a link: the copy is made, and later deleted, only inside Faber's own folder.
     real_path(&path).map_err(|_| "error.copy.failed")?;
@@ -163,7 +171,7 @@ pub fn make(
     std::fs::create_dir_all(home(data)).map_err(|_| "error.copy.failed")?;
     let target = copy.path.clone();
     let root = Path::new(&root);
-    // A copy set aside at start stays registered at this folder until git forgets it, and holds its branch till then.
+    // A copy interrupted during retirement stays registered here until git forgets it.
     let _ = git(exec, root, &["worktree", "prune"]);
     let exists = |exec: &mut dyn Executor, branch: &str| {
         git(exec, root, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_some()
@@ -227,7 +235,7 @@ pub fn cleanup(
         return (0, 0);
     }
     let path = home(data).join(id);
-    if !valid_conversation(id) || Path::new(&copy.path) != path || !own_branch(&copy.branch) || !plain_path(&path) {
+    if !valid_conversation(id) || !same_path(Path::new(&copy.path), &path) || !own_branch(&copy.branch) || !plain_path(&path) {
         return (0, 0);
     }
     let Ok(root) = path.canonicalize() else { return (0, 0) };
@@ -396,7 +404,7 @@ pub fn merged(exec: &mut dyn Executor, copy: &WorkCopy) -> bool {
 /// deleted, whatever the record says; links on the way stop it. Callers decide first that nothing unsaved is lost.
 pub fn remove(exec: &mut dyn Executor, data: &Path, id: &str, copy: &WorkCopy) -> Result<(), &'static str> {
     let path = home(data).join(id);
-    if !valid_conversation(id) || Path::new(&copy.path) != path || !own_branch(&copy.branch) {
+    if !valid_conversation(id) || !same_path(Path::new(&copy.path), &path) || !own_branch(&copy.branch) {
         return Err("error.copy.failed");
     }
     real_path(&path).map_err(|_| "error.copy.failed")?;
@@ -416,41 +424,64 @@ pub fn remove(exec: &mut dyn Executor, data: &Path, id: &str, copy: &WorkCopy) -
     Ok(())
 }
 
-/// Where a copy goes while it is deleted at start: a name no conversation has.
+/// Where a copy goes while it is retired: a name no conversation has.
 fn aside(data: &Path, id: &str) -> PathBuf {
     home(data).join(format!(".gone-{id}"))
 }
 
-/// Moves conversation `id`'s copy out of its place in one rename, so a message sent at that moment makes a fresh copy
-/// instead of starting its agent in one being deleted. The engine calls it under its lock, with nothing running in the copy;
-/// a folder a process still holds open cannot be renamed on Windows, and stays.
-pub fn set_aside(data: &Path, id: &str) -> bool {
+/// Moves an idle copy away while the engine holds its lock. A new turn waits for the returned retirement to finish
+/// before making the copy again. A folder a process still holds open cannot be renamed on Windows, and stays.
+pub fn set_aside(data: &Path, id: &str, copy: &WorkCopy) -> Option<Retirement> {
     let (from, to) = (home(data).join(id), aside(data, id));
-    valid_conversation(id) && real_path(&from).is_ok() && real_path(&to).is_ok() && !to.exists() && std::fs::rename(&from, &to).is_ok()
+    if !valid_conversation(id) || !own_branch(&copy.branch) || to.exists() {
+        return None;
+    }
+    real_path(&from).ok()?;
+    real_path(&to).ok()?;
+    // A record saved with other Windows casing still names this folder.
+    if !same_path(Path::new(&copy.path), &from) {
+        return None;
+    }
+    let mut paths = RETIRING.0.lock().unwrap();
+    std::fs::rename(&from, &to).ok()?;
+    paths.push(from.clone());
+    Some(Retirement { from, gone: to })
 }
 
-/// Deletes a copy [`set_aside`]: the folder goes, git forgets the work tree, and the branch goes too unless a new copy
-/// already has it checked out again (git refuses that delete, and the branch stays with its new copy).
-pub fn retire(exec: &mut dyn Executor, data: &Path, id: &str, copy: &WorkCopy) -> Result<(), &'static str> {
-    let gone = aside(data, id);
-    if !valid_conversation(id) || !own_branch(&copy.branch) {
-        return Err("error.copy.failed");
-    }
-    real_path(&gone).map_err(|_| "error.copy.failed")?;
-    if gone.exists() {
-        std::fs::remove_dir_all(&gone).map_err(|_| "error.copy.busy")?;
-    }
-    let root = Path::new(&copy.root);
-    if root.is_dir() {
-        let _ = git(exec, root, &["worktree", "prune"]);
-        let _ = git(exec, root, &["branch", "-D", &copy.branch]);
-    }
-    Ok(())
+pub struct Retirement {
+    from: PathBuf,
+    gone: PathBuf,
 }
 
-/// The conversations that have a folder under `copies/`, by id. A copy set aside by an earlier start and never finished
+impl Retirement {
+    /// Deletes the detached folder and its Git registration before a turn can recreate the copy.
+    pub fn finish(self, exec: &mut dyn Executor, copy: &WorkCopy) -> Result<(), &'static str> {
+        if !own_branch(&copy.branch) {
+            return Err("error.copy.failed");
+        }
+        real_path(&self.gone).map_err(|_| "error.copy.failed")?;
+        if self.gone.exists() {
+            std::fs::remove_dir_all(&self.gone).map_err(|_| "error.copy.busy")?;
+        }
+        let root = Path::new(&copy.root);
+        if root.is_dir() {
+            let _ = git(exec, root, &["worktree", "prune"]);
+            let _ = git(exec, root, &["branch", "-D", &copy.branch]);
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Retirement {
+    fn drop(&mut self) {
+        RETIRING.0.lock().unwrap().retain(|path| *path != self.from);
+        RETIRING.1.notify_all();
+    }
+}
+
+/// The conversations that have a folder under `copies/`, by id. A copy set aside by an earlier sweep and never finished
 /// goes now: it was clean and merged then, and git forgets it at its repository's next prune.
-pub fn found(data: &Path) -> Vec<String> {
+pub fn found(data: &Path, mut allowed: impl FnMut() -> bool) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(home(data)) else { return vec![] };
     let names: Vec<String> = entries
         .flatten()
@@ -459,9 +490,13 @@ pub fn found(data: &Path) -> Vec<String> {
         .collect();
     for id in names.iter().filter_map(|name| name.strip_prefix(".gone-")).filter(|id| valid_conversation(id)) {
         let gone = aside(data, id);
-        if real_path(&gone).is_ok() {
-            let _ = std::fs::remove_dir_all(gone);
+        if real_path(&gone).is_err() {
+            continue;
         }
+        if !allowed() {
+            break;
+        }
+        let _ = std::fs::remove_dir_all(gone);
     }
     names.into_iter().filter(|id| valid_conversation(id)).collect()
 }
