@@ -16,6 +16,7 @@ autostart.rs
 awake.rs
 background.rs
 badge.rs
+bench_switches.rs
 bridge.rs
 browse.rs
 browser.rs
@@ -192,6 +193,7 @@ stage.rs
 startup.rs
 stdio.rs
 steer.rs
+storage.rs
 store.rs
 stronger.rs
 stuck.rs
