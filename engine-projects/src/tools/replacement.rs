@@ -44,7 +44,7 @@ impl Journal {
     }
 }
 
-pub(super) fn plain(path: &Path, directory: bool) -> Result<(), String> {
+fn plain(path: &Path, directory: bool) -> Result<(), String> {
     let meta = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
     #[cfg(windows)]
     let linked = {
@@ -231,7 +231,22 @@ thread_local! {
 
 impl Store {
     pub(super) fn replacement_roots(&self) -> Result<(), String> {
-        self.check_file_root(&self.root)
+        for path in [
+            self.root.clone(),
+            self.plugin(),
+            self.skills(),
+            self.servers(),
+            self.root.join("plugins"),
+            self.root.join("runtimes"),
+            self.disabled(),
+            self.removed(),
+            self.root.join("replacements"),
+        ] {
+            if exists(&path)? {
+                plain(&path, true)?;
+            }
+        }
+        Ok(())
     }
     pub(super) fn initial_ledger(&self) -> Result<BTreeMap<String, String>, String> {
         let Some(bytes) = checked_bytes(&self.ledger())? else { return Ok(BTreeMap::new()) };
@@ -246,11 +261,10 @@ impl Store {
         self.initial_ledger()
     }
     pub(super) fn physical_copy(&self, item: &Item) -> Result<bool, String> {
-        self.check_file_root(&self.source_root(&item.id))?;
-        Ok(exists(&self.dir(item))? || exists(&self.disabled_copy(&item.id))?)
+        Ok(exists(&self.dir(item))? || exists(&self.disabled().join(&item.id))?)
     }
     pub(super) fn occupied_install(&self, item: &Item) -> Result<bool, String> {
-        Ok(self.physical_copy(item)? || exists(&self.removed_copy(&item.id))?)
+        Ok(self.physical_copy(item)? || exists(&self.removed().join(&item.id))?)
     }
     pub fn has_copy(&self, id: &str) -> Result<bool, String> {
         let _store = lock();
@@ -260,7 +274,7 @@ impl Store {
     }
     pub(super) fn direct_replacement(&self, item: &Item, zip: &Path, packages: &BTreeMap<String, PathBuf>) -> Result<bool, String> {
         let _store = lock();
-        self.recover_replacements_for(&item.id)?;
+        self.recover_replacements()?;
         if !self.physical_copy(item)? {
             return Ok(false);
         }
@@ -268,7 +282,7 @@ impl Store {
         if plan.item != *item {
             return Err("The replacement does not match the catalog".into());
         }
-        let copy = if plan.disabled_location { self.disabled_copy(&item.id) } else { self.dir(item) };
+        let copy = if plan.disabled_location { self.disabled().join(&item.id) } else { self.dir(item) };
         drop(_store);
         // Trusted direct callers can repeat a complete installation without replacing its receipt.
         if plan.old_commit == item.commit && self.verify_item(&copy, item) {
@@ -285,21 +299,19 @@ impl Store {
             return Err("Unknown tool".into());
         }
         let item = self.items.iter().find(|item| item.id == id).ok_or("Unknown tool")?;
-        let root = self.source_root(id);
-        self.check_file_root(&root)?;
-        if exists(&self.removed_copy(id))? {
+        if exists(&self.removed().join(id))? {
             return Err("A removed copy needs attention in Catalog".into());
         }
         let old_commit = self.replacement_ledger()?.get(id).cloned().ok_or("The tool is not installed")?;
         let selection = checked_bytes(&self.root.join("selection.json"))?;
         let switches = self.read_selection().ok_or("Could not read catalog switches")?;
         let active = exists(&self.dir(item))?;
-        let disabled_location = exists(&self.disabled_copy(id))?;
+        let disabled_location = exists(&self.disabled().join(id))?;
         if active == disabled_location {
             return Err("The stored copy needs attention in Catalog".into());
         }
         let enabled = active && !switches.disabled.contains(id);
-        let copy = if disabled_location { self.disabled_copy(id) } else { self.dir(item) };
+        let copy = if disabled_location { self.disabled().join(id) } else { self.dir(item) };
         let old_digest = fingerprint(&copy)?;
         Ok(ReplacementPlan {
             item: item.clone(),
@@ -310,13 +322,13 @@ impl Store {
             old_digest,
             selection,
             // A recovery receipt can hold both old and rejected copies, plus its atomic metadata.
-            previous_receipt: if exists(&root.join("replacements").join(id))? {
+            previous_receipt: if exists(&self.root.join("replacements").join(id))? {
                 let (bytes, paths) = if item.runtime.is_some() {
                     (48 * 1024 * 1024 * 1024 + 2 * 1024 * 1024, 240_064)
                 } else {
                     (2 * SERVER_LIMIT + 2 * 1024 * 1024, 40064)
                 };
-                Some(fingerprint_bounded(&root.join("replacements").join(id), bytes, paths, 65)?)
+                Some(fingerprint_bounded(&self.root.join("replacements").join(id), bytes, paths, 65)?)
             } else {
                 None
             },
@@ -324,15 +336,16 @@ impl Store {
     }
     pub fn capture_replacement(&self, id: &str) -> Result<ReplacementPlan, String> {
         let _store = lock();
-        self.recover_replacements_for(id)?;
+        self.recover_replacements()?;
         self.replacement_snapshot(id)
     }
     pub fn check_replacement(&self, plan: &ReplacementPlan) -> Result<(), String> {
         let _store = lock();
+        self.recover_replacements()?;
         self.check_replacement_locked(plan)
     }
     fn check_replacement_locked(&self, plan: &ReplacementPlan) -> Result<(), String> {
-        self.recover_replacements_for(&plan.item.id)?;
+        self.recover_replacements()?;
         if self.replacement_snapshot(&plan.item.id)? != *plan {
             return Err("The catalog copy changed; request confirmation again".into());
         }
@@ -350,21 +363,17 @@ impl Store {
         authorized: impl FnOnce() -> bool,
     ) -> Result<(), String> {
         self.check_replacement(plan)?;
-        let storage = self.source_root(&plan.item.id);
-        let temporary = self.stage_sources(&storage, &plan.item, zip, packages)?;
+        let temporary = self.stage_sources(&plan.item, zip, packages)?;
         let staging = &temporary.path;
         let _store = lock();
         self.check_replacement_locked(plan)?;
         if !authorized() {
             return Err("The catalog request is no longer active".into());
         }
-        if self.source_root(&plan.item.id) != storage {
-            return Err("The catalog location changed; request confirmation again".into());
-        }
-        let root = storage.join("replacements");
+        let root = self.root.join("replacements");
         std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
         let journal_dir = root.join(&plan.item.id);
-        let pending = kits::TemporaryCopy::new(&storage, ".staging-").map_err(|e| e.to_string())?;
+        let pending = kits::TemporaryCopy::new(&self.root, ".staging-").map_err(|e| e.to_string())?;
         std::fs::create_dir(&pending.path).map_err(|e| e.to_string())?;
         #[cfg(test)]
         if FAIL_INITIAL_JOURNAL.with(|fail| fail.replace(false)) {
@@ -373,10 +382,10 @@ impl Store {
         let mut journal = Journal { plan: plan.clone(), finished: false, rolled_back: false };
         journal.write(&pending.path)?;
         if exists(&journal_dir)? {
-            self.discard_at(&storage, &journal_dir).map_err(|e| e.to_string())?;
+            self.discard(&journal_dir).map_err(|e| e.to_string())?;
         }
         retry_busy(|| std::fs::rename(&pending.path, &journal_dir)).map_err(|e| e.to_string())?;
-        let dest = if plan.disabled_location { self.disabled_copy(&plan.item.id) } else { self.dir(&plan.item) };
+        let dest = if plan.disabled_location { self.disabled().join(&plan.item.id) } else { self.dir(&plan.item) };
         let published = (|| {
             retry_busy(|| std::fs::rename(&dest, journal_dir.join("old"))).map_err(|e| e.to_string())?;
             if fingerprint(&journal_dir.join("old"))? != plan.old_digest {
@@ -390,7 +399,7 @@ impl Store {
             journal.write(&journal_dir)
         })();
         if let Err(error) = published {
-            return match self.recover_replacements_for(&plan.item.id) {
+            return match self.recover_replacements() {
                 Ok(()) => Err(error),
                 Err(recovery) => Err(format!("{error}; catalog recovery needs attention: {recovery}")),
             };
@@ -400,27 +409,8 @@ impl Store {
     }
     /// Called under the store lock before any pruning or further mutation.
     pub(super) fn recover_replacements(&self) -> Result<(), String> {
-        self.recover_replacements_at(&self.root)?;
-        for storage in self.file_roots().into_iter().filter(|path| path != &self.root) {
-            if let Err(error) = self.recover_replacements_at(&storage) {
-                eprintln!("tools: external replacement needs attention: {error}");
-            }
-        }
-        Ok(())
-    }
-
-    pub(super) fn recover_replacements_for(&self, id: &str) -> Result<(), String> {
-        self.recover_replacements_at(&self.root)?;
-        let storage = self.source_root(id);
-        if storage != self.root {
-            self.recover_replacements_at(&storage)?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn recover_replacements_at(&self, storage: &Path) -> Result<(), String> {
-        self.check_file_root(storage)?;
-        let root = storage.join("replacements");
+        self.replacement_roots()?;
+        let root = self.root.join("replacements");
         if !exists(&root)? {
             return Ok(());
         }
@@ -438,9 +428,6 @@ impl Store {
                 || !plan.old_digest.bytes().all(|byte| byte.is_ascii_hexdigit())
             {
                 return Err("Invalid replacement journal".into());
-            }
-            if self.source_root(&plan.item.id) != storage {
-                continue;
             }
             let old = dir.join("old");
             if journal.rolled_back {
@@ -460,22 +447,10 @@ impl Store {
             {
                 return Err("The interrupted replacement needs attention in Catalog".into());
             }
-            let selection = checked_bytes(&self.root.join("selection.json"))?;
-            let same_selection = if storage == self.root {
-                selection == plan.selection
-            } else {
-                let switches = |bytes: Option<&[u8]>| {
-                    let value: super::kits::Selection = bytes
-                        .map_or_else(|| Ok(super::kits::Selection::default()), serde_json::from_slice)
-                        .map_err(|_| "The interrupted catalog state changed")?;
-                    Ok::<_, &str>((value.disabled.contains(&plan.item.id), value.always.contains(&plan.item.id)))
-                };
-                switches(selection.as_deref())? == switches(plan.selection.as_deref())?
-            };
-            if exists(&self.removed_copy(&plan.item.id))? || !same_selection {
+            if exists(&self.removed().join(&plan.item.id))? || checked_bytes(&self.root.join("selection.json"))? != plan.selection {
                 return Err("The interrupted catalog state changed".into());
             }
-            let dest = if plan.disabled_location { self.disabled_copy(&plan.item.id) } else { self.dir(&plan.item) };
+            let dest = if plan.disabled_location { self.disabled().join(&plan.item.id) } else { self.dir(&plan.item) };
             let mut ledger = self.replacement_ledger()?;
             if !ledger.get(&plan.item.id).is_some_and(|commit| commit == &plan.old_commit || commit == &plan.item.commit) {
                 return Err("The interrupted catalog ledger changed".into());
@@ -492,7 +467,7 @@ impl Store {
                     retry_busy(|| std::fs::rename(&dest, dir.join("rejected"))).map_err(|e| e.to_string())?;
                 }
                 if !exists(&dest)? {
-                    let recovery = kits::TemporaryCopy::new(storage, ".staging-").map_err(|e| e.to_string())?;
+                    let recovery = kits::TemporaryCopy::new(&self.root, ".staging-").map_err(|e| e.to_string())?;
                     let (mut remaining, mut paths) =
                         if plan.item.runtime.is_some() { (24 * 1024 * 1024 * 1024, 120_000) } else { (SERVER_LIMIT, 20000) };
                     copy_original(&old, &old, &recovery.path, &mut remaining, &mut paths, 0)?;

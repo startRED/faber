@@ -244,14 +244,12 @@ pub(super) async fn download(store: &Store, item: &Item, source: Option<&str>) -
     }
     let platform = bundle.platforms.get(std::env::consts::OS).ok_or("error.tools.host")?;
     let origin = source.map(|url| crate::install::loopback_origin(url).ok_or("error.tools.host")).transpose()?;
-    let directory = store.download_root(item)?;
-    store.check_file_root(&directory)?;
-    std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&store.root).map_err(|e| e.to_string())?;
     let needed = download_size(item).saturating_add(if runtime.kind == Kind::Python { ENV_LIMIT } else { FILE_LIMIT });
-    let root = faber_winproc::rewind::Root::open(&directory.canonicalize().map_err(|_| "error.tools.install")?)
+    let root = faber_winproc::rewind::Root::open(&store.root.canonicalize().map_err(|_| "error.tools.install")?)
         .map_err(|_| "error.tools.install")?;
     check_space(root.available_space().map_err(|_| "error.tools.install")?, needed)?;
-    let temporary = TemporaryCopy::new(&directory, ".staging-").map_err(|e| e.to_string())?;
+    let temporary = TemporaryCopy::new(&store.root, ".staging-").map_err(|e| e.to_string())?;
     std::fs::create_dir(&temporary.path).map_err(|e| e.to_string())?;
     let mut downloaded = Downloaded { files: vec![], packages: BTreeMap::new(), slot: None, temporary: Some(temporary) };
     let primary = Asset { source: runtime.source.clone(), sha256: runtime.sha256.clone(), size: runtime.size, path: "source".into() };

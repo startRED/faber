@@ -161,8 +161,8 @@ pub fn tool_deny(var: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
 
 /// Faber's approval records may be read but never changed (`permissions::FABER_RECORDS`); an Edit rule covers Write too.
 fn record_rules() -> Vec<String> {
-    let [kept, trust, storage] = crate::permissions::FABER_RECORDS;
-    [format!("Edit(//**/{kept})"), format!("Edit(//**/{trust}/**)"), format!("Edit(//**/{storage})"), format!("Write(//**/{storage})")]
+    let [kept, trust] = crate::permissions::FABER_RECORDS;
+    [format!("Edit(//**/{kept})"), format!("Edit(//**/{trust}/**)")]
         .into_iter()
         .chain(crate::permissions::ENGINE_NOTES.map(|name| format!("Edit(//**/{name})")))
         .collect()

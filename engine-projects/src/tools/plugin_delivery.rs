@@ -90,8 +90,7 @@ pub(super) fn copy_parts(store: &Path, target: &Path, plugins: &[Definition], re
     for plugin in plugins {
         for part in &plugin.parts {
             let Some(directory) = directory(part.kind) else { continue };
-            let source =
-                super::location::source_root(store, &plugin.item.id).join("plugins").join(&plugin.item.id).join("source").join(&part.path);
+            let source = store.join("plugins").join(&plugin.item.id).join("source").join(&part.path);
             if part_digest(&source)? != part.digest {
                 return Err(io::Error::other("The plugin part changed during snapshot preparation"));
             }

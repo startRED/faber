@@ -137,7 +137,6 @@ fn read<T: DeserializeOwned>(path: &Path) -> Option<T> {
 
 // Drivers have no Store handle; weak roots protect every live Store without retaining one after it closes.
 static DATA_ROOTS: Mutex<Vec<Weak<PathBuf>>> = Mutex::new(Vec::new());
-static EXTERNAL_DATA_ROOTS: Mutex<Vec<Weak<PathBuf>>> = Mutex::new(Vec::new());
 
 pub struct Store {
     _data_root: Arc<PathBuf>,
@@ -398,28 +397,9 @@ pub(crate) const TRANSCRIPTS_DIR: &str = "child-transcripts";
 
 impl Store {
     pub fn data_roots() -> Vec<PathBuf> {
-        Self::profile_data_roots().into_iter().chain(Self::external_data_roots()).collect()
-    }
-
-    fn live_roots(registry: &Mutex<Vec<Weak<PathBuf>>>) -> Vec<PathBuf> {
-        let mut roots = registry.lock().unwrap_or_else(|e| e.into_inner());
+        let mut roots = DATA_ROOTS.lock().unwrap_or_else(|e| e.into_inner());
         roots.retain(|root| root.strong_count() > 0);
         roots.iter().filter_map(Weak::upgrade).map(|root| (*root).clone()).collect()
-    }
-
-    pub(crate) fn profile_data_roots() -> Vec<PathBuf> {
-        Self::live_roots(&DATA_ROOTS)
-    }
-
-    pub(crate) fn external_data_roots() -> Vec<PathBuf> {
-        Self::live_roots(&EXTERNAL_DATA_ROOTS)
-    }
-
-    /// Protect the recorded names even while a drive is detached. The engine owns their lifetime.
-    pub fn protect_external_storage(path: PathBuf) -> Arc<PathBuf> {
-        let path = Arc::new(path);
-        EXTERNAL_DATA_ROOTS.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&path));
-        path
     }
 
     pub fn new(data_dir: &Path) -> Self {

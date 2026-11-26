@@ -36,7 +36,7 @@ import { ContextMeter } from './Context.tsx';
 import { heardParts } from './context.ts';
 import { Empty } from './Empty.tsx';
 import { Find } from './Find.tsx';
-import { LookStep, StorageQuestion } from './FirstRun.tsx';
+import { LookStep } from './FirstRun.tsx';
 import { keepFocusIn } from './focus.ts';
 import { Icon } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
@@ -67,7 +67,7 @@ import { createAutoOpen, doneCards, isWaiting, openPlace, type Place, placeOfRun
 import { type Keep, type Section, Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
 import { SharingQuestion } from './Sharing.tsx';
-import { continuePatch, finishSharingChoice, type FirstStep, firstRunStep, lookDue, setupPatch, shouldOpenSetup } from './setup.ts';
+import { continuePatch, finishSharingChoice, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
 import { Catalog, showInCatalog } from './Catalog.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { keepRows, neighbour, seedQuotas, withQuota } from './sidebar.ts';
@@ -275,12 +275,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const [back, setBack] = createSignal<Keep>();
   // The first run: step 1 (the accounts) or step 2 (the look) while one is due, else none. `setupOpen` is the same account
   // cards opened later, from the no-AI state or from Settings: they never reopen the first run.
-  const [step, setStep] = createSignal<FirstStep | 'storage' | undefined>(
-    props.initial.storageChoice?.ask && props.initial.sharing?.choice == null &&
-      shouldOpenSetup(props.initial.settings, props.initial.conversations)
-      ? 'storage' : firstRunStep(props.initial.settings, props.initial.conversations, props.initial.sharing),
-  );
-  const [storageNotice, setStorageNotice] = createSignal(props.initial.storageChoice?.notice);
+  const [step, setStep] = createSignal<FirstStep | undefined>(firstRunStep(props.initial.settings, props.initial.conversations, props.initial.sharing));
   const [setupOpen, setSetupOpen] = createSignal(false);
   // The control that opened the account cards, by its `data-restore`: the shell is drawn again when they close, so focus
   // goes to the new copy of that control.
@@ -1965,16 +1960,13 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         </span>
         <WindowControls />
       </header>
-      <Show when={saveError() || storageNotice()}>
-        <div class="toast" role={saveError() ? 'alert' : 'status'}>
-          <span>{saveError() || t(storageNotice() ?? 'reason.storage.default')}</span>
+      <Show when={saveError()}>
+        <div class="toast" role="alert">
+          <span>{saveError()}</span>
           <Show when={saveError() === t('composer.draftRemoveFailed')}>
             <button type="button" class="toast-retry" disabled={retryingDraftRemoval()} onClick={() => void retryRemovedDrafts()}>{t('changes.retry')}</button>
           </Show>
-          <button type="button" aria-label={t('toast.dismiss')} onClick={() => {
-            if (saveError()) setSaveError(undefined);
-            else setStorageNotice(undefined);
-          }}>
+          <button type="button" aria-label={t('toast.dismiss')} onClick={() => setSaveError(undefined)}>
             <Icon name="close" small />
           </button>
         </div>
@@ -1982,9 +1974,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       <Show
         when={!step() && !setupOpen()}
         fallback={
-          <Show when={step() !== 'storage'} fallback={<StorageQuestion onDone={() => {
-            setStep(firstRunStep(state().settings, state().conversations, state().sharing));
-          }} onError={(error) => setSaveError(failureText(error))} />}>
           <Show when={step() !== 'sharing'} fallback={<SharingQuestion onPick={async (yes) => finishSharingChoice(async () => {
             const sharing = await api.sharingSet(yes, lang());
             setState((previous) => ({ ...previous, sharing }));
@@ -2025,7 +2014,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 return saved;
               }}
             />
-          </Show>
           </Show>
           </Show>
         }
