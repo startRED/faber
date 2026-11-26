@@ -128,14 +128,14 @@ fn persona_puts_the_reply_language_first_and_above_the_project() {
     assert!(text.contains("progress notes"));
 }
 
-/// R10: quality first, economy before speed. Both drivers get the persona, so the order is checked once here.
+/// R582 (the owner, 2026-11-25, replacing R10): quality always; economy and speed go together, so neither is traded
+/// for the other. Both drivers get the persona, so the sentence is checked once here.
 #[test]
-fn persona_puts_economy_before_speed_as_r10_says() {
+fn persona_puts_quality_first_and_economy_with_speed() {
     let text = persona(&PersonaInput { name: None, tuning: &Default::default(), research: None });
-    let (quality, economy, speed) =
-        (text.find("Quality first").unwrap(), text.find("then economy").unwrap(), text.find("then speed").unwrap());
-    assert!(quality < economy && economy < speed, "{text}");
-    assert!(!text.contains("then speed, then cost"));
+    assert!(text.contains("Quality always; economy and speed go together"), "{text}");
+    assert!(!text.contains("save tokens"), "R10's tie-break is gone: {text}");
+    assert!(!text.contains("then speed"), "{text}");
 }
 
 /// Every turn rereads the whole context, so the agent is told to keep its own small (R260).

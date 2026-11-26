@@ -20,8 +20,8 @@ Faber is a desktop app that runs the official Claude Code and Codex CLIs on the 
 
 ## Principles
 
-- **Priorities.** Quality is roughly equal to economy, and both come before speed. Quality is slightly ahead. When speed
-  and economy conflict, economy wins.
+- **Priorities.** Quality always; economy and speed go together (R582, the owner on 2026-11-25, replacing R10): the
+  fewest steps and tokens to a correct, checked result, never one bought with the other.
 - **Good at everything from day one.** The order of the phases decides which areas get specialized tools and benchmarks
   first. It never limits what Faber does. The floor is the unmodified CLI underneath, with nothing cut.
 - **Claude Code and Codex, and Antigravity through its own CLI for Projects (R531).** Sign-in always happens in the
