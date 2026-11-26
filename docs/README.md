@@ -73,6 +73,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/first-run.md](design/first-run.md) | The first run and the tutorial |
 | [design/projects.md](design/projects.md) | The Projects screens, what a project stores, and how its checks run |
 | [dev/testing.md](dev/testing.md) | Tests: `cargo t`, screen tests, build folder and slots, what a run prints |
+| [dev/eyes-proof.md](dev/eyes-proof.md) | Running the hidden desktop window capture and UI Automation experiment |
 | [dev/autonomy.md](dev/autonomy.md) | Delivered wait repairs, real and controlled proofs, installed-app status and remaining recovery work |
 | [dev/shared-codex-service.md](dev/shared-codex-service.md) | Controlled shared-service recovery, Windows resource samples and memory budget |
 | [dev/evals.md](dev/evals.md) | Opt-in evaluations of what the AI writes with the real CLIs: the router, the persona |
