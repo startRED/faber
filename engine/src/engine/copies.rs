@@ -64,6 +64,7 @@ pub(super) struct Plan {
     run: GitRunner,
     folder: PathBuf,
     data: PathBuf,
+    profile: PathBuf,
     id: String,
     branch: String,
     from: Option<String>,
@@ -96,6 +97,9 @@ impl Engine {
 
     pub(super) fn make_copy(plan: Option<Plan>) -> Result<Made, String> {
         let Some(plan) = plan else { return Ok(None) };
+        if !storage_available(&plan.profile, &plan.data) {
+            return Err("error.storage.unreachable".into());
+        }
         let Some(mut exec) = (plan.run)() else { return Ok(None) };
         copy::make(&mut *exec, &plan.folder, &plan.data, &plan.id, &plan.branch, plan.from.as_deref(), plan.at.as_deref())
             .map(|made| made.map(|c| (plan.id, c)))
@@ -195,7 +199,15 @@ impl Engine {
     /// moment, so it tries again a few times.
     pub(super) fn drop_copy(&self, made: Made) {
         let Some((id, copy)) = made else { return };
-        let Some((run, data)) = self.with(|c| c.git.clone().map(|run| (run, c.opts.data_dir.clone()))) else { return };
+        let Some((run, data)) = self
+            .with(|c| {
+                let data = c.copy_storage(&id, &copy)?;
+                c.copy_storage_available(&data).then(|| (c.git.clone(), data))
+            })
+            .and_then(|(run, data)| Some((run?, data)))
+        else {
+            return;
+        };
         std::thread::spawn(move || {
             let Some(mut exec) = run() else { return };
             for attempt in 0..10 {
@@ -234,16 +246,24 @@ impl Engine {
         // Linux has no background class here yet: the sweep keeps its normal priority there.
         #[cfg(any(windows, target_os = "macos"))]
         let _background = faber_winproc::background_thread();
-        let Some((run, data)) = self.with(|c| c.git.clone().map(|run| (run, c.opts.data_dir.clone()))) else { return counts };
+        let Some((run, profile, roots)) = self.with(|c| c.git.clone().map(|run| (run, c.opts.data_dir.clone(), c.storage_roots.clone())))
+        else {
+            return counts;
+        };
         let Some(mut exec) = run() else { return counts };
         if !self.with(|c| c.copy_sweep_allowed()) {
             return counts;
         }
-        for id in copy::found(&data, || self.with(|c| c.copy_sweep_allowed())) {
+        let roots = std::iter::once(profile.clone())
+            .chain(roots.into_iter().map(|root| (*root).clone()))
+            .filter(|root| storage_available(&profile, root));
+        for (data, id) in roots
+            .flat_map(|root| copy::found(&root, || self.with(|c| c.copy_sweep_allowed())).into_iter().map(move |id| (root.clone(), id)))
+        {
             if !self.with(|c| c.copy_sweep_allowed()) {
                 break;
             }
-            let saved = data.join("conversations").join(format!("{id}.json"));
+            let saved = profile.join("conversations").join(format!("{id}.json"));
             let known = |c: &Core| c.copying.contains_key(&id) || c.convs.contains_key(&id) || saved.exists();
             if !self.with(|c| known(c)) {
                 // A conversation is deleted only once its copy is saved or the person said so: what is left is removed.
@@ -257,6 +277,9 @@ impl Engine {
             // Every writer in this copy counts, including ones outside the conversation's main session.
             let state = |c: &mut Core| {
                 let (record, busy, mark) = c.copy_state(&id)?;
+                if c.copy_storage(&id, &record).as_ref() != Some(&data) {
+                    return None;
+                }
                 let busy = busy
                     || c.live.contains_key(&id)
                     || !c.session_idle(&id)
@@ -325,7 +348,113 @@ impl Engine {
     }
 }
 
+fn storage_available(profile: &Path, root: &Path) -> bool {
+    root == profile
+        || (crate::storage::external_root_name(root)
+            && crate::project::lease::real_path(&copy::home(root)).is_ok()
+            && crate::storage::owns_external_root(profile, root))
+}
+
+#[cfg(test)]
+mod storage_choice_tests {
+    use super::*;
+    use crate::project::git::{GitError, Invocation, Output};
+
+    struct Git(PathBuf);
+
+    impl Executor for Git {
+        fn execute(&mut self, call: &Invocation) -> Result<Output, GitError> {
+            let mut args = call.args.as_slice();
+            while args.first().is_some_and(|arg| arg == "-c") {
+                args = &args[2..];
+            }
+            let text = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+                ["rev-parse", "--show-toplevel", "--show-prefix"] => format!("{}\n\n", self.0.display()),
+                ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"] => "1".repeat(40),
+                ["symbolic-ref", "--quiet", "HEAD"] => "refs/heads/main".into(),
+                ["rev-parse", ..] => return Ok(Output { success: false, stdout: vec![] }),
+                ["worktree", "add", "-b", _, "--", path, _] => {
+                    std::fs::create_dir(path).unwrap();
+                    String::new()
+                }
+                ["worktree", "prune"] => String::new(),
+                ["status", "--porcelain", "-z"] => " M changed.txt".into(),
+                other => panic!("unexpected git arguments: {other:?}"),
+            };
+            Ok(Output { success: true, stdout: text.into_bytes() })
+        }
+    }
+
+    #[tokio::test]
+    async fn storage_choice_places_new_copies_and_keeps_the_previous_location_on_reset() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let temp = tempfile::tempdir().unwrap();
+        let temp = temp.path().canonicalize().unwrap();
+        let folder = temp.join("project");
+        let storage = temp.join("Faber-storage");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::create_dir(&storage).unwrap();
+        std::fs::write(storage.join(".faber-owner"), dir.path().to_str().unwrap()).unwrap();
+        let project = engine.add_project(folder.to_str().unwrap()).unwrap();
+        engine.set_git(Arc::new(move || Some(Box::new(Git(folder.clone())))));
+        let first = engine.with(|core| core.blank(Area::Project, Some(project.id.clone())));
+        engine.set_new_storage(Some(storage.clone()), [storage.clone()].into());
+        let (_, copy) = Engine::make_copy(engine.with(|core| core.copy_plan(&first))).unwrap().unwrap();
+        assert_eq!(Path::new(&copy.path), copy::home(&storage).join(&first));
+        assert!(Path::new(&copy.path).is_dir());
+        let detached = temp.join("detached");
+        std::fs::rename(&storage, &detached).unwrap();
+        let plan = engine.with(|core| {
+            let next = core.blank(Area::Project, Some(project.id.clone()));
+            core.copy_plan(&next)
+        });
+        assert_eq!(Engine::make_copy(plan).err().as_deref(), Some("error.storage.unreachable"));
+        std::fs::rename(detached, &storage).unwrap();
+        engine.set_new_storage(None, [storage.clone()].into());
+        engine.with(|core| {
+            assert_eq!(core.copy_storage(&first, &copy), Some(storage.clone()));
+            assert!(core.checked_copy_folder(&first, &copy).is_some());
+            let conversation = core.convs.get_mut(&first).unwrap();
+            conversation.copy = Some(copy.clone());
+            conversation.updated_at = 0;
+            let next = core.blank(Area::Project, Some(project.id));
+            assert_eq!(core.copy_plan(&next).unwrap().data, core.opts.data_dir);
+        });
+        assert_eq!(engine.sweep_project_storage().kept_unmerged, 1);
+        std::fs::write(storage.join(".faber-owner"), "a different profile").unwrap();
+        engine.with(|core| assert!(core.checked_copy_folder(&first, &copy).is_none()));
+    }
+}
+
 impl Core {
+    pub(super) fn copy_storage(&self, id: &str, copy: &WorkCopy) -> Option<PathBuf> {
+        std::iter::once(&self.opts.data_dir)
+            .chain(self.storage_roots.iter().map(Arc::as_ref))
+            .find(|root| same_path(&copy::home(root).join(id), Path::new(&copy.path)))
+            .cloned()
+    }
+
+    pub(super) fn copy_storage_available(&self, root: &Path) -> bool {
+        storage_available(&self.opts.data_dir, root)
+    }
+
+    pub(super) fn checked_copy_folder(&self, id: &str, copy: &WorkCopy) -> Option<PathBuf> {
+        let root = self.copy_storage(id, copy)?;
+        let folder = copy.folder();
+        if root == self.opts.data_dir {
+            return Some(folder);
+        }
+        if !self.copy_storage_available(&root) || !crate::project::git::path_within(&folder, Path::new(&copy.path)) {
+            return None;
+        }
+        crate::project::lease::real_path(&folder).ok()
+    }
+
+    fn new_copy_storage(&self) -> PathBuf {
+        self.new_storage.as_ref().unwrap_or(&self.opts.data_dir).clone()
+    }
+
     fn copy_sweep_allowed(&self) -> bool {
         !self.closing
             && self.agent_installs == 0
@@ -410,7 +539,10 @@ impl Core {
     /// The copy is ready, or git could not make it: attach it, then start what waited for it. An answer stopped or
     /// removed meanwhile starts nothing, and a copy that no longer fits comes back to be removed.
     fn copy_made(&mut self, id: &str, made: Result<Made, String>, base: Option<String>) -> Made {
-        let failed = made.is_err();
+        let failure = made
+            .as_ref()
+            .err()
+            .map(|key| if key == "error.storage.unreachable" { "error.storage.unreachable" } else { "error.copy.failed" });
         let mut stray = None;
         match made {
             Ok(Some((made_for, copy))) => {
@@ -454,8 +586,8 @@ impl Core {
             return stray;
         }
         match tail {
-            _ if failed => {
-                self.fail_reply(id, &reply, "error.copy.failed".into());
+            _ if let Some(failure) = failure => {
+                self.fail_reply(id, &reply, failure.into());
                 self.step_not_started(id);
             }
             Some(Tail { pick, text, images, by_hand }) => {
@@ -491,13 +623,17 @@ impl Core {
             }
             None => return None,
         };
-        let data = self.opts.data_dir.clone();
+        let data = match &c.copy {
+            Some(copy) => self.copy_storage(id, copy)?,
+            None => self.new_copy_storage(),
+        };
         // A plan step's conversation starts from the leader's latest work, as a branched one starts from its source.
         let lead = self.step_lead(id);
         Some(Plan {
             run,
             folder: PathBuf::from(project.path),
             data,
+            profile: self.opts.data_dir.clone(),
             id: id.to_string(),
             branch,
             from: lead.clone().flatten(),
@@ -515,11 +651,12 @@ impl Core {
         }
         let id = new_id();
         let branch = copy::branch_for(&req.text, &id);
-        let data = self.opts.data_dir.clone();
+        let data = self.new_copy_storage();
         Some(Plan {
             run,
             folder: PathBuf::from(project.path),
             data,
+            profile: self.opts.data_dir.clone(),
             id,
             branch,
             from: source.copy.map(|c| c.branch),

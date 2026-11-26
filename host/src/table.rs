@@ -27,6 +27,8 @@ struct FullState {
     version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     sharing: Option<SharingState>,
+    #[serde(rename = "storageChoice", skip_serializing_if = "Option::is_none")]
+    storage_choice: Option<crate::storage_choice::Status>,
 }
 
 #[derive(Serialize)]
@@ -258,7 +260,7 @@ table! {
         let mut state = h.engine.state();
         state.settings = h.shell.shown_settings(std::mem::take(&mut state.settings));
         let look = look::stored(state.settings.appearance.as_ref());
-        Ok(FullState { state, look, models: lock(&h.models).clone(), antigravity_models: lock(&h.antigravity_models).clone(), version: h.shell.version(), sharing: sharing_state_for(&h.sharing) })
+        Ok(FullState { state, look, models: lock(&h.models).clone(), antigravity_models: lock(&h.antigravity_models).clone(), version: h.shell.version(), sharing: sharing_state_for(&h.sharing), storage_choice: Some(lock(&h.storage_choice).status()) })
     }
     /// Read-only bootstrap for a session-owned app renderer; never resets the person's streaming feed.
     Read Own("/by") fn app_control_state(h, by: Option<String>) -> FullState {
@@ -268,7 +270,7 @@ table! {
         scope_app_state(&mut state, by.as_deref(), |id| reach::root(id, |at| starters.get(at).cloned()));
         state.settings = h.shell.shown_settings(std::mem::take(&mut state.settings));
         let look = look::stored(state.settings.appearance.as_ref());
-        Ok(FullState { state, look, models: lock(&h.models).clone(), antigravity_models: lock(&h.antigravity_models).clone(), version: h.shell.version(), sharing: None })
+        Ok(FullState { state, look, models: lock(&h.models).clone(), antigravity_models: lock(&h.antigravity_models).clone(), version: h.shell.version(), sharing: None, storage_choice: None })
     }
     #[cfg(faber_telemetry)]
     Read Screen fn sharing_state(h) -> SharingState {
@@ -731,6 +733,12 @@ table! {
     /// Measures the data folder and the free space on its drive, in bytes.
     Read Free fn storage_usage(h) -> faber_engine::storage::StorageUsage {
         h.engine.storage_usage().await
+    }
+    Read Screen fn storage_choice(h) -> crate::storage_choice::Status {
+        Ok(lock(&h.storage_choice).status())
+    }
+    Write Person fn storage_choose(h, reset: bool) -> Option<crate::storage_choice::Status> {
+        crate::storage_choice::change(h, reset).await
     }
     /// A theme file comes from other people, so an appearance is checked here before anything is saved.
     Write Ask fn save_settings(h, patch: Settings) -> SavedSettings [Failure] {
