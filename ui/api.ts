@@ -43,14 +43,6 @@ export interface SiteTabs {
   closed?: SiteTab[];
 }
 /** What the person does to the tabs. */
-/** What pick mode answered: what the person picked on the page, or that it is still waiting, or that it ended. */
-export type SitePick = {
-  picked?: { role: string; name: string; text: string; selector: string; page: string };
-  picture?: string | null;
-  waiting?: boolean;
-  ended?: boolean;
-};
-
 export type SiteTabStep = 'new' | 'reopen' | 'bring' | 'close' | 'closeOthers';
 
 export interface UpdateStatus {
@@ -1308,9 +1300,6 @@ export const api = {
   siteGo: (id: string, url: string) => invoke<boolean>('site_go', { id, url }),
   siteClear: (id: string) => invoke<void>('site_clear', { id }),
   siteHistory: (id: string) => invoke<[boolean, boolean]>('site_history', { id }),
-  /** Pick mode on that conversation's page in view: with `on`, waits a few seconds for the person's pick (its words are
-   * masked by the host, the picture is a JPEG); without, ends it. */
-  sitePick: (id: string, on: boolean) => invoke<SitePick>('site_pick', { id, on }),
   onSiteTabs: (listener: (id: string) => void) => listen<string>('faber:site-tabs', (e) => listener(e.payload)),
   onSiteBusy: (listener: (busy: { conversation: string; tab: string; busy: boolean }) => void) =>
     listen<{ conversation: string; tab: string; busy: boolean }>('faber:site-busy', (e) => listener(e.payload)),

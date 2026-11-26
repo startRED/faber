@@ -1257,11 +1257,6 @@ table! {
     Window Screen fn site_history(h, id: String) -> [bool; 2] {
         h.pane()?.site_history(id).await
     }
-    /// Pick mode on conversation `id`'s page in view: with `on`, waits a few seconds for the person to pick something and answers
-    /// its masked words and picture, `waiting` or `ended`; without, ends the mode.
-    Window Screen fn site_pick(h, id: String, on: bool) -> Value {
-        h.pane()?.site_pick(id, on).await
-    }
     /// Clears conversation `id`'s browsing data once the person said yes: tabs, closed tabs, sign-ins and the page's own data.
     Window Screen fn site_clear(h, id: String) -> () {
         h.pane()?.site_clear(id).await
