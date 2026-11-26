@@ -93,6 +93,7 @@ mod settings_change;
 mod siblings;
 mod silence;
 mod stage;
+mod storage;
 mod stronger;
 mod stuck_watch;
 mod temporary;

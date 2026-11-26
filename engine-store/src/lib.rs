@@ -21,6 +21,7 @@ pub mod project_rules;
 mod prompt_history;
 pub mod recents;
 pub mod search;
+pub mod storage;
 pub mod store;
 pub mod transcript;
 pub mod worker_memory;

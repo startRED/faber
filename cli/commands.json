@@ -2623,6 +2623,18 @@
     "reach": "ask"
   },
   {
+    "name": "storage_usage",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "Measures the data folder and the free space on its drive, in bytes."
+  },
+  {
     "name": "save_settings",
     "args": [
       [

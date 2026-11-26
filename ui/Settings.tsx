@@ -15,6 +15,7 @@ import { ProjectsSection } from './ProjectSettings.tsx';
 import { Recents } from './Recents.tsx';
 import { ReportProblem } from './ReportProblem.tsx';
 import { SharingSettings } from './Sharing.tsx';
+import { StorageUse } from './StorageUse.tsx';
 import type { Quotas } from './sidebar.ts';
 import './settings.css';
 
@@ -347,6 +348,12 @@ export function Settings(props: Props) {
                 </button>
               </Opt>
               <Toggle id="set-previews" label={t('set.previews')} hint={t('set.previewsHint')} more={t('set.previewsMore')} checked={props.saved.previews === true} onChange={(on) => save({ previews: on })} />
+            </Group>
+            {/* The data folder holds both areas (Chat conversations too), so its size sits in General; closed, it measures nothing. */}
+            <Group title={t('set.group.storage')}>
+              <Fold id="set-storage" title={t('set.storage')} hint={t('set.storage.line')}>
+                <StorageUse projects={props.projects ?? []} />
+              </Fold>
             </Group>
           </Match>
           <Match when={section() === 'appearance'}>

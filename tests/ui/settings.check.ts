@@ -1673,3 +1673,111 @@ check('report a problem: Settings previews the exact fields and Cancel opens not
     equal(document.querySelector('dialog[open][aria-labelledby="report-title"]'), null);
   } finally { view.stop(); api.problemReport = oldReport; api.openLink = oldOpen; }
 });
+
+// General > Storage: what `storage_usage` sends for a data folder with an unreadable folder, a removed project and loose copies.
+const STORAGE = {
+  totalBytes: null,
+  freeBytes: 24 * 1024 ** 3,
+  byKind: { copies: 3.1 * 1024 ** 3, reports: 1.6 * 1024 ** 3, tools: 1.5 * 1024 ** 3, rewind: null, helperTranscripts: 0.6 * 1024 ** 3, conversations: 40 * 1024 ** 2, rest: 0 },
+  copiesByProject: { shop: 2 * 1024 ** 3, gone: 1024 ** 3, broken: null },
+  unassignedCopyBytes: 0.1 * 1024 ** 3,
+  partial: true,
+};
+
+const storageView = (projects = [{ id: 'shop', name: 'Shop', path: 'C:/shop' }, { id: 'broken', name: 'Broken', path: 'C:/broken' }]) => {
+  forgetSection();
+  return mount(() => createComponent(Settings, {
+    look: look(), saved: SHOWN, vendors: [], quotas: {}, now: 0, projects,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+};
+
+check('storage: General measures only when the fold opens or Measure again is pressed, lists every kind and copies by project, and an unknown size is never 0', async () => {
+  const previous = api.storageUsage;
+  let reads = 0;
+  api.storageUsage = async () => { reads++; return STORAGE; };
+  const view = storageView();
+  try {
+    await tick();
+    equal(reads, 0, 'a closed fold measures nothing');
+    ok(!view.host.querySelector('.store'), 'the view is not in the page while closed');
+    const head = view.host.querySelector<HTMLButtonElement>('#set-storage')!;
+    ok(head.closest('.st-group')!.querySelector('.st-title')!.textContent === en['set.group.storage'], 'it is its own group in General');
+    head.click();
+    await tick();
+    equal(reads, 1);
+    const store = view.host.querySelector<HTMLElement>('.store')!;
+    const [kinds, copies] = [...store.querySelectorAll<HTMLUListElement>('.store-list')];
+    const rows = (list: HTMLElement) => [...list.querySelectorAll('.store-row')].map((row) => [row.querySelector('.store-name')!.textContent, row.querySelector('.num')!.textContent]);
+    const kindRows = rows(kinds);
+    deepEqual(kindRows.map(([name]) => name), ['Conversation copies', 'Reports', 'Tools', 'Helper transcripts', 'Conversations', 'Saved files for going back', 'Everything else'], 'biggest first, unknown after, the rest last');
+    equal(kindRows[5][1], 'Unknown', 'a size that could not be read says so');
+    ok(kindRows[6][1] !== 'Unknown' && kindRows[6][1]!.startsWith('0'), `a real zero stays a zero: ${kindRows[6][1]}`);
+    ok(kindRows[0][1]!.includes('GB'), `large sizes read in gigabytes: ${kindRows[0][1]}`);
+    ok(store.querySelector('.st-ctl .store-total')!.textContent === 'Unknown', 'the total is unknown when a kind is');
+    ok(store.textContent!.includes('free on this drive'), 'the free space of the drive is shown');
+    ok(store.textContent!.includes(en['set.storage.partial']), 'a partial reading says the sizes may be larger');
+    deepEqual(rows(copies).map(([name]) => name), ['Shop', 'A removed project', 'Broken', 'Not linked to a project'], 'biggest first, copies with no project last');
+    equal(rows(copies)[2][1], 'Unknown');
+    const again = [...store.querySelectorAll<HTMLButtonElement>('button')];
+    deepEqual(again.map((b) => b.textContent), [en['set.storage.again']], 'the only control measures again: no clean-up is offered yet');
+    again[0].focus();
+    again[0].click();
+    ok(again[0].getAttribute('aria-disabled') === 'true' && store.getAttribute('aria-busy') === 'true', 'measuring again waits and keeps the old figures');
+    equal(document.activeElement, again[0], 'the button keeps focus while it measures');
+    again[0].click();
+    ok(store.querySelectorAll('.store-row').length > 0);
+    await tick();
+    equal(reads, 2);
+    head.click();
+    // The closed fold keeps its body only for its exit (at most --dur-exit), then lets it go.
+    await leave();
+    ok(!view.host.querySelector('.store'), 'closed again, the view leaves the page');
+    head.click(); await tick();
+    equal(reads, 3, 'opening again measures again');
+  } finally { api.storageUsage = previous; view.stop(); }
+});
+
+check('storage: pressing every control of the view reads and asks nothing, and a failed reading offers Try again', async () => {
+  const calls: string[] = [];
+  const saved = new Map<string, unknown>();
+  const shared = api as unknown as Record<string, unknown>;
+  for (const [name, fn] of Object.entries(shared)) {
+    if (typeof fn !== 'function') continue;
+    saved.set(name, fn);
+    shared[name] = (...args: unknown[]) => { calls.push(name); return (fn as (...a: unknown[]) => unknown)(...args); };
+  }
+  let fail = true;
+  shared.storageUsage = async () => { calls.push('storageUsage'); if (fail) throw 'error.store.read'; return { ...STORAGE, partial: false, copiesByProject: {}, unassignedCopyBytes: 0 }; };
+  const view = storageView([]);
+  try {
+    view.host.querySelector<HTMLButtonElement>('#set-storage')!.click();
+    await tick();
+    const store = view.host.querySelector<HTMLElement>('.store')!;
+    equal(store.querySelector('[role="alert"]')!.textContent, en['error.store.read']);
+    ok(!store.querySelector('.store-row'), 'a failed reading shows no sizes, not zeros');
+    fail = false;
+    calls.length = 0;
+    for (const button of store.querySelectorAll<HTMLButtonElement>('button')) { equal(button.textContent, en['set.storage.retry']); button.click(); }
+    await tick();
+    deepEqual(calls, ['storageUsage'], 'the view only reads');
+    ok(!document.querySelector('.ask, [role="alertdialog"], dialog[open]'), 'no question is asked');
+    ok(!store.querySelector('[role="alert"]'));
+    ok(store.textContent!.includes(en['set.storage.noCopies']), 'no copies is said in words');
+    ok(!store.textContent!.includes(en['set.storage.partial']));
+  } finally {
+    for (const [name, fn] of saved) shared[name] = fn;
+    view.stop();
+  }
+});
+
+check('storage: every language has the view written by hand, and the closed line fits its row', () => {
+  const keys = Object.keys(en).filter((key) => key.startsWith('set.storage') || key === 'set.group.storage') as (keyof typeof en)[];
+  equal(keys.length, 24);
+  for (const [code, words] of Object.entries({ ptBR, es, fr, de })) {
+    for (const key of keys) ok(typeof words[key] === 'string' && words[key].length > 0, `${code}: ${key}`);
+    for (const key of ['set.storage', 'set.storage.kind.copies', 'set.storage.kind.rewind', 'set.storage.sweep', 'set.storage.unknown'] as const) ok(words[key] !== en[key], `${code}: ${key} is not left in English`);
+    ok((words['set.storage.free'] as string).includes('{size}'), `${code}: the free space keeps its size`);
+  }
+  for (const words of [en, ptBR, es, fr, de]) ok(words['set.storage.line'].length <= 70, words['set.storage.line']);
+});
