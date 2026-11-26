@@ -150,6 +150,10 @@ impl Shell for TauriShell {
         self.handle.package_info().version.to_string()
     }
 
+    fn report_shell(&self) -> &'static str {
+        "Tauri"
+    }
+
     fn persist_settings(&self, autostart: Option<bool>, persist: &mut dyn FnMut() -> Result<Settings, String>) -> Result<Settings, String> {
         let _saving = lock(&self.saving);
         autostart::save(self.autostart.as_ref(), autostart, persist)

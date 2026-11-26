@@ -21,6 +21,7 @@ pub mod pane;
 mod project_commands;
 mod queues;
 pub mod reach;
+mod report;
 pub mod setup;
 pub mod sidecar;
 mod table;
@@ -200,6 +201,10 @@ pub trait Shell: Send + Sync + 'static {
     /// The version of the program that runs; the screen shows it.
     fn version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
+    }
+    /// The desktop shell that runs the screen.
+    fn report_shell(&self) -> &'static str {
+        "unknown"
     }
     /// Stores settings through `persist`, together with whatever only the shell keeps for them (registering to start with the
     /// system, which is undone if `persist` fails). `autostart` is the patch's switch for it, if it carries one.
