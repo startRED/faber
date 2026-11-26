@@ -585,7 +585,7 @@ async fn a_conversation_whose_project_was_removed_is_told_so_and_searches_nothin
     app.shutdown();
 }
 
-// ---- installing: guardrail 3 puts the person's card in front of every install ----
+// ---- installing: consent and audit ----
 
 use faber_engine::model::{Conversation, Permission, Permissions, Status};
 
@@ -595,9 +595,13 @@ const SKILL: &[u8] = b"---\nname: careful\ndescription: Be careful.\n---\nBe car
 
 /// The archive of the repository `owner/repo` at `commit`, holding the skill `careful`.
 fn careful_zip() -> Vec<u8> {
+    skill_zip("skills/careful")
+}
+
+fn skill_zip(path: &str) -> Vec<u8> {
     use std::io::Write;
     let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    zip.start_file("repo-0123/skills/careful/SKILL.md", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.start_file(format!("repo-0123/{path}/SKILL.md"), zip::write::SimpleFileOptions::default()).unwrap();
     zip.write_all(SKILL).unwrap();
     zip.finish().unwrap().into_inner()
 }
@@ -625,18 +629,23 @@ fn careful(commit: &str) -> faber_engine::tools::Item {
 /// Where the downloads of an agent go: a loopback server that counts its requests and, while `open` is false, holds each one.
 struct Serve {
     server: crate::loopback::Server,
-    hits: Arc<std::sync::atomic::AtomicUsize>,
+    requests: Arc<std::sync::Mutex<Vec<String>>>,
     open: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Serve {
     /// Answers the archive of `careful` (nothing but a 404 for an empty `zip`). Starts holding every request when `shut`.
     fn new(zip: Vec<u8>, shut: bool) -> Serve {
+        Self::archive("/owner/repo/archive/0123.zip".into(), zip, shut)
+    }
+
+    fn archive(archive_path: String, zip: Vec<u8>, shut: bool) -> Serve {
         use std::sync::atomic::Ordering::SeqCst;
-        let (hits, open) = (Arc::new(std::sync::atomic::AtomicUsize::new(0)), Arc::new(std::sync::atomic::AtomicBool::new(!shut)));
-        let (seen, gate) = (hits.clone(), open.clone());
+        let requests = Arc::<std::sync::Mutex<Vec<String>>>::default();
+        let open = Arc::new(std::sync::atomic::AtomicBool::new(!shut));
+        let (seen, gate) = (requests.clone(), open.clone());
         let server = crate::loopback::Server::start(move |_, path, stream| {
-            seen.fetch_add(1, SeqCst);
+            seen.lock().unwrap().push(path.into());
             // A sync server thread cannot await the shared helper.
             for _ in 0..2000 {
                 if gate.load(SeqCst) {
@@ -644,17 +653,13 @@ impl Serve {
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
-            if path == "/owner/repo/archive/0123.zip" && !zip.is_empty() {
-                crate::loopback::send(stream, &zip)
-            } else {
-                crate::loopback::not_found(stream)
-            }
+            if path == archive_path && !zip.is_empty() { crate::loopback::send(stream, &zip) } else { crate::loopback::not_found(stream) }
         });
-        Serve { server, hits, open }
+        Serve { server, requests, open }
     }
 
     fn hits(&self) -> usize {
-        self.hits.load(std::sync::atomic::Ordering::SeqCst)
+        self.requests.lock().unwrap().len()
     }
 }
 
@@ -816,9 +821,11 @@ async fn settings_search_waits_for_its_own_card_and_denial_keeps_the_saved_choic
 }
 
 #[tokio::test]
-async fn an_install_in_ask_and_full_access_waits_on_one_card_and_a_no_changes_nothing() {
-    for mode in [Permissions::Ask, Permissions::FullAccess] {
+async fn a_checked_install_in_ask_and_accept_edits_waits_on_one_card_and_a_no_changes_nothing() {
+    for mode in [Permissions::Ask, Permissions::AcceptEdits] {
         let mut agent = claude_project(mode).await;
+        // Loosening the global settings does not change the mode of the turn already running.
+        agent.app.save_settings(Settings { permissions: Some(Permissions::FullAccess), ..Settings::default() }).unwrap();
         agent.call("rpc1", "toolu_i1", json!({ "install": "ponytail" })).await;
         let (turn, card) = agent.card().await;
         assert_eq!(card.request_id, "toolu_i1", "{mode:?}");
@@ -858,6 +865,48 @@ async fn an_install_in_ask_and_full_access_waits_on_one_card_and_a_no_changes_no
 }
 
 #[tokio::test]
+async fn a_checked_install_in_full_access_reaches_the_pinned_download_without_a_card_and_logs_the_conversation() {
+    let item = faber_engine::tools::find("ponytail").unwrap();
+    let archive = format!("/{}/archive/{}.zip", item.repo, item.commit);
+    let source = Serve::archive(archive.clone(), skill_zip(&item.path), false);
+    let mut agent = claude_project_with(Permissions::FullAccess, source, vec![]).await;
+    agent.call("checked", "checked_call", json!({ "install": item.id })).await;
+    let (text, error) = tokio::select! {
+        reply = agent.reply("checked") => reply,
+        (_, card) = agent.card() => panic!("checked install asked for {}", card.tool),
+    };
+    // Same path and a valid skill, but the bytes do not match the checked digest.
+    assert!(error && text.starts_with("Download failed"), "{text}");
+    assert_eq!(*agent.serve.requests.lock().unwrap(), [archive]);
+    assert!(agent.cards().1.is_empty());
+    agent.store_untouched();
+    let log = agent.log();
+    assert_eq!(steps(&log), [pair("full_access", "allowed"), pair("full_access", "failed")]);
+    assert!(log.iter().all(|l| {
+        l["kind"] == "tools.install" && l["id"] == item.id.as_str() && l["to"] == item.commit.as_str() && l["conv"] == agent.id.as_str()
+    }));
+    agent.app.shutdown();
+}
+
+#[tokio::test]
+async fn an_unlisted_install_still_asks_in_every_mode_that_can_install() {
+    let item = careful("0123");
+    assert!(faber_engine::tools::find(&item.id).is_none());
+    for mode in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Auto, Permissions::FullAccess] {
+        let mut agent = claude_project_with(mode, Serve::new(careful_zip(), false), vec![item.clone()]).await;
+        agent.call("unlisted", "unlisted_call", json!({ "install": item.id })).await;
+        let (_, card) = agent.card().await;
+        assert_eq!(card.tool, CARD, "{mode:?}");
+        assert_eq!(agent.serve.hits(), 0, "{mode:?}");
+        agent.answer("unlisted_call", true, false).await.unwrap();
+        let (text, failed) = agent.reply("unlisted").await;
+        assert!(!failed && text.starts_with("Installed careful"), "{mode:?}: {text}");
+        assert_eq!(steps(&agent.log()), [pair("once", "allowed"), pair("once", "installed")]);
+        agent.app.shutdown();
+    }
+}
+
+#[tokio::test]
 async fn an_install_the_person_allows_once_that_cannot_download_changes_nothing_and_the_next_one_asks_again() {
     let mut agent = claude_project(Permissions::Ask).await;
     agent.call("rpc1", "toolu_i1", json!({ "install": "ponytail" })).await;
@@ -881,7 +930,7 @@ async fn an_install_the_person_allows_once_that_cannot_download_changes_nothing_
 
 #[tokio::test]
 async fn always_allow_installs_stops_the_card_and_a_stricter_mode_takes_it_back() {
-    let mut agent = claude_project(Permissions::FullAccess).await;
+    let mut agent = claude_project(Permissions::AcceptEdits).await;
     agent.call("rpc1", "toolu_i1", json!({ "install": "ponytail" })).await;
     agent.answer("toolu_i1", true, true).await.unwrap();
     assert!(agent.reply("rpc1").await.1, "the download still fails");
@@ -1834,7 +1883,7 @@ async fn catalog_switch_restarted_and_forged_cards_cannot_authorize_a_change() {
 #[tokio::test]
 async fn catalog_remove_requires_own_consent_and_keeps_undo_without_download() {
     let item = careful("0123");
-    let mut agent = claude_project_with(Permissions::Ask, Serve::new(vec![], false), vec![item.clone()]).await;
+    let mut agent = claude_project_with(Permissions::FullAccess, Serve::new(vec![], false), vec![item.clone()]).await;
     let store = seed(&agent, &item);
     let (held, _) = store.kit_for(Vendor::Claude, "debug my app crash", None, Area::Project, Permissions::Ask, &[]);
     let held_path = held.skills.as_ref().unwrap().join("careful/SKILL.md");

@@ -1,6 +1,6 @@
 //! Project-agent tools shared by both official CLI adapters. Quota, catalog and memory search read local facts;
 //! offer_bigger asks one scope question. Creative comparisons start two isolated, bounded model requests and save receipts.
-//! Catalog changes keep the existing consent gate. No tool exposes account identifiers or sign-in data.
+//! Catalog changes have action-specific consent. No tool exposes account identifiers or sign-in data.
 
 use crate::model::Vendor;
 use crate::tools::{Item, Tier};
@@ -40,8 +40,8 @@ const QUOTA_DESCRIPTION: &str = "Reads the limits of each connected AI subscript
 window, when it renews, and whether it is billed per use. Starts no request. Use it before big work or to choose which AI takes it.";
 
 const CATALOG_DESCRIPTION: &str = "Searches Faber's catalog of skills, plugins and tool servers by words, offline. With `install` set \
-to a catalog id it installs that tool from its original source, but only after the person allows it on a card in Faber (or has \
-turned on full trust for Faber's own setup), and only a tool Faber holds no copy of: it never updates, repairs or replaces one. A \
+to a catalog id it installs that tool from its pinned source if Faber holds no copy. This requires an approval card, an existing \
+grant, or full trust for Faber's own setup. In Full access, an item from the shipped checked catalog needs no card. A \
 tool installed loads in a new conversation, not this one. With `set_enabled` set to an object with `id` and boolean `enabled`, it turns a healthy installed tool on or off with separate permission; new conversations receive the change. With `remove` set to an installed catalog id, it removes that tool with its own permission and keeps Undo in Catalog until Faber restarts. Only on the person's explicit request, `update` or `repair` replaces an installed id with the shipped curated pin through its own permission; local edits and any prior backup are replaced, retaining the current files. Never self-update or fetch a latest version. Existing conversations retain their tools. Use exactly one action per call.";
 
 const MEMORY_SEARCH_DESCRIPTION: &str = "Searches this project's own past conversations (the person's words and the final answers, \
@@ -102,7 +102,7 @@ fn catalog_schema() -> Value {
         "properties": {
             "query": { "type": "string", "description": "Words for the job, e.g. \"fix a bug\". Empty lists the recommended tools." },
             "remove": { "type": "string", "description": "Remove one installed catalog id after its own permission. Undo stays in Catalog until restart." },
-            "install": { "type": "string", "description": "The id of one catalog tool, from a search, to install after the person allows it." },
+            "install": { "type": "string", "description": "The id of one catalog tool from a search. In Full access a shipped checked item needs no approval card." },
             "update": { "type": "string", "description": "Only on the person's explicit request: replace an installed id with the current curated catalog pin, after its own permission. Never fetch latest or update during other work. Replaces any prior backup; existing conversations keep their tools." },
             "repair": { "type": "string", "description": "Only on the person's explicit request: repair an installed catalog id after its own permission. Replaces local edits and any prior backup, retaining the current files. Never combine with another action." },
             "set_enabled": { "type": "object", "description": "Turn one healthy installed tool on or off after permission. Changes apply to new conversations. Never combine with query or install.",
@@ -767,7 +767,8 @@ mod tests {
         let listed = mcp_tools();
         let catalog = listed.iter().find(|tool| tool["name"] == CATALOG).expect("Catalog is exposed");
         assert!(catalog["inputSchema"]["properties"]["install"].is_object(), "the model can name an id to install");
-        assert!(CATALOG_DESCRIPTION.contains("only after the person allows it on a card"));
+        assert!(CATALOG_DESCRIPTION.contains("requires an approval card"));
+        assert!(CATALOG_DESCRIPTION.contains("In Full access, an item from the shipped checked catalog needs no card"));
         assert!(!CATALOG_DESCRIPTION.contains("installs nothing"));
     }
 

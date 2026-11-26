@@ -1,6 +1,6 @@
 //! The agent's toolbox (`crate::toolbox`): `quota` answers from the readings the engine already holds, `catalog` from the shipped
 //! catalog and the store's ledger. Searching starts no request, so both are offered to a project's own agent in any permission
-//! mode. `catalog` with `install` changes Faber itself (guardrail 3): it waits for the person's card, then installs through the
+//! mode. `catalog` with `install` changes Faber itself (guardrail 3): it checks consent, then installs through the
 //! one installer the Catalog screen uses (`tools::install_for_agent`, whose last check of what Faber holds runs under the store lock), and only a tool the store holds no copy of.
 //! `memory_search` is answered in `memory_search.rs`. `offer_bigger` shows one question card per conversation and answers from the
 //! person's choice (`answer.rs`).
@@ -275,8 +275,8 @@ impl Core {
         });
     }
 
-    /// Under the lock again: the person's standing trust or an "always" they gave installs at once; otherwise the card goes on the
-    /// turn and the call waits for the answer (`answer_self_change`). Nothing is written to the CLI for the card.
+    /// Under the lock again: trust, an "always" grant or a checked install in Full access lets the change run at once.
+    /// Otherwise the card goes on the turn and the call waits for the answer (`answer_self_change`).
     fn install_decide(&mut self, conv: &str, sid: u64, call: String, item: &'static Item, enabled: Option<bool>, remove: bool) {
         // The turn may have ended, the mode changed or a second call come in while the checks ran.
         if let Err(text) = self.install_target(conv, sid, &serde_json::json!(item.id)) {
@@ -290,6 +290,13 @@ impl Core {
         }
         if self.grant_stands(conv, change_tool(enabled, remove)) {
             return self.run_install(conv, sid, call, item, (enabled, remove), "always");
+        }
+        if enabled.is_none()
+            && !remove
+            && self.live.get(conv).is_some_and(|live| live.permissions == Permissions::FullAccess)
+            && crate::tools::find(&item.id).is_some_and(|checked| std::ptr::eq(checked, item))
+        {
+            return self.run_install(conv, sid, call, item, (enabled, remove), "full_access");
         }
         let store = self.catalog_store();
         let (plugin, runs_code) = (store.plugin_definition(&item.id).is_some(), store.requires_node(item));
@@ -421,7 +428,7 @@ impl Core {
 
     /// Writes the decision, installs through the one installer and writes the result, all away from the lock, then tells the agent
     /// how it ended. The decision line comes first: an install the person can read about is never one that happened unrecorded, and
-    /// whatever the way it was allowed (once, always or trust), a decision that cannot be written is not acted on.
+    /// a decision that cannot be written is not acted on, regardless of how it was allowed.
     fn run_install(&mut self, conv: &str, sid: u64, call: String, item: &'static Item, change: (Option<bool>, bool), how: &'static str) {
         let (enabled, remove) = change;
         if let Err(text) = self.install_target(conv, sid, &serde_json::json!(item.id)) {
