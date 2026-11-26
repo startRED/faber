@@ -28,27 +28,3 @@ The plan estimates spend at the configured per-invocation allowance for two tria
 
 Other launch differences include local progress, decisions, project map and catalog tools, catalog resource selection, a separate working copy, and policies for permissions and protected paths. The app can add browser actions when a browser host is attached. These mechanisms can add text or local work. User-driven paths such as a side question, manual compaction or approval, a goal, a pull request wake or Keep going require state outside these fresh requests. [Project launch](../../engine/src/engine.rs), [tool delivery](../../engine/src/engine/kits.rs), [built-in tools](../../engine-drivers/src/helper.rs), [background returns](../../engine/src/engine/by_itself.rs).
 
-## Measured on 2026-11-26
-
-One request (`organize-folder`), Codex on both sides, one pair per part, alternating order, judged blind by the other
-vendor. Spent US$ 3.54 in all. One pair is one sample: a verdict here is a lead to check, not a reason to cut a part. The
-three-request set the task names was estimated at US$ 148.50 and waits for the owner.
-
-| Part | Time on / off (s) | Input on / off | Output on / off | Extra calls on / off | Judge picked |
-| :--- | ---: | ---: | ---: | ---: | :--- |
-| `persona` | 86 / 108 | 38674 / 39158 | 1915 / 2180 | 3 / 4 | off |
-| `guide` | 86 / 88 | 38466 / 39614 | 1722 / 2322 | 3 / 3 | off |
-| `start-card` | 75 / 58 | 39244 / 34878 | 2045 / 1038 | 3 / 3 | on |
-| `checks` | 54 / 66 | 35320 / 34937 | 1013 / 1026 | 3 / 3 | on |
-| `review` | 82 / 109 | 38730 / 40568 | 1689 / 2773 | 3 / 3 | off |
-| `router` | 55 / 80 | 17463 / 38700 | 949 / 2141 | 3 / 2 | off |
-| `title` | 87 / 75 | 39511 / 40329 | 2240 / 2036 | 3 / 2 | off |
-| `ask-judge` | 65 / 55 | 34908 / 34985 | 1042 / 1069 | 3 / 2 | on |
-| `follow-ups` | 55 / 69 | 34092 / 19851 | 970 / 1705 | 3 / 3 | off |
-| `delegation` | 68 / 100 | 35106 / 37663 | 1008 / 2682 | 3 / 3 | off |
-| `creative-judge` | 74 / 90 | 18288 / 39265 | 1207 / 2026 | 3 / 3 | off |
-
-The judge picked the side with the part on for 3 parts (`start-card`, `checks`, `ask-judge`) and the side without it for the
-other 8. Input excludes cached reads; time is wall seconds for the whole turn. Raw rows: run `parts-1`.
-In 8 of the 11 pairs the picked side wrote the longer answer, so a length bias in the judge is a likely part of these
-verdicts; the next run should hold the answer length in view before reading a part as worth cutting.
