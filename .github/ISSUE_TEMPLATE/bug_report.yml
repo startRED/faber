@@ -21,6 +21,13 @@ body:
       description: Shown in Settings, or in the release file name.
     validations:
       required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Optional technical details shown by Faber before opening this form.
+    validations:
+      required: false
   - type: dropdown
     id: os
     attributes:

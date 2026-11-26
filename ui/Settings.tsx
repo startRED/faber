@@ -13,6 +13,7 @@ import { availableChoice, modelOptions, vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { ProjectsSection } from './ProjectSettings.tsx';
 import { Recents } from './Recents.tsx';
+import { ReportProblem } from './ReportProblem.tsx';
 import type { Quotas } from './sidebar.ts';
 import './settings.css';
 
@@ -332,6 +333,9 @@ export function Settings(props: Props) {
                 <Toggle id="set-awake" label={t('set.keepAwake')} hint={t('set.keepAwakeHint')} checked={props.saved.keepAwake === true} onChange={(on) => save({ keepAwake: on })} />
                 <Toggle id="set-autostart" label={t('set.autostart')} hint={t('set.autostartHint')} checked={props.saved.autostart === true} onChange={(on) => save({ autostart: on })} />
               </Show>
+            </Group>
+            <Group>
+              <Opt id="set-report" label={t('report.action')} hint={t('report.hint')}><ReportProblem /></Opt>
             </Group>
             <Group title={t('set.updates')}>
               <Opt id="set-update-check" label={t('set.updateCheck')} hint={t(lookup() ? LOOKUP[lookup()!] : 'set.updateCheckHint')}>
