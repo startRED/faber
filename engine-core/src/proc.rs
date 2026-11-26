@@ -667,6 +667,7 @@ impl TreeState {
             .and_then(|job| faber_winproc::job_active_processes(job.handle()))?
             == 0;
         #[cfg(unix)]
+        // A descendant that called setsid or changed process groups is outside this check.
         let empty = faber_winproc::process_group_empty(self.pgid)?;
         if empty {
             self.confirmed.store(true, Ordering::Release);
@@ -738,8 +739,13 @@ impl Containment {
     }
 
     /// Request termination while retaining the owned job/group for subsequent confirmation.
-    fn end(&self) {
+    pub fn end(&self) {
         self.tree.end();
+    }
+
+    /// Check a terminated container without waiting on its async monitor.
+    pub fn confirm_stopped(&self) -> io::Result<bool> {
+        self.tree.empty()
     }
 
     /// Root exit and closed pipes are insufficient: the owned container must have no remaining member.

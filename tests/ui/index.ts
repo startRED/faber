@@ -90,6 +90,7 @@ import './selfchange.check.ts';
 import './quiet.check.ts';
 import './agents.check.ts';
 import './site.check.ts';
+import './run-app.check.ts';
 import './site-tabs.check.ts';
 import './browse-bench.check.ts';
 import './skills.check.ts';

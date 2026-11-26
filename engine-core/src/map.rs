@@ -442,9 +442,16 @@ fn text_keys(text: &str) -> Vec<(String, usize)> {
     out
 }
 
+pub fn package_scripts(text: &str) -> Option<serde_json::Map<String, Value>> {
+    let mut json: Value = serde_json::from_str(text).ok()?;
+    match json.get_mut("scripts")?.take() {
+        Value::Object(scripts) => Some(scripts),
+        _ => None,
+    }
+}
+
 fn package(text: &str, push: &mut impl FnMut(Kind, String, usize)) {
-    let Ok(json) = serde_json::from_str::<Value>(text) else { return };
-    let Some(scripts) = json["scripts"].as_object() else { return };
+    let Some(scripts) = package_scripts(text) else { return };
     // Each script's line is looked for inside the `scripts` object, so a key of the same name above it is not taken.
     let start = text.lines().position(|l| l.contains("\"scripts\"")).unwrap_or(0);
     for name in scripts.keys() {

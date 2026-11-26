@@ -263,6 +263,7 @@ impl Engine {
                     || c.rewind_blocked(&id)
                     // A closed session's final rewind scan still reads this folder.
                     || c.rewind_sealing_in(Path::new(&record.path))
+                    || c.app_active(&id, Path::new(&record.path))
                     || c.asking.values().any(|a| a.conversation() == id)
                     || c.verifier.as_ref().is_some_and(|verifier| verifier.active_in(Path::new(&record.path)));
                 Some((record, busy, mark))

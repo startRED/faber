@@ -1,5 +1,5 @@
 import { type Accessor, createEffect, createResource, createSignal, For, Index, on, onCleanup, onMount, Show } from 'solid-js';
-import { api, errorText, type Message, type SiteTab, type SiteTabs, type SiteTabStep, type ToolUse } from './api.ts';
+import { api, errorText, type Message, type RunAppView, type SiteTab, type SiteTabs, type SiteTabStep, type ToolUse } from './api.ts';
 import { appliedLook } from './appearance.ts';
 import { Cookies, cookieProfiles } from './Cookies.tsx';
 import { SiteExtensions } from './SiteExtensions.tsx';
@@ -431,7 +431,7 @@ function paintedCover(box: HTMLElement, departing: boolean): boolean {
 /** The page in the right column: Faber's browser sits over this box, measured here, and leaves when the box goes. Every
  * move of the box moves it, and it is placed again whenever the window changes size. The address field above it takes
  * the person anywhere on the web; with no page yet, only the field shows. */
-export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: boolean; onWide?: () => void; extensionsDeveloperMode?: boolean }) {
+export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: boolean; onWide?: () => void; extensionsDeveloperMode?: boolean; runApp?: boolean }) {
   let box: HTMLDivElement | undefined;
   // The shell never places a box again once it let the page go, so coming back from a step of the log takes a new one.
   let id = boxId();
@@ -955,6 +955,16 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
           </button>
         </div>
       </div>
+      <Show when={props.runApp && conversation()} keyed>
+        {(id) => <RunApp
+          id={id}
+          open={(url) => void go(url)}
+          onStart={() => {
+            const before = navigation;
+            return (url: string) => { if (before === navigation) void go(url); };
+          }}
+        />}
+      </Show>
       <Show when={!blank() && !picked() && sizes()?.now}>
         <div class="site-preview">
           <span>{t('site.preview', { size: sizeWords(sizes()?.now) })}</span>
@@ -1029,5 +1039,89 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
         </Show>
       </div>
     </>
+  );
+}
+
+function RunApp(props: { id: string; open: (url: string) => void; onStart: () => (url: string) => void }) {
+  const [view, setView] = createSignal<RunAppView>({ phase: 'idle' });
+  const [pending, setPending] = createSignal(false);
+  const phase = () => view().phase;
+  const confirmation = () => { const now = view(); return now.phase === 'confirm' ? now : undefined; };
+  const running = () => { const now = view(); return now.phase === 'running' ? now : undefined; };
+  const notice = () => { const now = view(); return now.phase === 'notice' ? now : undefined; };
+  const output = () => { const now = view(); return 'output' in now ? now.output : undefined; };
+  const watching = () => ['starting', 'running', 'stopping'].includes(phase());
+  let timer: number | undefined;
+  let revision = 0;
+  let openWhenReady: ((url: string) => void) | undefined;
+
+  const schedule = () => {
+    if (watching()) timer = window.setTimeout(() => void read(), phase() === 'running' ? 1_000 : 400);
+  };
+  const apply = (next: RunAppView) => {
+    setView(next);
+    if (next.phase === 'running') openWhenReady?.(next.url);
+    if (next.phase !== 'starting') openWhenReady = undefined;
+    schedule();
+  };
+  const read = async () => {
+    const request = revision;
+    try {
+      const next = await api.runAppStatus(props.id);
+      if (request === revision) apply(next);
+    } catch {
+      if (request === revision) schedule();
+    }
+  };
+  const act = async (action: () => Promise<RunAppView>, autoOpen = true) => {
+    const request = ++revision;
+    clearTimeout(timer);
+    setPending(true);
+    openWhenReady = autoOpen ? props.onStart() : undefined;
+    try {
+      const next = await action();
+      if (request === revision) apply(next);
+    } catch (err) {
+      if (request === revision) apply({ phase: 'notice', reason: errorText(err), output: '' });
+    } finally {
+      if (request === revision) setPending(false);
+    }
+  };
+  onMount(() => void read());
+  onCleanup(() => { revision++; clearTimeout(timer); });
+
+  return (
+    <div class="site-run-app">
+      <div class="site-preview">
+        <Show when={!watching() && phase() !== 'stopFailed' && phase() !== 'confirm'}>
+          <button class="btn site-run-start" disabled={pending()} onClick={() => void act(() => api.runAppStart(props.id))}>{t('site.runApp')}</button>
+        </Show>
+        <Show when={running()}>{(app) =>
+          <button class="btn" onClick={() => props.open(app().url)}>{t('site.runApp.open')}</button>
+        }</Show>
+        <Show when={watching() || phase() === 'stopFailed'}>
+          <button class="btn site-run-stop" disabled={pending() || phase() === 'stopping'} onClick={() => void act(() => api.runAppStop(props.id), false)}>{t('commands.stop')}</button>
+        </Show>
+        <Show when={phase() === 'starting' || phase() === 'stopping' || phase() === 'stopFailed'}>
+          <span role="status">{phase() === 'starting' ? t('site.runApp.starting') : phase() === 'stopping' ? t('commands.stopping') : t('reason.runApp.stopFailed')}</span>
+        </Show>
+        <Show when={notice()}>{(info) => <span class="site-run-notice" role="status">{fromEngine(info().reason)}</span>}</Show>
+      </div>
+      <Show when={confirmation()}>{(question) =>
+        <div class="site-preview site-run-confirm" role="group" aria-label={t('site.runApp.confirm')} tabIndex={-1}
+          ref={(el) => queueMicrotask(() => el.isConnected && el.focus())}>
+          <span>{t('site.runApp.confirm')}</span>
+          <pre>{[question().command, ...question().scripts.map(([name, body]) => `${name}: ${body}`)].join('\n')}</pre>
+          <button class="btn" disabled={pending()} onClick={() => void act(() => api.runAppConfirm(props.id, question().seen))}>{t('site.runApp.allow')}</button>
+          <button class="btn" disabled={pending()} onClick={() => setView({ phase: 'idle' })}>{t('catalog.cancel')}</button>
+        </div>
+      }</Show>
+      <Show when={output()}>{(recent) =>
+        <details class="site-preview site-run-output">
+          <summary>{t('site.runApp.output')}</summary>
+          <pre>{recent()}</pre>
+        </details>
+      }</Show>
+    </div>
   );
 }
