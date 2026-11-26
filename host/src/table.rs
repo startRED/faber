@@ -922,10 +922,6 @@ table! {
         terminal::open(&cmd).map_err(|_| "error.terminal.open")?;
         Ok(true)
     }
-    /// Prepare the exact fields the person can review before opening the bug form.
-    Read Screen fn problem_report(h, language: String, crash: bool) -> crate::report::Report {
-        Ok(crate::report::prepare(&h.data_dir, &h.shell.version(), h.shell.report_shell(), &language, crash))
-    }
     /// Links in answers open in the user's browser. Video cards and the reply link's pane action use a separate command.
     Write Ask fn open_link(h, url: String) -> () {
         if !(url.starts_with("https://") || url.starts_with("http://")) {

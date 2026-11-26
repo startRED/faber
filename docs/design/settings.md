@@ -4,8 +4,6 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
 
 ## Settings
 
-- General offers Report a problem. Its dialog shows the exact version and environment fields before Open launches the bug form in the external browser; Cancel opens nothing. A recovery notice also offers it with only the newest crash kind, source file and line. No message or path is included and Faber sends nothing.
-
 - General offers the shared marked model menu for the default in new Chat and Projects conversations. The Antigravity
   group requires a connected account. If a saved model is unavailable, the draft uses Auto until the model comes back.
   At phone widths the Settings navigation wraps above the screen so controls retain the full width.

@@ -1627,34 +1627,3 @@ check('settings: the hooks fold reads and shows previews only while open', async
     equal(reads, 2);
   } finally { api.hookList = previous; view.stop(); }
 });
-
-check('report a problem: Settings previews the exact fields and Cancel opens nothing', async () => {
-  const oldReport = api.problemReport;
-  const oldOpen = api.openLink;
-  let opened = 0;
-  api.problemReport = async (language, crash) => {
-    equal(language, 'en');
-    equal(crash, false);
-    return { version: '1.2.3', environment: 'Build commit: abc123\nOperating system: windows 10', url: 'https://github.com/example' };
-  };
-  api.openLink = async () => { opened++; };
-  const view = mount(() => createComponent(Settings, {
-    look: look(), saved: {}, vendors: [], quotas: {}, now: Date.now(), onSave: async () => true,
-    onClose: () => {}, onOpenSetup: () => {},
-  }));
-  try {
-    const button = view.host.querySelector<HTMLButtonElement>('[data-opt="set-report"] button');
-    ok(button, 'the action is in General');
-    button.click();
-    await frames();
-    const dialog = document.querySelector<HTMLDialogElement>('dialog[open][aria-labelledby="report-title"]');
-    ok(dialog, 'the preview opens');
-    ok(dialog.textContent?.includes('1.2.3') && dialog.textContent.includes('Build commit: abc123'), 'the exact values are visible');
-    const cancel = [...dialog.querySelectorAll('button')].find((b) => b.textContent === 'Cancel');
-    ok(cancel, 'Cancel is available');
-    cancel.click();
-    await frames();
-    equal(opened, 0, 'Cancel never opens the browser');
-    equal(document.querySelector('dialog[open][aria-labelledby="report-title"]'), null);
-  } finally { view.stop(); api.problemReport = oldReport; api.openLink = oldOpen; }
-});

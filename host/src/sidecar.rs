@@ -333,10 +333,6 @@ impl Shell for SidecarShell {
         self.0.version.clone()
     }
 
-    fn report_shell(&self) -> &'static str {
-        "Electron"
-    }
-
     fn update_status(&self) -> Value {
         match self.0.updater.get() {
             Some(updater) => serde_json::to_value(updater.status()).unwrap_or_default(),

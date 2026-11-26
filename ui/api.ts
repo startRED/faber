@@ -730,7 +730,7 @@ export interface VendorUsage {
 }
 export interface AppState {
   gitReason?: 'reason.git_missing';
-  uncleanExit?: { at: number; started?: number; panic: boolean; panicOnly?: boolean };
+  uncleanExit?: { at: number; started?: number; panic: boolean };
   conversations: Summary[];
   projects: Project[];
   // Absent in an older engine's state: no groups.
@@ -1195,7 +1195,6 @@ export const api = {
   addProject: () => invoke<Project | null>('add_project'),
   repointProject: (id: string, path?: string) => invoke<Project | null>('repoint_project', { id, path: path ?? null }),
   dismissUncleanExit: () => invoke<void>('dismiss_unclean_exit'),
-  problemReport: (language: string, crash: boolean) => invoke<{ version: string; environment: string; url: string }>('problem_report', { language, crash }),
   openLogFolder: () => invoke<string>('open_log_folder'),
   chatFolder: (id: string | undefined, scratch = false, path?: string) =>
     invoke<Conversation | null>('chat_folder', { id: id ?? null, scratch, path: path ?? null }),

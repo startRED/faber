@@ -24,8 +24,6 @@ pub struct UncleanExit {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started: Option<u64>,
     pub panic: bool,
-    #[serde(default)]
-    pub panic_only: bool,
 }
 
 static UNCLEAN: OnceLock<Mutex<HashMap<PathBuf, UncleanExit>>> = OnceLock::new();
@@ -44,7 +42,6 @@ pub const CRASHES: &str = "crashes.jsonl";
 const CRASHES_MAX: u64 = 100_000;
 /// Exists while a run of Faber is going. A clean exit removes it; finding it at start means the last run did not end by itself.
 const MARKER: &str = "running.marker";
-const PANIC_NOTICE: &str = "panic.notice";
 const MESSAGE_MAX: usize = 200;
 /// Where two paths that differ only in the case of a letter are the same path.
 const CASE_BLIND: bool = cfg!(any(windows, target_os = "macos"));
@@ -105,11 +102,8 @@ fn home() -> String {
 /// Writes a panic's line. When the panic ends the process (`panic = "abort"`, every release build) the marker goes too, once
 /// the line is on the disk: the next start would count the same crash a second time. A panic a thread survives leaves it.
 fn record_panic(dir: &Path, line: &Value, ends_the_run: bool) {
-    if append_capped_line_without_hanging(&dir.join(CRASHES), &line.to_string(), CRASHES_MAX) {
-        let _ = std::fs::write(dir.join(PANIC_NOTICE), line["at"].as_u64().unwrap_or(0).to_string());
-        if ends_the_run {
-            end_run(dir);
-        }
+    if append_capped_line_without_hanging(&dir.join(CRASHES), &line.to_string(), CRASHES_MAX) && ends_the_run {
+        end_run(dir);
     }
 }
 
@@ -250,7 +244,7 @@ fn record_unclean_marker(dir: &Path, last: &Value) -> UncleanExit {
     let of = |key: &str| last[key].as_str().unwrap_or("unknown").chars().take(64).collect::<String>();
     let line = json!({ "at": at, "kind": "unclean-exit", "version": of("version"), "commit": of("commit"), "started": started });
     append_capped_line(&dir.join(CRASHES), &line.to_string(), CRASHES_MAX);
-    UncleanExit { at, started, panic, panic_only: false }
+    UncleanExit { at, started, panic }
 }
 
 /// Starts a run: when the last one left its marker, one `unclean-exit` line says so (with that run's version and build, which
@@ -258,16 +252,10 @@ fn record_unclean_marker(dir: &Path, last: &Value) -> UncleanExit {
 pub fn start_run(dir: &Path, version: &str, commit: &str) -> bool {
     let marker = dir.join(MARKER);
     let last = std::fs::read_to_string(&marker).ok().map(|text| serde_json::from_str::<Value>(&text).unwrap_or(Value::Null));
-    let notice = std::fs::read_to_string(dir.join(PANIC_NOTICE)).ok().and_then(|s| s.parse::<u64>().ok());
-    if notice.is_some() {
-        let _ = std::fs::remove_file(dir.join(PANIC_NOTICE));
-    }
     let mut map = unclean_map().lock().unwrap_or_else(|e| e.into_inner());
     if let Some(last) = &last {
         let unclean = record_unclean_marker(dir, last);
         map.insert(dir.to_path_buf(), unclean);
-    } else if let Some(at) = notice {
-        map.insert(dir.to_path_buf(), UncleanExit { at, started: None, panic: true, panic_only: true });
     } else {
         map.remove(dir);
     }
@@ -490,22 +478,6 @@ mod tests {
         let second = take_unclean(dir.path()).expect("unclean exit with panic reported");
         assert!(second.panic);
         assert_eq!(take_unclean(dir.path()), None);
-    }
-
-    #[test]
-    fn a_recorded_panic_is_offered_once_after_a_clean_exit() {
-        let dir = tempfile::tempdir().unwrap();
-        start_run(dir.path(), "1.0.0", "abc");
-        let line = panic_line(now_ms(), "1.0.0", "abc", "worker", "private", "src/lib.rs:7:1", "");
-        record_panic(dir.path(), &line, false);
-        end_run(dir.path());
-        assert!(!start_run(dir.path(), "1.0.0", "abc"));
-        let notice = take_unclean(dir.path()).expect("a panic gets a notice even after a clean exit");
-        assert!(notice.panic && notice.panic_only);
-        assert!(take_unclean(dir.path()).is_none());
-        end_run(dir.path());
-        start_run(dir.path(), "1.0.0", "abc");
-        assert!(take_unclean(dir.path()).is_none());
     }
 
     fn file_with(lines: &[Value]) -> (tempfile::TempDir, PathBuf) {
