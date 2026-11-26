@@ -15,3 +15,8 @@ Build:
 Leave out: sharing working files.
 
 Done: before and after disk per copy measured on a fixture project; tests that two copies building at once stay correct. Stored data and processes: review by the other vendor (R146).
+
+State (2026-11-26): blocked before any code; the owner chooses the direction.
+- Sharing `CARGO_TARGET_DIR` between copies is unsafe. Two copies of one crate in different folders built into one target dir, and the second build silently reused the first copy's binary: cargo judges freshness by modification time, and its hashes ignore the folder. `docs/dev/build-folders.md` avoids this for Faber's own copies by clearing fingerprints around a cargo call Faber wraps. Faber does not wrap the cargo call of a person's project, so it has no safe point to do that.
+- A per-project `npm_config_cache` saves nothing: npm's cache is already one global folder, and `node_modules` must stay per copy.
+- Options: seed each copy's own target from a base build (hardlinks are unsafe if cargo writes in place; NTFS has no reflinks); only cap and clean what exists; or wait for cargo's checksum freshness to stabilise.
