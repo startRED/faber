@@ -170,14 +170,14 @@ existing checks. Completed receipts add no per-session hashing or writes. No bac
 
 ## Agent requests
 
-In Full access (the asking conversation's live mode) an agent installs a checked `tools.json` item with no card
-(R584); the digest still holds, `self-changes.jsonl` logs `conv` and `full_access`; all else asks (R33).
+Site, game, video and voice searches lead with kit items, install status and purpose, then regular matches.
 
-Agent removals use the existing self-change card with separate removal consent. Its effect line says Undo remains in
-Catalog until restart and current conversation tools stay available.
+In the asking conversation's live Full access mode, checked installs skip the card (R584). Digests still apply and
+`self-changes.jsonl` logs `conv` and `full_access`. Other installs ask (R33).
 
-Agent-requested update and repair use that same card rather than another Catalog flow.
-Each action has its own grant and shows the original and selected curated pins. The card states that local edits and
+Removal has separate consent. Its card says Catalog Undo lasts until restart and current tools stay available.
+
+Update and repair use that card with separate grants and show both curated pins. The card states that local edits and
 an earlier backup are replaced; the current files become the one retained backup outside all launch roots. It keeps
 the tool's on/off state, and running conversations keep their leased kits. An incomplete journal is recovered before
 new catalog preparation, while unknown or changed recovery files remain preserved and block new delivery.

@@ -40,10 +40,7 @@ pub enum PartKind {
 }
 
 pub fn catalog() -> &'static [Definition] {
-    static PLUGINS: OnceLock<Vec<Definition>> = OnceLock::new();
-    PLUGINS.get_or_init(|| {
-        serde_json::from_str::<super::CatalogFile>(include_str!("../tools.json")).map(|file| file.plugins).unwrap_or_default()
-    })
+    &super::loaded_catalog().plugins
 }
 
 fn relative(path: &str) -> bool {

@@ -108,9 +108,20 @@ impl Item {
     }
 }
 
+/// A goal and the catalog items that help with it, in recommended order.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Kit {
+    pub id: String,
+    #[serde(rename = "for")]
+    pub purpose: String,
+    pub items: Vec<String>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CatalogFile {
+    kits: Vec<Kit>,
     skills: Vec<Item>,
     #[serde(default)]
     servers: Vec<Item>,
@@ -120,22 +131,45 @@ struct CatalogFile {
     runtimes: Vec<Item>,
 }
 
-/// The catalog that ships with this version of Faber: its skills, then its servers.
+#[derive(Default)]
+struct Catalog {
+    items: Vec<Item>,
+    kits: Vec<Kit>,
+    plugins: Vec<plugins::Definition>,
+}
+
+fn parse_catalog(source: &str) -> Result<Catalog, String> {
+    let CatalogFile { skills, servers, plugins, runtimes, kits } = serde_json::from_str(source).map_err(|e| e.to_string())?;
+    let items: Vec<_> = skills
+        .into_iter()
+        .filter(|i| i.server.is_none())
+        .chain(servers.into_iter().filter(|i| i.server.is_some()))
+        .chain(plugins.iter().map(|p| p.item.clone()))
+        .chain(runtimes)
+        .collect();
+    for kit in &kits {
+        for id in &kit.items {
+            if !items.iter().any(|item| item.id == *id) {
+                return Err(format!("Unknown catalog item {id} in kit {}", kit.id));
+            }
+        }
+    }
+    Ok(Catalog { items, kits, plugins })
+}
+
+fn loaded_catalog() -> &'static Catalog {
+    static CATALOG: OnceLock<Catalog> = OnceLock::new();
+    CATALOG.get_or_init(|| parse_catalog(include_str!("tools.json")).unwrap_or_default())
+}
+
+/// The tools that ship with this version of Faber.
 pub fn catalog() -> &'static [Item] {
-    static CATALOG: OnceLock<Vec<Item>> = OnceLock::new();
-    CATALOG.get_or_init(|| {
-        let file = serde_json::from_str::<CatalogFile>(include_str!("tools.json"));
-        file.map(|c| {
-            c.skills
-                .into_iter()
-                .filter(|i| i.server.is_none())
-                .chain(c.servers.into_iter().filter(|i| i.server.is_some()))
-                .chain(c.plugins.into_iter().map(|p| p.item))
-                .chain(c.runtimes)
-                .collect()
-        })
-        .unwrap_or_default()
-    })
+    &loaded_catalog().items
+}
+
+/// The goal kits that ship with this version of Faber.
+pub fn kits() -> &'static [Kit] {
+    &loaded_catalog().kits
 }
 
 pub fn find(id: &str) -> Option<&'static Item> {
@@ -2077,11 +2111,19 @@ mod tests {
     }
 
     #[test]
+    fn a_kit_with_an_unknown_item_rejects_the_catalog() {
+        let mut file: serde_json::Value = serde_json::from_str(include_str!("tools.json")).unwrap();
+        file["kits"][0]["items"][0] = serde_json::json!("unknown-kit-item");
+        assert_eq!(parse_catalog(&file.to_string()).err().as_deref(), Some("Unknown catalog item unknown-kit-item in kit site"));
+    }
+
+    #[test]
     fn the_catalog_that_ships_is_well_formed() {
-        let file = serde_json::from_str::<CatalogFile>(include_str!("tools.json")).expect("the complete strict catalog parses");
-        assert_eq!(file.runtimes.len(), 11, "all required audio tools are listed");
-        for runtime in &file.runtimes {
-            runtime.runtime.as_ref().unwrap().validate().unwrap();
+        let file = parse_catalog(include_str!("tools.json")).expect("the complete strict catalog parses");
+        let runtimes: Vec<_> = file.items.iter().filter_map(|item| item.runtime.as_ref()).collect();
+        assert_eq!(runtimes.len(), 11, "all required audio tools are listed");
+        for runtime in runtimes {
+            runtime.validate().unwrap();
         }
         let items = catalog();
         assert!(!items.is_empty(), "tools.json parses and lists skills");

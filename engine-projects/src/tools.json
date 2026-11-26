@@ -1,4 +1,10 @@
 {
+  "kits": [
+    {"id":"site","for":"Design, write and test a website or landing page.","items":["design-taste-frontend","playwright-mcp","copywriting","chrome-devtools"]},
+    {"id":"game","for":"Prototype a game and build it in your chosen engine.","items":["game-prototype-fast","game-feel","godot-gdscript","unity-csharp-scripting","roblox-dev-skill","phaser-core"]},
+    {"id":"video","for":"Create an illustrated demo or motion piece with animation and narration.","items":["stageshow","animate","gsap-core","chatterbox-multilingual","faster-whisper"]},
+    {"id":"voice","for":"Generate narration, transcribe speech and check voice quality.","items":["chatterbox-multilingual","faster-whisper","speechmos","utmosv2"]}
+  ],
   "skills": [
     {"id":"stageshow","job":"design","license":"MIT","repo":"benjitaylor/skills","commit":"299140fafd08df55a9c234e610c3f64af3f45531","path":"stageshow","digest":"3e3ed3b317a94cab6f7027c199f2a899a562d8abe89e66e5bbad13b007b97444","tier":"more"},
     {"id":"systematic-debugging","job":"debugging","license":"MIT","repo":"obra/superpowers","commit":"bb92a77741419a4ab5f06e711a283343f1ada0c3","path":"skills/systematic-debugging","digest":"ceb6a7a4cb02402360846cd466df67a8c6eaa3c5b1e97d1b419b5ba2ceeb734c","tier":"recommended"},

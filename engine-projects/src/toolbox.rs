@@ -3,6 +3,7 @@
 //! Catalog changes have action-specific consent. No tool exposes account identifiers or sign-in data.
 
 use crate::model::Vendor;
+use crate::tools::kits::{CONTEXT_BUDGET, DISCOVERY_BUDGET};
 use crate::tools::{Item, Tier};
 use crate::usage::VendorUsage;
 use serde_json::{Value, json};
@@ -31,7 +32,7 @@ pub const CLAUDE_CATALOG: &str = "mcp__faber__catalog";
 pub const CLAUDE_MEMORY_SEARCH: &str = "mcp__faber__memory_search";
 pub const CLAUDE_OFFER_BIGGER: &str = "mcp__faber__offer_bigger";
 
-/// Results one search lists; the rest are counted.
+/// Lines one search lists before the remaining results count.
 const SHOWN: usize = 20;
 /// Shorter words match everything ("a", "to") and rank nothing, unless they are a whole id or job word ("ui", "ai", "3d").
 const SHORTEST_WORD: usize = 3;
@@ -363,13 +364,31 @@ fn kind_of(item: &Item, plugin: bool) -> &'static str {
     }
 }
 
-/// The entries that match the words of `input["query"]`, best first: a tool matches by how many of the words its id, name,
-/// purpose, job or source holds; with no words the recommended ones are listed. At most 20 are shown.
+/// A matching goal kit comes first, then the entries ranked by how many query words they match.
+/// With no words the recommended entries are listed.
 pub fn catalog(entries: &[Entry], input: &Value) -> (bool, String) {
     let words = english();
     let say = |key: String| words.get(key.as_str()).cloned();
     let query = input["query"].as_str().unwrap_or_default().to_lowercase();
     let wanted: Vec<&str> = query.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    let goal = wanted.iter().find_map(|word| match *word {
+        "site" | "website" | "web" | "page" | "landing" => Some("site"),
+        "game" | "roblox" | "unity" | "godot" => Some("game"),
+        "video" | "film" | "animation" | "reel" => Some("video"),
+        "voice" | "speech" | "tts" | "audio" | "narration" => Some("voice"),
+        _ => None,
+    });
+    let mut out = Vec::new();
+    if let Some(kit) = goal.and_then(|id| crate::tools::kits().iter().find(|kit| kit.id == id)) {
+        out.push(kit.purpose.clone());
+        for id in &kit.items {
+            if let Some(entry) = entries.iter().find(|e| e.item.id == *id) {
+                let state = if entry.installed { "installed" } else { "not installed" };
+                let purpose = say(format!("tools.{id}")).unwrap_or_else(|| entry.item.job.clone());
+                out.push(format!("{id} ({state}): {}", purpose.lines().next().unwrap_or(&entry.item.job)));
+            }
+        }
+    }
     let mut found: Vec<(usize, &Entry, String, String)> = entries
         .iter()
         .filter_map(|e| {
@@ -385,27 +404,34 @@ pub fn catalog(entries: &[Entry], input: &Value) -> (bool, String) {
         })
         .collect();
     if found.is_empty() {
-        return (
-            true,
-            "Nothing in the catalog matches. Try other words for the job, or call it with no words for the recommended tools.".into(),
-        );
+        out.push("Nothing in the catalog matches. Try other words for the job, or call it with no words for the recommended tools.".into());
+        return (true, out.join("\n"));
     }
     found.sort_by_key(|(hits, e, ..)| (std::cmp::Reverse(*hits), e.item.tier != Tier::Recommended));
-    let mut out: Vec<String> = found
-        .iter()
-        .take(SHOWN)
-        .map(|(_, e, name, what)| {
-            let kind = kind_of(e.item, e.plugin);
-            let state = match (e.installed, e.on) {
-                (false, _) => "not installed",
-                (true, true) => "installed, on",
-                (true, false) => "installed, off",
-            };
-            format!("{} — {name} ({kind}): {what}. Source: github.com/{}. Licence: {}. {state}.", e.item.id, e.item.repo, e.item.license)
-        })
-        .collect();
-    if found.len() > SHOWN {
-        out.push(format!("({} more: add words to narrow it)", found.len() - SHOWN));
+    let kit_lines = out.len();
+    let more = |count| format!("({count} more: add words to narrow it)");
+    let mut bytes_left = if kit_lines == 0 {
+        usize::MAX
+    } else {
+        let reserved = out.iter().map(|line| line.len() + 1).sum::<usize>() + more(found.len()).len();
+        CONTEXT_BUDGET.min(DISCOVERY_BUDGET).saturating_sub(reserved)
+    };
+    for (_, e, name, what) in found.iter().take(SHOWN.saturating_sub(kit_lines)) {
+        let kind = kind_of(e.item, e.plugin);
+        let state = match (e.installed, e.on) {
+            (false, _) => "not installed",
+            (true, true) => "installed, on",
+            (true, false) => "installed, off",
+        };
+        let line =
+            format!("{} — {name} ({kind}): {what}. Source: github.com/{}. Licence: {}. {state}.", e.item.id, e.item.repo, e.item.license);
+        let Some(remaining) = bytes_left.checked_sub(line.len() + 1) else { break };
+        bytes_left = remaining;
+        out.push(line);
+    }
+    let remaining = found.len() - (out.len() - kit_lines);
+    if remaining > 0 {
+        out.push(more(remaining));
     }
     (true, out.join("\n"))
 }
