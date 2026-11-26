@@ -888,6 +888,10 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .site-bar { display: flex; align-items: center; gap: 2px; padding: 0 12px 8px; container-type: inline-size; }
 .site-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 0 12px 8px; color: var(--ink-2); font-size: var(--fs-xs); }
 .site-preview .site-fit { font-size: inherit; }
+.site-run-app:empty, .site-run-app > .site-preview:empty { display: none; }
+.site-run-app pre { flex-basis: 100%; min-width: 0; max-height: 7rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.site-run-confirm > span { flex-basis: 100%; }
+.site-run-output { display: block; }
 .site-bar .iconbtn:disabled { opacity: 0.4; pointer-events: none; }
 /* A narrow pane drops Forward first: Back and the field matter more. */
 @container (max-width: 300px) { .site-bar .site-forward { display: none; } }

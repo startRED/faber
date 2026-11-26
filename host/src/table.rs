@@ -721,7 +721,8 @@ table! {
         Ok(())
     }
     Write Ask fn remove_project(h, id: String) -> () {
-        h.engine.remove_project(&id)
+        let engine = h.engine.clone();
+        off("error.store.write", move || engine.remove_project(&id)).await?
     }
 
     /// The look of an appearance that is not saved. Failing pairs come back inside the look.
@@ -1055,6 +1056,32 @@ table! {
         let after = checks::confirm(&before, &commands, &setup, &declared).map_err(str::to_string)?;
         h.engine.update_project(&before, &after)?;
         Ok(checks::view(&after))
+    }
+
+    /// Find the app command in the conversation's project copy and start it if already confirmed.
+    Write Person fn run_app_start(h, id: String) -> faber_engine::engine::run_app::View {
+        project_commands::id(&id)?;
+        let engine = h.engine.clone();
+        off("reason.runApp.launch", move || engine.run_app_start(&id, None)).await?
+    }
+    /// Confirm the displayed app command for the project and start it in the conversation's copy.
+    Write Person fn run_app_confirm(h, id: String, seen: String) -> faber_engine::engine::run_app::View {
+        project_commands::id(&id)?;
+        if seen.len() != 64 || !seen.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err("error.host.badArgs".into());
+        }
+        let engine = h.engine.clone();
+        off("reason.runApp.launch", move || engine.run_app_start(&id, Some(&seen))).await?
+    }
+    /// Read the conversation's app status, local address or recent output if it stopped.
+    Read Person fn run_app_status(h, id: String) -> faber_engine::engine::run_app::View {
+        project_commands::id(&id)?;
+        Ok(h.engine.run_app_status(&id))
+    }
+    /// Stop the app owned by this conversation.
+    Write Person fn run_app_stop(h, id: String) -> faber_engine::engine::run_app::View {
+        project_commands::id(&id)?;
+        Ok(h.engine.run_app_stop(&id))
     }
 
     /// The screen's view of the update: its phase and the download's progress. Changes arrive as `faber:update`.
