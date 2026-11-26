@@ -16,7 +16,7 @@ delivery and recovery.
 
 ## Browsing
 
-Search is the main action; the quiet Select all shown button follows the results, leaving the search row to finding tools. Search is focused with the shared Ctrl+F (Command+F on macOS) from `ui/keys.ts`, also named in the
+Search comes first, with three shelves ([search and shelves](catalog-search.md)); Select all shown follows the results. Search is focused with the shared Ctrl+F (Command+F on macOS) from `ui/keys.ts`, also named in the
 shortcut sheet. All, Skills, Tool servers and Installed are native pressed buttons; Plugins joins them only when the
 catalog lists a plugin, so while it ships none no pill leads to an empty list. The catalog has 117 skills, four
 servers and zero plugins; the twenty rejected candidates have no placeholder cards. Good start offers debugging, simple code and interface design, plus general everyday skills.

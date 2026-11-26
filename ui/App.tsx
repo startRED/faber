@@ -2462,7 +2462,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               <Show when={catalogShown()}>
                 <div class="layer" classList={{ leaving: !catalogOpen() }} inert={!catalogOpen()}>
                   <Show when={narrow()}><div class="topbar"><button class="iconbtn menu" ref={(el) => (layerMenu = el)} aria-label={t('side.show')} aria-expanded={sideOverlay()} onClick={openSide}><Icon name="menu" /></button></div></Show>
-                  <Catalog projects={state().projects} projectId={projectId()} vendors={state().vendors} />
+                  <Catalog projects={state().projects} projectId={projectId()} vendors={state().vendors} conversations={state().conversations} />
                 </div>
               </Show>
             </main>

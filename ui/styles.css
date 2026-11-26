@@ -2043,8 +2043,25 @@ html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
 .catalog h2 { display: flex; align-items: center; gap: 8px; font-size: var(--fs-ui); font-weight: 580; margin: 28px 0 12px; }
 .catalog h2 > svg { color: var(--ink-3); }
 .catalog h3 { font-size: var(--fs-ui); margin: 20px 0 12px; }
-.catalog-top { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; justify-content: space-between; margin-bottom: 24px; }
-.catalog-search { flex: 1 1 280px; max-width: 560px; display: flex; align-items: center; gap: 10px; }
+.catalog-top { display: grid; gap: 20px; margin-bottom: 24px; }
+/* Search first: the question, then one field and the public search beside it. */
+.catalog-ask { display: grid; gap: 10px; max-width: 760px; }
+.catalog-ask-label { font-size: var(--fs-lead); font-weight: 580; color: var(--ink); }
+.catalog-ask-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.catalog-search { flex: 1 1 280px; display: flex; align-items: center; gap: 10px; }
+.catalog-shelf + .catalog-shelf, .catalog-pages + .catalog-shelf { margin-top: 36px; }
+.catalog-shelf > h2 { margin: 0 0 4px; font-size: var(--fs-lead); }
+.catalog-shelf > .hint { margin: 0 0 14px; }
+.catalog-group h3 { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.catalog-group h3 > svg { color: var(--ink-3); }
+.catalog-seal { display: inline-flex; font-size: var(--fs-xs); color: var(--ink-2); border: 1px solid var(--line-2); border-radius: 999px; padding: 1px 8px; }
+.catalog-seal[data-seal='unchecked'] { border-style: dashed; color: var(--ink-3); }
+.catalog-hero .catalog-seal { margin-inline-start: 4px; }
+.catalog-by { color: var(--ink-3); font-size: var(--fs-sm); overflow-wrap: anywhere; margin: 0; }
+.catalog-open-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 14px; }
+.catalog-open { display: flex; flex-direction: column; align-items: start; gap: 8px; padding: 20px; min-width: 0; border: 1px dashed var(--line-3); border-radius: var(--r-md); }
+.catalog-open .catalog-name { user-select: text; }
+.catalog-open-state { color: var(--ink-2); }
 .catalog-search input { width: 100%; min-width: 0; background: transparent; border: 0; color: var(--ink); }
 .catalog-search kbd { white-space: nowrap; color: var(--ink-3); font-size: var(--fs-xs); }
 .catalog-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 24px; }
@@ -2126,7 +2143,7 @@ html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
 .catalog-location { color: var(--ink-3); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 [data-motion='reduced'] :is(.catalog-card, .catalog-pick, .catalog-site), [data-motion='none'] :is(.catalog-card, .catalog-pick, .catalog-site) { transition: none; }
 @media (prefers-reduced-motion: reduce) { .catalog-card, .catalog-pick, .catalog-site { transition: none; } }
-@media (max-width: 800px) { .catalog-content { padding-top: 24px; } .catalog-grid { grid-template-columns: 1fr; } .catalog-top { align-items: stretch; } .catalog-search { max-width: none; } }
+@media (max-width: 800px) { .catalog-content { padding-top: 24px; } .catalog-grid { grid-template-columns: 1fr; } .catalog-search { flex-basis: 100%; } }
 .catalog-empty .peek svg { animation: pulse var(--dur-pulse) steps(3) infinite; }
 html.away-win .catalog-empty .peek svg { animation-play-state: paused !important; }
 /* Technical facts use the existing column and tool rows; text stays still in every motion mode. */

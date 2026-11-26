@@ -2,7 +2,7 @@ import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import catalog from '../../engine-projects/src/tools.json';
-import { api, type AppEvent, type AppState, type ToolInventoryList, type ToolRow, type Vendor } from '../../ui/api.ts';
+import { api, type AppEvent, type AppState, type OpenHit, type ToolInventoryList, type ToolRow, type Vendor } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
 import { Catalog, forgetCatalogView } from '../../ui/Catalog.tsx';
 import { catalogName, LANGUAGES, lang, t, useLanguage } from '../../ui/i18n.ts';
@@ -52,8 +52,9 @@ const sources: ToolInventoryList[] = [{ vendor: 'claude', rows: [
   { name: 'personal-skill', kind: 'skill', source: 'user', location: 'C:/person/.claude/skills/personal-skill' },
   { name: 'team-plugin', kind: 'plugin', source: 'project', location: 'C:/person/.claude/plugins/installed_plugins.json' },
 ], issues: [{ source: 'user', kind: 'plugin', reason: 'unsupported' }] }];
-type Options = { keepView?: boolean; rows?: ToolRow[]; inventory?: ToolInventoryList[]; vendors?: Vendor[]; failList?: boolean; failInventory?: boolean; failInstall?: boolean; failToggle?: boolean; failRemove?: boolean; failRestore?: boolean; failReplace?: boolean };
+type Options = { keepView?: boolean; rows?: ToolRow[]; hits?: OpenHit[]; failSearch?: string; conversations?: { id: string; title: string }[]; inventory?: ToolInventoryList[]; vendors?: Vendor[]; failList?: boolean; failInventory?: boolean; failInstall?: boolean; failToggle?: boolean; failRemove?: boolean; failRestore?: boolean; failReplace?: boolean };
 const cards = (root: Element) => [...root.querySelectorAll<HTMLButtonElement>('[data-catalog-card]')];
+const byId = (root: Element, id: string) => cards(root).find((card) => card.dataset.catalogCard === id)!;
 function button(root: Element, key: Key) {
   const found = [...root.querySelectorAll<HTMLButtonElement>('button')].find((el) => el.textContent?.trim() === t(key));
   ok(found, `button ${key}`); return found;
@@ -70,7 +71,7 @@ async function panel(options: Options = {}) {
   const before = { ...api }, language = lang(), store = structuredClone(options.rows ?? sample());
   const removed = new Map<string, ToolRow>();
   let listener: ((event: AppEvent) => void) | undefined;
-  const calls = { list: 0, inventory: 0, install: [] as string[], remove: [] as string[], enabled: [] as boolean[], links: [] as string[], prepare: [] as string[], replace: [] as unknown[] };
+  const calls = { list: 0, inventory: 0, install: [] as string[], remove: [] as string[], enabled: [] as boolean[], links: [] as string[], prepare: [] as string[], replace: [] as unknown[], search: [] as string[] };
   api.toolsClearRemoved = async () => {};
   api.on = async (receive) => { listener = receive; return () => {}; };
   api.toolsList = async () => { calls.list++; if (options.failList) throw 'error.tools.install'; return structuredClone(store); };
@@ -83,6 +84,7 @@ async function panel(options: Options = {}) {
   api.toolsSetEnabled = async (id, enabled) => { calls.enabled.push(enabled); if (options.failToggle) throw 'error.tools.toggle'; store.find((r) => r.id === id)!.enabled = enabled; };
   api.openLink = async (url) => { calls.links.push(url); };
   api.mcpServers = async () => [];
+  api.toolsSearch = async (query) => { calls.search.push(query); if (options.failSearch) throw options.failSearch; return structuredClone(options.hits ?? []); };
   api.inputSeen = async () => {};
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;left:0;top:0;width:720px;height:600px;display:flex;flex-direction:column';
@@ -90,7 +92,7 @@ async function panel(options: Options = {}) {
   for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
   document.body.append(root);
   if (!options.keepView) forgetCatalogView();
-  const dispose = render(() => createComponent(Catalog, { projects: [project], vendors: options.vendors ?? ['claude'] }), root);
+  const dispose = render(() => createComponent(Catalog, { projects: [project], vendors: options.vendors ?? ['claude'], conversations: options.conversations }), root);
   await tick();
   return { root, calls, store, publish: () => listener?.({ type: 'catalog' }), close: () => { dispose(); root.remove(); Object.assign(api, before); useLanguage(language); } };
 }
@@ -248,6 +250,125 @@ check('catalog pipeline: searches, copies to Projects and returns focus without 
     else Reflect.deleteProperty(navigator, 'clipboard');
     view.close();
   }
+});
+
+const hits: OpenHit[] = [
+  { id: 'acme/tools/fixture-helper', source: 'acme/tools', installs: 40, server: false },
+  { id: 'io.example/fixture-server', source: '', installs: 3, server: true },
+];
+const submit = async (root: Element) => { root.querySelector<HTMLFormElement>('form[role=search]')!.requestSubmit(); await tick(); };
+
+check('catalog: the screen starts with the question, and public directories wait for a submitted search', async () => {
+  const view = await panel({ hits });
+  try {
+    const form = view.root.querySelector<HTMLFormElement>('form[role=search]')!;
+    const input = form.querySelector<HTMLInputElement>('input[type=search]')!;
+    equal(input.labels?.[0]?.textContent, t('catalog.ask'), 'the field is named by the question');
+    const first = [...view.root.querySelectorAll('.catalog-list button, .catalog-list input')][0];
+    equal(first, input, 'the search box is the first control of the screen');
+    for (const shelf of view.root.querySelectorAll('[data-shelf]')) ok(!!(form.compareDocumentPosition(shelf) & Node.DOCUMENT_POSITION_FOLLOWING));
+    const ask = form.querySelector<HTMLButtonElement>('[data-catalog-ask]')!;
+    equal(ask.textContent, t('catalog.searchOpen'));
+    ok(ask.disabled, 'nothing to send before words are typed');
+    search(view.root, 'fixture'); await tick();
+    deepEqual(view.calls.search, [], 'opening and typing never reach the public directories');
+    equal(view.root.querySelector('[data-shelf="open"]'), null);
+    await submit(view.root);
+    deepEqual(view.calls.search, ['fixture'], 'one submitted search sends its words once');
+    deepEqual([...view.root.querySelectorAll<HTMLElement>('[data-shelf]')].map((shelf) => shelf.dataset.shelf), ['mine', 'kit', 'open'], 'the three shelves of the AI catalog tool');
+    equal(view.root.querySelector('[data-shelf="mine"] h2')?.textContent, t('catalog.shelf.mine'));
+    equal(view.root.querySelector('[data-shelf="kit"] h2')?.textContent, t('catalog.shelf.kit'));
+    equal(view.root.querySelector('[data-shelf="open"] h2')?.textContent, t('catalog.shelf.open'));
+    deepEqual(cards(view.root.querySelector('[data-shelf="mine"]')!).map((card) => card.dataset.catalogCard), ['ponytail']);
+    deepEqual(cards(view.root.querySelector('[data-shelf="kit"]')!).map((card) => card.dataset.catalogCard).sort(), ['chrome-devtools', 'systematic-debugging']);
+    ok(cards(view.root).every((card) => card.querySelector('[data-seal]')?.getAttribute('data-seal') === 'checked' && card.textContent?.includes(t('catalog.seal.checked'))), 'every catalog card carries the checked seal');
+    search(view.root, 'other'); await tick();
+    equal(view.root.querySelector('[data-shelf="open"]'), null, 'changed words hide the answer to the earlier ones');
+    search(view.root, 'fixture'); await tick();
+    ok(view.root.querySelector('[data-shelf="open"]'), 'the same words show it again without asking twice');
+    equal(view.calls.search.length, 1);
+  } finally { view.close(); }
+});
+
+check('catalog: open world hits are marked unchecked and offer no install control', async () => {
+  const view = await panel({ hits });
+  try {
+    search(view.root, 'fixture'); await submit(view.root);
+    const open = view.root.querySelector('[data-shelf="open"]')!;
+    const items = [...open.querySelectorAll<HTMLElement>('[data-open-hit]')];
+    deepEqual(items.map((item) => item.dataset.openHit), hits.map((hit) => hit.id));
+    for (const item of items) {
+      equal(item.querySelector('[data-seal]')?.getAttribute('data-seal'), 'unchecked');
+      equal(item.querySelector('[data-seal]')?.textContent, t('catalog.seal.unchecked'));
+      ok(item.textContent?.includes(t('catalog.search.unchecked')), 'the existing unchecked words say Faber cannot install it');
+    }
+    await tap(button(view.root, 'catalog.installed'));
+    equal(view.root.querySelector('[data-shelf="open"]'), null, 'Installed lists only what the person has');
+    await tap(button(view.root, 'catalog.all'));
+    ok(items[1].textContent?.includes(t('catalog.kind.server')) && items[0].textContent?.includes(t('catalog.kind.skill')));
+    equal(open.querySelectorAll('button, input, a, [role=switch]').length, 0, 'no install, switch, select or link on an unchecked hit');
+    deepEqual(view.calls.install, []);
+  } finally { view.close(); }
+  const nothing = await panel({ hits });
+  try {
+    search(nothing.root, 'nowhere'); await submit(nothing.root);
+    equal(cards(nothing.root).length, 0);
+    ok(nothing.root.querySelector('[data-shelf="open"] [data-open-hit]'));
+    equal(nothing.root.querySelector('.catalog-empty'), null, 'public hits replace the empty no-match state');
+  } finally { nothing.close(); }
+  for (const [failure, key] of [['error.tools.searchOff', 'error.tools.searchOff'], ['error.tools.searchUnavailable', 'error.tools.searchUnavailable']] as const) {
+    const failed = await panel({ failSearch: failure });
+    try {
+      search(failed.root, 'fixture'); await submit(failed.root);
+      equal(failed.root.querySelector('[data-shelf="open"] [role=status]')?.textContent, t(key), 'a refused or failed public search says why, beside the local shelves');
+      ok(cards(failed.root).length === 3, 'the local shelves stay');
+    } finally { failed.close(); }
+  }
+});
+
+check('catalog: an installed item says who installed it, you or the AI in a named conversation', async () => {
+  const rows = sample();
+  rows[0].installed = true; rows[0].installedBy = { conv: 'c1', fullAccess: false };
+  rows[1].installedBy = { fullAccess: false };
+  rows[2].installed = true; rows[2].installedBy = { conv: 'gone', fullAccess: true };
+  const view = await panel({ rows, conversations: [{ id: 'c1', title: 'Fix the login page' }] });
+  try {
+    const by = (id: string) => view.root.querySelector(`[data-catalog-card="${id}"] .catalog-by`);
+    equal(by('systematic-debugging')?.getAttribute('data-installed-by'), 'ai');
+    equal(by('systematic-debugging')?.textContent, t('catalog.by.ai', { title: 'Fix the login page' }));
+    equal(by('ponytail')?.getAttribute('data-installed-by'), 'you');
+    equal(by('ponytail')?.textContent, t('catalog.by.you'));
+    equal(by('chrome-devtools')?.textContent, t('catalog.by.aiSomewhere'), 'a deleted conversation is not named');
+    await tap(cards(view.root).find((card) => card.dataset.catalogCard === 'systematic-debugging')!);
+    equal(view.root.querySelector('.catalog-detail .catalog-by')?.textContent, t('catalog.by.ai', { title: 'Fix the login page' }), 'the detail repeats the origin');
+    await tap(button(view.root, 'catalog.back'));
+  } finally { view.close(); }
+  const full = sample();
+  full[1].installedBy = { conv: 'c1', fullAccess: true };
+  full[2].installed = true;
+  const fullView = await panel({ rows: full, conversations: [{ id: 'c1', title: 'Fix the login page' }] });
+  try {
+    equal(fullView.root.querySelector('[data-catalog-card="ponytail"] .catalog-by')?.textContent, t('catalog.by.aiFull', { title: 'Fix the login page' }));
+    equal(fullView.root.querySelector('[data-catalog-card="systematic-debugging"] .catalog-by'), null, 'an item not installed has no origin');
+    equal(fullView.root.querySelector('[data-catalog-card="chrome-devtools"] .catalog-by'), null, 'an install the log does not name gets no guessed origin');
+  } finally { fullView.close(); }
+});
+
+check('catalog: the origin follows installs, removals and Undo made on this screen', async () => {
+  const rows = sample();
+  rows[1].installedBy = { conv: 'c1', fullAccess: false };
+  const view = await panel({ rows, conversations: [{ id: 'c1', title: 'Fix the login page' }] });
+  try {
+    await tap(cards(view.root).find((card) => card.dataset.catalogCard === 'ponytail')!);
+    equal(view.root.querySelector('.catalog-detail .catalog-by')?.textContent, t('catalog.by.ai', { title: 'Fix the login page' }));
+    await tap(button(view.root, 'catalog.remove')); await tap(button(view.root, 'catalog.remove'));
+    await tap(button(view.root, 'catalog.undo'));
+    equal(view.root.querySelector('.catalog-detail .catalog-by'), null, 'Undo writes no line, so the old AI origin is not shown');
+    await tap(button(view.root, 'catalog.back'));
+    await tap(cards(view.root).find((card) => card.dataset.catalogCard === 'systematic-debugging')!);
+    await tap(button(view.root, 'catalog.install'));
+    equal(view.root.querySelector('.catalog-detail .catalog-by')?.textContent, t('catalog.by.you'), "an install here is the person's");
+  } finally { view.close(); }
 });
 
 check('catalog: search comes before the select shown action', async () => {
@@ -434,10 +555,10 @@ check('catalog: the full curated list pages without duplicates and searches beyo
     ...item, tier: 'tier' in item ? item.tier as ToolRow['tier'] : 'more',
     server: 'server' in item, installed: index < 49, home: `https://github.com/${item.repo}`,
   }));
-  const view = await panel({ rows });
+  // A newcomer (nothing installed) sees Good start first in Faber Kit; the person's own items move to their shelf.
+  const newcomer = await panel({ rows: rows.map((row) => ({ ...row, installed: false })) });
   try {
-    ok(rows.length > 100, 'exercise the shipped catalog rather than a short synthetic list');
-    const good = [...view.root.querySelectorAll('.catalog-group')].find((group) => group.querySelector('h2')?.textContent === t('catalog.goodStart'))!;
+    const good = [...newcomer.root.querySelectorAll('.catalog-group')].find((group) => group.querySelector('h3')?.textContent === t('catalog.goodStart'))!;
     const suggestions = cards(good);
     equal(suggestions.length, 10);
     ok(suggestions.every((card) => rows.find((row) => row.id === card.dataset.catalogCard)?.tier === 'recommended'));
@@ -446,6 +567,11 @@ check('catalog: the full curated list pages without duplicates and searches beyo
       'improve-codebase-architecture', 'grill-me', 'skill-creator', 'emil-design-eng',
       'break-ui', 'humanizer',
     ].sort(), 'Good start keeps general coding and everyday skills, including the original entry points');
+  } finally { newcomer.close(); }
+  const view = await panel({ rows });
+  try {
+    ok(rows.length > 100, 'exercise the shipped catalog rather than a short synthetic list');
+    equal(cards(view.root.querySelector('[data-shelf="mine"]')!).length, 48, 'the first page starts with what the person has');
     const seen: string[] = [];
     const pages = Math.ceil(rows.length / 48);
     for (let page = 0; page < pages; page++) {
@@ -516,7 +642,7 @@ check('catalog: return stays reachable after reading a small-window detail', asy
         view.root.style.setProperty('--fs-ui', enlarged ? '28px' : themes.css.base['fs-ui']);
         events.length = 0; passStarted = performance.now();
         const beforeOpen = { active: describe(document.activeElement), connected: view.root.isConnected };
-        await tap(cards(view.root)[0]);
+        await tap(byId(view.root, 'systematic-debugging'));
         // WebKit reveals the newly focused heading in a later rendering step; reading starts once it has (on macOS
         // CI the reveal undid the scroll below on 2026-10-28, failing queues that never touched the catalog).
         await frames();
@@ -552,7 +678,7 @@ check('catalog: return stays reachable after reading a small-window detail', asy
 check('catalog: details open their original source in the system browser and install, switch, cancel removal and undo preserve state', async () => {
   const view = await panel();
   try {
-    await tap(cards(view.root)[0]);
+    await tap(byId(view.root, 'systematic-debugging'));
     ok(view.root.querySelector('.catalog-detail'));
     ok(view.root.textContent?.includes(t('catalog.whenSkill')) && view.root.textContent?.includes(t('catalog.accessSkill')));
     ok(view.root.textContent?.includes('abc123') && view.root.textContent?.includes('MIT'));
@@ -654,7 +780,7 @@ check('catalog: failed listing, installation and switching expose retry and keep
   try {
     ok(view.root.querySelector('[role=alert]')); options.failList = false;
     await tap(button(view.root, 'catalog.retry')); equal(cards(view.root).length, 3);
-    await tap(cards(view.root)[0]); await tap(button(view.root, 'catalog.install'));
+    await tap(byId(view.root, 'systematic-debugging')); await tap(button(view.root, 'catalog.install'));
     equal(view.store[0].installed, false); ok(view.root.textContent?.includes(t('error.tools.install')));
     options.failInstall = false; await tap(button(view.root, 'catalog.retry')); equal(view.store[0].installed, true);
     const toggle = view.root.querySelector<HTMLInputElement>('[role=switch]')!;

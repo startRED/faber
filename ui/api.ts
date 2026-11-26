@@ -858,7 +858,12 @@ export interface ToolRow {
   requiresNode?: boolean;
   /** A tool server (an npm package Node runs) rather than a skill. */
   server: boolean;
+  /** Who installed the copy Faber holds, from the install log: the agent in `conv`, or the person (no `conv`). Absent: unknown. */
+  installedBy?: { conv?: string; fullAccess: boolean };
 }
+
+/** One unchecked public directory hit: data only, which Faber cannot install. */
+export interface OpenHit { id: string; source: string; installs: number; server: boolean }
 
 export interface ToolInventoryList {
   vendor: Vendor;
@@ -1341,6 +1346,8 @@ export const api = {
   toolsInventory: (projectId?: string) => invoke<ToolInventoryList[]>('tools_inventory', { projectId }),
   toolsList: () => invoke<ToolRow[]>('tools_list'),
   toolsInstall: (id: string) => invoke<void>('tools_install', { id }),
+  /** Public directories, only on the person's submitted search and with live web search on. */
+  toolsSearch: (query: string) => invoke<OpenHit[]>('tools_search', { query }),
   toolsPrepareReplacement: (id: string) => invoke<{ plan: unknown; from: string; to: string; enabled: boolean }>('tools_prepare_replacement', { id }),
   toolsReplace: (plan: unknown) => invoke<void>('tools_replace', { plan }),
   toolsClearRemoved: () => invoke<void>('tools_clear_removed'),

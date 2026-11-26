@@ -1138,6 +1138,9 @@ table! {
     Read Free fn tools_list(h) -> Vec<tools::ToolRow> {
         tools::tools_list(h).await
     }
+    Read Screen fn tools_search(h, query: String) -> Vec<tools::OpenHit> {
+        tools::tools_search(h, query).await
+    }
     Read Free fn tools_inventory(h, project_id: Option<String>) -> Vec<faber_engine::tool_inventory::List> {
         tools::tools_inventory(h, project_id).await
     }

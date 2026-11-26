@@ -199,6 +199,8 @@ error.tools.reinstall
 error.tools.remove
 error.tools.restore
 error.tools.scripts
+error.tools.searchOff
+error.tools.searchUnavailable
 error.tools.size
 error.tools.snapshot
 error.tools.space

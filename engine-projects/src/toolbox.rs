@@ -311,6 +311,12 @@ pub struct Entry<'a> {
     pub on: bool,
 }
 
+/// A public hit as the Catalog screen's open shelf shows it: id, repository (may be empty), installs and whether it is a
+/// tool server. The fields stay data; nothing installs from them.
+pub fn open_hit(hit: &Hit) -> (&str, &str, u64, bool) {
+    (&hit.id, &hit.source, hit.installs, hit.server)
+}
+
 /// The English words of the screen the catalog shows: names, one-line purposes and jobs. They are the same text a person
 /// reads in the Catalog, so the agent describes a tool the way the screen does.
 pub(crate) fn english() -> &'static HashMap<&'static str, String> {

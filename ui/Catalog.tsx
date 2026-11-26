@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
-import { api, type Project, type ToolRow, type Vendor } from './api.ts';
+import { api, type OpenHit, type Project, type ToolRow, type Vendor } from './api.ts';
 import { Toggle } from './controls.tsx';
 import { Icon, type GlyphName } from './Glyphs.tsx';
 import { StateGlyph } from './icons/kinds.tsx';
@@ -43,6 +43,8 @@ function RuntimeInfo(props: { row: ToolRow }) {
 }
 const glyph = (row: ToolRow): GlyphName => plugin(row) ? 'puzzle' : row.server ? 'globe' : glyphs[row.job] ?? 'wand';
 const tone = (row: ToolRow) => row.status || unavailable(row) ? 'warn' : !row.installed ? 'none' : row.enabled === false ? 'off' : 'on';
+// The person's own shelf: what Faber holds a copy of, healthy or waiting for a repair.
+const mine = (row: ToolRow) => row.installed || !!row.status;
 const hasCopy = (row: ToolRow) => row.hasCopy ?? !!(row.installed || row.status);
 const removedCopy = (row: ToolRow) => typeof row.removedEnabled === 'boolean';
 type Batch = 'install' | 'on' | 'off' | 'remove';
@@ -72,7 +74,7 @@ export const forgetCatalogView = (): void => { Object.assign(held, { query: '', 
 export const showInCatalog = (id: string): void => { held.selected = id; };
 
 /** Browse only while open: no CLI launch, polling or hidden card tree. */
-export function Catalog(props: { projects: Project[]; projectId?: string; vendors: Vendor[] }) {
+export function Catalog(props: { projects: Project[]; projectId?: string; vendors: Vendor[]; conversations?: readonly { id: string; title: string }[] }) {
   const [rows, setRows] = createStore<ToolRow[]>([]);
   const [error, setError] = createSignal<string>();
   const [retry, setRetry] = createSignal<() => void>();
@@ -94,6 +96,9 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
   const [confirmingBatch, setConfirmingBatch] = createSignal(false);
   const [batchError, setBatchError] = createSignal<{ text: string; action: Batch }>();
   const [projectChoice, setProjectChoice] = createSignal(props.projectId ?? '');
+  // The open shelf: public directories, asked only when the person submits the search, never on open or while typing.
+  const [found, setFound] = createSignal<{ query: string; hits?: OpenHit[]; error?: string }>();
+  let asked = 0;
   const projectId = () => props.projects.some((p) => p.id === projectChoice()) ? projectChoice() : undefined;
   let gone = false;
   let stop: (() => void) | undefined;
@@ -163,7 +168,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
   window.addEventListener('keydown', key);
   onCleanup(() => { gone = true; stop?.(); window.removeEventListener('keydown', key); });
   const starters = createMemo(() => {
-    const recommended = rows.filter((row) => row.tier === 'recommended');
+    const recommended = rows.filter((row) => row.tier === 'recommended' && !mine(row));
     const seen = new Set<string>();
     const first = recommended.filter((row) => {
       const group = job(row);
@@ -176,11 +181,13 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     if (filter() === 'pipelines') return [];
     const text = query().trim().toLocaleLowerCase();
     const list = filter() === 'all' && !text ? [...starters(), ...rows.filter((row) => !starters().includes(row))] : rows;
-    return list.filter((row) => (filter() !== 'skills' || (!row.server && !plugin(row) && !row.runtime)) && (filter() !== 'servers' || row.server)
+    const found = list.filter((row) => (filter() !== 'skills' || (!row.server && !plugin(row) && !row.runtime)) && (filter() !== 'servers' || row.server)
       && (filter() !== 'runtimes' || !!row.runtime)
       && (filter() !== 'plugins' || plugin(row))
       && (filter() !== 'installed' || row.installed || row.status)
       && (!text || `${row.id} ${catalogName(row.id)} ${row.repo} ${words(`tools.${row.id}`, row.id)} ${words(`catalog.job.${row.job}`, row.job)} ${words(`catalog.job.${job(row)}`, job(row))}`.toLocaleLowerCase().includes(text)));
+    // One list pages both shelves, so each item shows once: what the person has first, then the rest of Faber Kit.
+    return [...found.filter(mine), ...found.filter((row) => !mine(row))];
   });
   const workflows = createMemo(() => {
     const text = query().trim().toLocaleLowerCase();
@@ -192,8 +199,9 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     if (page() > last) setPage(last);
   });
   const visible = () => matching().slice(page() * PAGE, (page() + 1) * PAGE);
+  const mineShown = () => visible().filter(mine);
   const groups = createMemo(() => {
-    const list = visible();
+    const list = visible().filter((row) => !mine(row));
     const good = filter() === 'all' && !query().trim() && page() === 0 ? list.filter((r) => starters().includes(r)) : [];
     return [
       ...(good.length ? [{ name: t('catalog.goodStart'), job: '', rows: good }] : []),
@@ -202,6 +210,25 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
       })),
     ];
   });
+  const shelf = () => found()?.query === query().trim() ? found() : undefined;
+  const ask = async (event: SubmitEvent) => {
+    event.preventDefault();
+    const text = query().trim();
+    if (!text) return;
+    const current = ++asked;
+    setFound({ query: text });
+    try {
+      const hits = await api.toolsSearch(text);
+      if (!gone && current === asked) setFound({ query: text, hits });
+    } catch (err) { if (!gone && current === asked) setFound({ query: text, error: failureText(err) }); }
+  };
+  // Who installed it: the person here, or the project agent in a named conversation (the agent's own install log).
+  const origin = (row: ToolRow) => {
+    const by = row.installedBy!;
+    if (!by.conv) return t('catalog.by.you');
+    const title = props.conversations?.find((c) => c.id === by.conv)?.title.trim();
+    return title ? t(by.fullAccess ? 'catalog.by.aiFull' : 'catalog.by.ai', { title }) : t('catalog.by.aiSomewhere');
+  };
   const item = () => rows.find((r) => r.id === selected());
   const pipeline = () => catalogPipeline(selected());
   const status = (id: string) => rows.find((row) => row.id === id)?.status ?? undefined;
@@ -242,7 +269,9 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
         if (gone) return;
         done.push(id);
         const at = rows.findIndex((r) => r.id === id);
-        if (at >= 0) setRows(at, { installed: action !== 'remove', hasCopy: action !== 'remove', removedEnabled: undefined, enabled: action === 'install' ? rows[at].enabled !== false : action !== 'off', status: undefined });
+        // An install from this screen is logged as the person's; a removal clears the origin with the copy.
+        const by = action === 'install' ? { fullAccess: false } : action === 'remove' ? undefined : rows[at]?.installedBy;
+        if (at >= 0) setRows(at, { installed: action !== 'remove', hasCopy: action !== 'remove', removedEnabled: undefined, enabled: action === 'install' ? rows[at].enabled !== false : action !== 'off', status: undefined, installedBy: by });
       } catch (err) { reason = failureText(err); }
     }
     if (gone) return;
@@ -291,7 +320,9 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
       if (gone) return true;
       // Update fields in place so a successful toggle keeps its native input and focus.
       const index = rows.findIndex((r) => r.id === id);
-      if (index >= 0) setRows(index, { installed: action !== 'remove', hasCopy: action !== 'remove', removedEnabled: action === 'remove' ? wasEnabled : undefined, enabled: action === 'toggle' ? enabled : action === 'restore' ? restoring?.enabled !== false : action === 'install' ? wasEnabled : true, status: undefined });
+      // An install here is logged as the person's; a removal clears the origin, and Undo writes no line, so it shows none.
+      const by = action === 'install' ? { fullAccess: false } : action === 'toggle' ? rows[index]?.installedBy : undefined;
+      if (index >= 0) setRows(index, { installed: action !== 'remove', hasCopy: action !== 'remove', removedEnabled: action === 'remove' ? wasEnabled : undefined, enabled: action === 'toggle' ? enabled : action === 'restore' ? restoring?.enabled !== false : action === 'install' ? wasEnabled : true, status: undefined, installedBy: by });
       if (action === 'remove') { setRemoved({ id, enabled: wasEnabled }); setConfirming(false); queueMicrotask(() => undo?.focus()); }
       else if (removed()?.id === id) setRemoved(undefined);
       if (action === 'restore') rememberRemoved(rows);
@@ -339,6 +370,24 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     <McpServers status={serverStatus} globallyEnabled={row.enabled !== false && !row.status} revision={revision()} projectId={projectId()} projects={props.projects} {...names} onError={(e) => { setError(failureText(e)); setRetry(() => () => { setError(undefined); setRevision((v) => v + 1); }); }} />
   </>;
   const count = (action: Batch) => chosen().filter((row) => fits(row, action)).length;
+  const tile = (row: ToolRow) => <div class="catalog-tile" data-tone={tone(row)} classList={{ picked: picked().includes(row.id) }}>
+            <button class="catalog-card" data-catalog-card={row.id} onClick={(e) => open(row.id, e.currentTarget)}>
+              <span class="catalog-icon"><Icon name={glyph(row)} /></span>
+              <span class="catalog-name">{catalogName(row.id)}</span><span class="catalog-description">{words(`tools.${row.id}`, row.id)}</span>
+              <Show when={plugin(row)}><span class="catalog-description">{partsSummary(row)}</span><PluginLimits row={row} claude={props.vendors.includes('claude')} /></Show>
+              <span class="catalog-origin">{row.repo} · {row.license}</span>
+              <span class="catalog-seal" data-seal="checked">{t('catalog.seal.checked')}</span>
+              <Show when={row.installed && row.installedBy}><span class="catalog-by" data-installed-by={row.installedBy?.conv ? 'ai' : 'you'}>{origin(row)}</span></Show>
+              <RuntimeInfo row={row} />
+              <span class="catalog-state">{state(row)}</span>
+            </button>
+            <input type="checkbox" class="catalog-pick" aria-label={t('catalog.pick', { name: catalogName(row.id) })} checked={picked().includes(row.id)} onChange={(e) => pick(row.id, e.currentTarget.checked)} />
+            <button class="iconbtn catalog-site" aria-label={t('catalog.openSite', { repo: row.repo })} title={t('catalog.openSite', { repo: row.repo })} onClick={() => site(row)}><Icon name="external" small /></button>
+            <Show when={fits(row, 'install')}><button class="btn secondary catalog-quick" aria-label={t('catalog.installName', { name: catalogName(row.id) })} onClick={() => void change(row.id, 'install').then((done) => done && focusCard(row.id))}><Icon name="download" small />{t('catalog.install')}</button></Show>
+            <Show when={needsUv(row)}><button class="link catalog-quick" onClick={() => void api.openLink('https://docs.astral.sh/uv/getting-started/installation/').catch((e) => setError(failureText(e)))}>{t('catalog.getUv')}</button></Show>
+            <Show when={hasCopy(row) && !!row.status && !removedCopy(row)}><button class="btn secondary catalog-quick" disabled={busy()} onClick={(e) => open(row.id, e.currentTarget)}>{t('catalog.replace')}</button></Show>
+            <Show when={row.installed && !row.status}><input type="checkbox" role="switch" class="sw2 catalog-quick" aria-label={t('catalog.switchName', { name: catalogName(row.id) })} checked={row.enabled !== false} onChange={async (e) => { const box = e.currentTarget; if (!(await change(row.id, 'toggle', box.checked))) box.checked = row.enabled !== false; }} /></Show>
+          </div>;
   return (
     <section class="catalog" ref={(el) => (surface = el)} data-catalog data-picking={chosen().length ? '' : undefined} aria-label={t('area.catalog')}>
       {/* The list and a tool's page cross-fade: the one that leaves is an inert copy (animateList). */}
@@ -349,7 +398,13 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
         <Show when={item()} fallback={<Show when={pipeline()} fallback={<div class="catalog-list">
           <header class="catalog-top">
             <h1>{t('area.catalog')}</h1>
-            <label class="field catalog-search"><Icon name="search" /><input ref={(el) => (search = el)} type="search" aria-label={t('catalog.search')} placeholder={t('catalog.search')} value={query()} onInput={(e) => { setQuery(e.currentTarget.value); setPage(0); }} /><kbd>{keysOf('find')}</kbd></label>
+            <form class="catalog-ask" role="search" onSubmit={(e) => void ask(e)}>
+              <label class="catalog-ask-label" for="catalog-search">{t('catalog.ask')}</label>
+              <div class="catalog-ask-row">
+                <div class="field catalog-search"><Icon name="search" /><input id="catalog-search" ref={(el) => (search = el)} type="search" placeholder={t('catalog.askExample')} value={query()} onInput={(e) => { setQuery(e.currentTarget.value); setPage(0); }} /><kbd>{keysOf('find')}</kbd></div>
+                <button class="btn" type="submit" data-catalog-ask disabled={!query().trim()}>{t('catalog.searchOpen')}</button>
+              </div>
+            </form>
           </header>
           <div class="catalog-bar">
             <div class="catalog-filters" role="group" aria-label={t('catalog.filter')}>
@@ -357,26 +412,27 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
             </div>
           </div>
           <Show when={loading() && filter() !== 'pipelines'}><div class="catalog-empty" role="status"><Peek /><p>{t('catalog.loading')}</p></div></Show>
-          <Show when={!workflows().length && (filter() === 'pipelines' || (filter() !== 'installed' && !loading() && !matching().length && !error()))}><div class="catalog-empty" role="status"><Peek scene={query().trim() ? 'noResults' : 'catalogEmpty'} /><p>{t(query().trim() ? 'catalog.noMatch' : 'catalog.empty')}</p></div></Show>
+          <Show when={!workflows().length && (filter() === 'pipelines' || (filter() !== 'installed' && !loading() && !matching().length && !error() && !shelf()?.hits?.length))}><div class="catalog-empty" role="status"><Peek scene={query().trim() ? 'noResults' : 'catalogEmpty'} /><p>{t(query().trim() ? 'catalog.noMatch' : 'catalog.empty')}</p></div></Show>
           <Show when={workflows().length}><CatalogPipelineCards visible={workflows()} open={open} /></Show>
-          <For each={groups()}>{(group) => <section class="catalog-group"><h2><Show when={glyphs[group.job]}>{(name) => <Icon name={name()} small />}</Show>{group.name}</h2><div class="catalog-grid"><For each={group.rows}>{(row) => <div class="catalog-tile" data-tone={tone(row)} classList={{ picked: picked().includes(row.id) }}>
-            <button class="catalog-card" data-catalog-card={row.id} onClick={(e) => open(row.id, e.currentTarget)}>
-              <span class="catalog-icon"><Icon name={glyph(row)} /></span>
-              <span class="catalog-name">{catalogName(row.id)}</span><span class="catalog-description">{words(`tools.${row.id}`, row.id)}</span>
-              <Show when={plugin(row)}><span class="catalog-description">{partsSummary(row)}</span><PluginLimits row={row} claude={props.vendors.includes('claude')} /></Show>
-              <span class="catalog-origin">{row.repo} · {row.license}</span>
-              <RuntimeInfo row={row} />
-              <span class="catalog-state">{state(row)}</span>
-            </button>
-            <input type="checkbox" class="catalog-pick" aria-label={t('catalog.pick', { name: catalogName(row.id) })} checked={picked().includes(row.id)} onChange={(e) => pick(row.id, e.currentTarget.checked)} />
-            <button class="iconbtn catalog-site" aria-label={t('catalog.openSite', { repo: row.repo })} title={t('catalog.openSite', { repo: row.repo })} onClick={() => site(row)}><Icon name="external" small /></button>
-            <Show when={fits(row, 'install')}><button class="btn secondary catalog-quick" aria-label={t('catalog.installName', { name: catalogName(row.id) })} onClick={() => void change(row.id, 'install').then((done) => done && focusCard(row.id))}><Icon name="download" small />{t('catalog.install')}</button></Show>
-            <Show when={needsUv(row)}><button class="link catalog-quick" onClick={() => void api.openLink('https://docs.astral.sh/uv/getting-started/installation/').catch((e) => setError(failureText(e)))}>{t('catalog.getUv')}</button></Show>
-            <Show when={hasCopy(row) && !!row.status && !removedCopy(row)}><button class="btn secondary catalog-quick" disabled={busy()} onClick={(e) => open(row.id, e.currentTarget)}>{t('catalog.replace')}</button></Show>
-            <Show when={row.installed && !row.status}><input type="checkbox" role="switch" class="sw2 catalog-quick" aria-label={t('catalog.switchName', { name: catalogName(row.id) })} checked={row.enabled !== false} onChange={async (e) => { const box = e.currentTarget; if (!(await change(row.id, 'toggle', box.checked))) box.checked = row.enabled !== false; }} /></Show>
-          </div>}</For></div></section>}</For>
+          <Show when={mineShown().length}><section class="catalog-shelf" data-shelf="mine"><h2>{t('catalog.shelf.mine')}</h2><p class="hint">{t('catalog.shelf.mineNote')}</p><div class="catalog-grid"><For each={mineShown()}>{tile}</For></div></section></Show>
+          <Show when={groups().length}><section class="catalog-shelf" data-shelf="kit"><h2>{t('catalog.shelf.kit')}</h2><p class="hint">{t('catalog.shelf.kitNote')}</p>
+            <For each={groups()}>{(group) => <section class="catalog-group"><h3><Show when={glyphs[group.job]}>{(name) => <Icon name={name()} small />}</Show>{group.name}</h3><div class="catalog-grid"><For each={group.rows}>{tile}</For></div></section>}</For>
+          </section></Show>
             <Show when={filter() !== 'installed' && visible().length}><button class="btn ghost" data-catalog-pick-shown onClick={pickShown}><Icon name="check" small />{t(allShown() ? 'catalog.unpickShown' : 'catalog.pickShown')}</button></Show>
           <Show when={matching().length > PAGE}><nav class="catalog-pages" aria-label={t('catalog.pages')}><button class="btn" disabled={!page()} onClick={() => setPage(page() - 1)}>{t('catalog.previous')}</button><span aria-live="polite">{t('catalog.page', { n: page() + 1, total: Math.ceil(matching().length / PAGE) })}</span><button class="btn" disabled={(page() + 1) * PAGE >= matching().length} onClick={() => setPage(page() + 1)}>{t('catalog.next')}</button></nav></Show>
+          <Show when={filter() !== 'pipelines' && filter() !== 'installed' && shelf()}>{(answer) => <section class="catalog-shelf" data-shelf="open" aria-busy={!answer().hits && !answer().error}>
+            <h2>{t('catalog.shelf.open')}</h2><p class="hint">{t('catalog.shelf.openNote')}</p>
+            <Show when={answer().hits} fallback={<p class="catalog-open-state" role="status">{answer().error ?? t('catalog.searching')}</p>}>{(hits) =>
+              <Show when={hits().length} fallback={<p class="catalog-open-state" role="status">{t('catalog.openNone')}</p>}>
+                <ul class="catalog-open-list"><For each={hits()}>{(hit) => <li class="catalog-open" data-open-hit={hit.id}>
+                  <span class="catalog-name">{hit.id}</span>
+                  <span class="catalog-description">{t(hit.server ? 'catalog.kind.server' : 'catalog.kind.skill')}<Show when={hit.source && !hit.id.startsWith(hit.source)}> · github.com/{hit.source}</Show></span>
+                  <span class="catalog-seal" data-seal="unchecked">{t('catalog.seal.unchecked')}</span>
+                  <span class="catalog-description">{t('catalog.search.unchecked')}</span>
+                </li>}</For></ul>
+              </Show>}
+            </Show>
+          </section>}</Show>
           <Show when={filter() === 'installed'}><CatalogInventory query={query()} catalogMatches={matching().length} status={status} serverStatus={serverStatus} available={available} revision={revision()} projectId={projectId()} projects={props.projects} onProject={setProjectChoice} onOpen={(id) => { if (rows.some((row) => row.id === id)) open(id, search!); }} /></Show>
           <Show when={chosen().length && filter() !== 'pipelines'}><div class="catalog-batch" role="region" aria-label={t('catalog.selection')} data-catalog-batch>
             <Show when={batchError()}>{(failure) => <span class="catalog-batch-error" role="alert">{failure().text}<button class="btn" onClick={() => void runBatch(failure().action)}>{t('catalog.retry')}</button></span>}</Show>
@@ -397,7 +453,8 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
               <span class="catalog-icon"><Icon name={glyph(row())} /></span>
               <div class="catalog-hero-text">
                 <h1 ref={(el) => (detail = el)} tabindex="-1">{catalogName(row().id)}</h1>
-                <p class="catalog-meta"><span>{words(`catalog.job.${row().job}`, words(`catalog.job.${job(row())}`, t('catalog.other')))}</span><span class="catalog-state">{state(row())}</span></p>
+                <p class="catalog-meta"><span>{words(`catalog.job.${row().job}`, words(`catalog.job.${job(row())}`, t('catalog.other')))}</span><span class="catalog-state">{state(row())}</span><span class="catalog-seal" data-seal="checked">{t('catalog.seal.checked')}</span></p>
+                <Show when={row().installed && row().installedBy}><p class="catalog-by" data-installed-by={row().installedBy?.conv ? 'ai' : 'you'}>{origin(row())}</p></Show>
               </div>
               <button class="btn secondary" onClick={() => site(row())}><Icon name="external" small />{t('catalog.openSource')}</button>
             </header>
