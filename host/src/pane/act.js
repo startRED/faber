@@ -16,6 +16,7 @@ export default (request) => {
     const found = [];
     const walk = (root) => {
       found.push(root);
+      if (root.shadowRoot) walk(root.shadowRoot);
       for (const el of root.querySelectorAll('*')) {
         if (el.shadowRoot) walk(el.shadowRoot);
         if (el.tagName === 'IFRAME' || el.tagName === 'FRAME') {
@@ -174,7 +175,7 @@ export default (request) => {
   const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
   const KINDS = new Set(['button', 'link', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'checkbox', 'radio', 'switch', 'option', 'combobox', 'textbox', 'searchbox', 'slider', 'spinbutton', 'treeitem']);
   const FIELDS = new Set(['textbox', 'searchbox', 'spinbutton', 'combobox', 'slider']);
-  const CONTROLS = 'a[href], button, summary, input, select, textarea, [role], [contenteditable=""], [contenteditable="true"], [tabindex], [onclick]';
+  const CONTROLS = 'a[href], button, summary, input, select, textarea, [role], [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], [tabindex], [onclick]';
   const MAX_CANDIDATES = 2000;
   const MAX_LISTED = 250;
   const MAX_BLOCK = 16000;
@@ -359,6 +360,290 @@ export default (request) => {
     return hit ? { one: hit.el, role: hit.role } : { why: 'ref' };
   };
 
+  // The person points at something on the page to ask about it (pick mode, `pane/pick.rs`). A clear layer over the page, in
+  // the top layer under a closed shadow root, takes the pointer: hovering outlines what is under it, a click describes it and
+  // never reaches the page, Esc ends it. Only the person's own input counts (`isTrusted`): a page that dispatches events at
+  // the layer picks nothing. The layer lives in Faber's world between calls (`faberPick`); each `pick` waits up to `wait` ms
+  // for the person and answers `{ picked }`, `{ ended }` or `{ waiting }`. It ends by itself 60 s after it started, 4 s after
+  // nobody waits on it any more, or once the page takes it out of the document or the top layer. `unpick` ends it.
+  // `checks` (the screen's checks only; the host never sends it) lets synthetic events through.
+  const PICK_LIMIT = 60000;
+  const PICK_SEND = 20000;
+  const real = (e) => e.isTrusted || request.checks === true;
+  const pickMode = () => {
+    const state = globalThis.faberPick;
+    if (request.kind === 'unpick') {
+      globalThis.faberPicked = undefined;
+      state?.end({ ok: true, ended: true });
+      return { ok: true, ended: true };
+    }
+    const ready = globalThis.faberPicked;
+    if (ready) {
+      globalThis.faberPicked = undefined;
+      return ready;
+    }
+    const wait = Math.min(Math.max(Number(request.wait) || 0, 0), 9000);
+    const picker = state || startPick();
+    if (!picker) return { ok: true, ended: true };
+    return new Promise((resolve) => picker.wait(resolve, wait));
+  };
+  // Every kind of box a person types in, a custom one too, whatever its `contenteditable` says.
+  const FIELD = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role=textbox], [role=searchbox]';
+  const isField = (el) => /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+  const holdsSecret = (f) => isSecret(f) || isCard(f);
+  // The fields in an element and itself, through its open shadow roots and its own site's frames.
+  const fieldsIn = (el) => [...(el.matches(FIELD) ? [el] : []), ...all(FIELD, el)];
+  // A short, stable way back to the element: its own id when the page has it once, else a test id, else its place among
+  // its parent's children of the same kind, up to six steps or an ancestor with an id.
+  const selectorOf = (el) => {
+    const steps = [];
+    for (let n = el; n && n.nodeType === 1 && steps.length < 6; n = n.parentElement) {
+      const tag = n.tagName.toLowerCase();
+      if (n.id && /^[A-Za-z][\w-]{0,60}$/.test(n.id) && n.ownerDocument.querySelectorAll(`#${CSS.escape(n.id)}`).length === 1) {
+        steps.unshift(`#${CSS.escape(n.id)}`);
+        break;
+      }
+      const test = n.getAttribute('data-testid');
+      if (test && test.length <= 60) {
+        steps.unshift(`${tag}[data-testid="${test.replace(/["\\]/g, '\\$&')}"]`);
+        break;
+      }
+      const same = n.parentElement ? [...n.parentElement.children].filter((c) => c.tagName === n.tagName) : [];
+      steps.unshift(same.length > 1 ? `${tag}:nth-of-type(${same.indexOf(n) + 1})` : tag);
+      if (tag === 'body') break;
+    }
+    return steps.join(' > ');
+  };
+  // The words of a label a person can see: hidden parts and the controls inside it left out.
+  const shownText = (root) => {
+    const out = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const parent = node.parentElement;
+      if (parent && !parent.closest('select, textarea, button') && seen(parent) && Number(getComputedStyle(parent).opacity) > 0) out.push(node.data);
+    }
+    return out.join(' ');
+  };
+  // The name a person sees: the words of labelling elements only while they are on view, then the element's own words.
+  const pickName = (el) => {
+    const root = el.getRootNode();
+    const ids = flat(el.getAttribute('aria-labelledby')).split(' ').filter(Boolean);
+    let text = flat(ids.map((id) => root.getElementById?.(id)).filter((t) => t && seen(t)).map((t) => t.innerText).join(' '));
+    if (!text) text = flat(el.getAttribute('aria-label'));
+    if (!text && el.labels?.length) {
+      text = flat([...el.labels].filter(seen).map(shownText).join(' '));
+    }
+    if (!text && el.tagName === 'INPUT' && /^(button|submit|reset)$/.test(el.type)) text = flat(el.value);
+    if (!text && !isField(el)) text = flat(el.innerText);
+    if (!text) text = flat(el.getAttribute('alt') || el.title || el.placeholder);
+    return text.slice(0, PICK_SEND);
+  };
+  const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  // What a person picked, as the page's words, uncut (the host masks them, then cuts them): its role (or tag), its name and
+  // its visible text or value. A password, card or one-time-code field in it, a frame in it, a long text, or a secret field
+  // its box reaches makes it `secret`: its words say `[hidden]` where a secret would be, and no picture is taken. The values
+  // of the other text fields its box reaches (`near`) come along so the host can mask them and drop the picture for a key.
+  const describe = (el, dx, dy) => {
+    const role = roleOf(el) || el.tagName.toLowerCase();
+    const fields = fieldsIn(el);
+    const own = fields.includes(el);
+    const hidden = fields.some(holdsSecret);
+    const framed = Boolean(dx || dy) || el.matches('iframe, frame') || all('iframe, frame', el).length > 0;
+    // A secret field around it counts as one inside it: a word picked in a password box is the password.
+    let around = false;
+    for (let up = el.parentElement || el.getRootNode().host; up && !around; up = up.parentElement || up.getRootNode().host) {
+      around = up.matches(FIELD) && holdsSecret(up);
+    }
+    const boxed = fields.some((f) => !isField(f) && holdsSecret(f)) || around;
+    let text;
+    if (boxed || (own && holdsSecret(el))) text = '[hidden]';
+    else if (el.tagName === 'SELECT') text = flat(el.selectedOptions?.[0]?.text);
+    else if (isField(el) && !/^(button|submit|reset|image|checkbox|radio|file|hidden)$/.test(el.type)) text = flat(el.value);
+    else text = flat(el.innerText || (el.tagName === 'INPUT' && /^(button|submit|reset)$/.test(el.type) ? el.value : ''));
+    const long = text.length > PICK_SEND;
+    const name = boxed ? '' : pickName(el);
+    const b = el.getBoundingClientRect();
+    const box = { left: b.left + dx, top: b.top + dy, right: b.right + dx, bottom: b.bottom + dy };
+    const near = [];
+    let covered = false;
+    for (const f of all(FIELD)) {
+      if (!seen(f) || !overlaps(f.getBoundingClientRect(), box)) continue;
+      if (holdsSecret(f) || near.length >= 20) covered = true;
+      else near.push(flat(isField(f) ? f.value : f.textContent).slice(0, PICK_SEND));
+    }
+    // Any frame the box reaches may hold a field this page cannot read (another site's payment form): no picture.
+    for (const f of all('iframe, frame')) if (seen(f) && overlaps(f.getBoundingClientRect(), box)) covered = true;
+    return {
+      ok: true,
+      turn,
+      picked: {
+        role,
+        name,
+        text: text.slice(0, PICK_SEND),
+        selector: selectorOf(el),
+        secret: hidden || boxed || framed || long || covered,
+        near,
+        href: `${location.href}`,
+        rect: [box.left, box.top, b.width, b.height].map(Math.round),
+        x: scrollX,
+        y: scrollY,
+        vw: innerWidth,
+        vh: innerHeight,
+      },
+    };
+  };
+  const startPick = () => {
+    const doc = document;
+    if (!doc.documentElement) return null;
+    // The host is a bare element: what the page can find of it is an empty box whose inside it cannot reach.
+    const host = doc.createElement('div');
+    host.setAttribute('popover', 'manual');
+    host.style.cssText = 'all: initial; position: fixed; inset: 0; width: 100vw; height: 100vh; margin: 0; padding: 0; border: 0; background: transparent; cursor: crosshair; z-index: 2147483647;';
+    const shadow = host.attachShadow({ mode: 'closed' });
+    const ring = doc.createElement('div');
+    const tag = doc.createElement('span');
+    shadow.append(ring, tag);
+    const stop = new AbortController();
+    let waiter = null;
+    let waitTimer = 0;
+    let leftTimer = 0;
+    let limit = 0;
+    let watch = null;
+    let at = null;
+    let frame = 0;
+    // The element under a point, through the page's open shadow roots and one frame of its own site; a part of a control
+    // (the words of a button) is that control.
+    const under = (x, y) => {
+      let el = doc.elementsFromPoint(x, y).find((e) => e !== host);
+      let dx = 0;
+      let dy = 0;
+      for (let depth = 0; el && depth < 8; depth++) {
+        if (el.shadowRoot) {
+          const inner = el.shadowRoot.elementFromPoint(x - dx, y - dy);
+          if (!inner || inner === el) break;
+          el = inner;
+        } else if ((el.tagName === 'IFRAME' || el.tagName === 'FRAME') && !dx && !dy) {
+          let inner = null;
+          const r = el.getBoundingClientRect();
+          try {
+            inner = el.contentDocument?.elementFromPoint(x - r.left - el.clientLeft, y - r.top - el.clientTop);
+          } catch {
+            // Another site's frame: the frame itself is what was picked.
+          }
+          if (!inner) break;
+          dx = r.left + el.clientLeft;
+          dy = r.top + el.clientTop;
+          el = inner;
+        } else break;
+      }
+      if (!el || el === doc.documentElement || el === doc.body) return null;
+      const control = el.closest(CONTROLS);
+      return { el: control && roleOf(control) ? control : el, dx, dy };
+    };
+    const draw = () => {
+      frame = 0;
+      const hit = at && under(at.x, at.y);
+      if (!hit) {
+        ring.style.cssText = 'display: none;';
+        tag.style.cssText = 'display: none;';
+        return;
+      }
+      const r = hit.el.getBoundingClientRect();
+      const [left, top] = [r.left + hit.dx, r.top + hit.dy];
+      ring.style.cssText = `position: fixed; pointer-events: none; left: ${left - 2}px; top: ${top - 2}px; width: ${r.width + 4}px; height: ${r.height + 4}px; box-sizing: border-box; border: 2px solid #4c8dff; border-radius: 4px; background: rgba(76, 141, 255, 0.12);`;
+      const role = roleOf(hit.el) || hit.el.tagName.toLowerCase();
+      const secretBox = !isField(hit.el) && hit.el.matches(FIELD) && holdsSecret(hit.el);
+      const name = secretBox ? '' : pickName(hit.el);
+      tag.textContent = `${role}${name ? ` "${clip(name, 40)}"` : ''}`;
+      const below = top < 24;
+      tag.style.cssText = `position: fixed; pointer-events: none; left: ${Math.max(0, left)}px; top: ${below ? top + r.height + 4 : top - 22}px; max-width: 320px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; background: #4c8dff; color: #fff; font: 600 11px/18px system-ui, sans-serif; padding: 0 6px; border-radius: 4px;`;
+    };
+    const soon = () => (frame ||= requestAnimationFrame(draw));
+    const end = (answer) => {
+      stop.abort();
+      watch?.disconnect();
+      clearTimeout(waitTimer);
+      clearTimeout(leftTimer);
+      clearTimeout(limit);
+      cancelAnimationFrame(frame);
+      host.remove();
+      if (globalThis.faberPick === picker) globalThis.faberPick = undefined;
+      if (waiter) {
+        const done = waiter;
+        waiter = null;
+        done(answer);
+      } else if (answer.picked) globalThis.faberPicked = answer;
+    };
+    const picker = {
+      end,
+      wait: (resolve, ms) => {
+        if (waiter) waiter({ ok: true, waiting: true });
+        waiter = resolve;
+        clearTimeout(waitTimer);
+        clearTimeout(leftTimer);
+        waitTimer = setTimeout(() => {
+          if (waiter !== resolve) return;
+          waiter = null;
+          resolve({ ok: true, waiting: true });
+        }, ms);
+        // Nobody asked again in time: the screen went away, and the layer goes with it.
+        leftTimer = setTimeout(() => end({ ok: true, ended: true }), ms + 4000);
+      },
+    };
+    const options = { capture: true, signal: stop.signal };
+    const moves = ['pointermove', 'mousemove', 'pointerover', 'mouseover', 'pointerenter', 'mouseenter', 'pointerout', 'mouseout', 'pointerleave', 'mouseleave'];
+    const presses = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'auxclick', 'contextmenu', 'touchstart', 'touchend', 'dragstart'];
+    for (const type of moves) {
+      window.addEventListener(type, (e) => {
+        if (e.target !== host) return;
+        e.stopImmediatePropagation();
+        if (!real(e)) return;
+        if (e.type === 'pointerleave' || e.type === 'mouseleave') at = null;
+        else at = { x: e.clientX, y: e.clientY };
+        soon();
+      }, options);
+    }
+    for (const type of presses) {
+      window.addEventListener(type, (e) => {
+        if (!real(e)) {
+          // A press the page made up itself goes nowhere when it is aimed at the layer.
+          if (e.target === host) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+          return;
+        }
+        // The person's press landed on something the page put over the layer (its own modal): the page has it, and the mode ends.
+        if (e.target !== host) return end({ ok: true, ended: true });
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.type !== 'click' || e.button !== 0) return;
+        const hit = under(e.clientX, e.clientY);
+        if (hit) end(describe(hit.el, hit.dx, hit.dy));
+      }, { ...options, passive: false });
+    }
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !real(e)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      end({ ok: true, ended: true });
+    }, options);
+    window.addEventListener('scroll', soon, { ...options, passive: true });
+    window.addEventListener('resize', soon, options);
+    host.addEventListener('toggle', (e) => e.newState === 'closed' && end({ ok: true, ended: true }), { signal: stop.signal });
+    doc.documentElement.append(host);
+    try {
+      host.showPopover?.();
+    } catch {
+      // A page that refuses the top layer still gets the layer over its own content.
+    }
+    // The page took the layer out of the document: the mode ends with it.
+    watch = new MutationObserver(() => !host.isConnected && end({ ok: true, ended: true }));
+    watch.observe(doc.documentElement, { childList: true });
+    limit = setTimeout(() => end({ ok: true, ended: true }), PICK_LIMIT);
+    globalThis.faberPick = picker;
+    return picker;
+  };
   const turn = turnOf();
   if (request.kind === 'read') {
     const shown = request.view ? view() : {};
@@ -414,6 +699,7 @@ export default (request) => {
     history.back();
     return { ok: true, turn };
   }
+  if (request.kind === 'pick' || request.kind === 'unpick') return pickMode();
   if (turn) return { ok: false, turn };
   // A redirect between the agent's reading and its action must not send the action to another page.
   if (moved()) return gone();

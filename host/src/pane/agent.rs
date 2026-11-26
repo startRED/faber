@@ -18,7 +18,7 @@ use std::time::Duration;
 impl Pane {
     /// A world of Faber's own inside the page: it shares the page's document but none of its scripts, so a page cannot change
     /// what Faber's code calls or what it answers.
-    async fn world(&self) -> Result<i64, String> {
+    pub(super) async fn world(&self) -> Result<i64, String> {
         let tree = self.call("Page.getFrameTree", json!({})).await?;
         let frame = tree["frameTree"]["frame"]["id"].as_str().ok_or("the page has no frame")?.to_string();
         let world = self.call("Page.createIsolatedWorld", json!({ "frameId": frame, "worldName": "faber" })).await?;
@@ -510,7 +510,7 @@ impl Pane {
     }
 
     /// A JPEG of `clip` (page pixels and a scale), none when the view could not draw it.
-    async fn capture(&self, clip: Value) -> Option<Vec<u8>> {
+    pub(super) async fn capture(&self, clip: Value) -> Option<Vec<u8>> {
         let shot = self.call("Page.captureScreenshot", json!({ "format": "jpeg", "quality": 70, "clip": clip })).await.ok()?;
         shot["data"].as_str().and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok())
     }
