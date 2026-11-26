@@ -631,7 +631,15 @@ pub fn prepare_tmp(root: &Path) -> bool {
             Err(_) => return false,
         }
         if target(&root, scratch, true, true).is_none() {
-            return false;
+            // Another command creating the same folder can fail this check for a moment; what it made, opened through
+            // the checked root (no links), counts.
+            return (0..8).any(|_| {
+                let made = directory.under(Path::new(scratch)).is_ok();
+                if !made {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                made
+            });
         }
         // Keep the existing root in place and create only through physical, checked parents.
         let path = root.join(scratch);
