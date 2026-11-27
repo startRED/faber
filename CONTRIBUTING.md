@@ -112,7 +112,7 @@ for one.
 
 ## License
 
-Faber is source-available under [FSL-1.1-ALv2](LICENSE); see also [NOTICE](NOTICE). Read both before you contribute.
+Faber is open source under the [MIT License](LICENSE); see also [NOTICE](NOTICE). What you contribute is licensed under the same terms.
 
 ## Working with AI agents and the maintainer workflow
 

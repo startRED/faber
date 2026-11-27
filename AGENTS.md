@@ -1,6 +1,6 @@
 # Faber: guide for agents
 
-Faber is a source-available desktop app (FSL-1.1-ALv2) with a Chat area and a Projects area that run the official AI CLIs
+Faber is an open-source desktop app (MIT) with a Chat area and a Projects area that run the official AI CLIs
 with the user's own subscriptions. [docs/README.md](docs/README.md) lists the living pages: read what your task needs, never
 a folder; `docs/history/` and dated specs are never a source. Before changing scope read [docs/product/](docs/product/README.md);
 before changing what a person sees, sets or calls follow [docs/product-rules.md](docs/product-rules.md) and search

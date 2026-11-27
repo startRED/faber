@@ -4,9 +4,8 @@ The license, the providers' terms and how Faber is distributed.
 
 ## License
 
-Faber is under the Functional Source License, Version 1.1, ALv2 Future License (`LICENSE`, SPDX `FSL-1.1-ALv2`).
-Faber is source-available, not open source. Anyone may use, change and share it for any purpose except a Competing Use,
-as defined in `LICENSE`. Each version becomes Apache 2.0 two years after its release. What users create with Faber
+Faber is under the MIT License (`LICENSE`, SPDX `MIT`, R588). Faber is open source: anyone may use, change, share and
+sell it, as long as the copyright notice and the license text stay with every copy. What users create with Faber
 belongs to them.
 
 ## Provider terms

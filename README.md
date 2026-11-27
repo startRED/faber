@@ -10,7 +10,7 @@
 
 [![Latest release](https://img.shields.io/github/v/release/startRED/faber?style=flat-square&color=d6dc48&labelColor=141a11)](https://github.com/startRED/faber/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/startRED/faber/ci.yml?branch=main&style=flat-square&label=CI&labelColor=141a11)](https://github.com/startRED/faber/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-f3f0e8?style=flat-square&labelColor=141a11)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-f3f0e8?style=flat-square&labelColor=141a11)](LICENSE)
 [![Downloads](https://img.shields.io/github/downloads/startRED/faber/total?style=flat-square&label=downloads&labelColor=141a11)](https://github.com/startRED/faber/releases)
 [![Good first issues](https://img.shields.io/github/issues/startRED/faber/good%20first%20issue?style=flat-square&label=good%20first%20issues&color=d6dc48&labelColor=141a11)](https://github.com/startRED/faber/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
 
@@ -204,8 +204,8 @@ computer. The command-line tools talk to their own services exactly as they do i
 **Why not the terminal, or each vendor's own app?** One window for both tools, Auto that picks the model for each
 message and says why, a review by the other AI, and project memory in plain files that outlive the app.
 
-**Why source-available and not open source?** The [license](#license) lets anyone use, change and share Faber for
-anything except a competing product, and each version becomes Apache 2.0 two years after its release.
+**Is it open source?** Yes. Faber is under the [MIT license](#license): anyone may use, change, share and sell it,
+as long as the copyright notice stays with the copies.
 
 **Is it finished?** No. Version 1.0 is out, [what works today](#what-works-today) is the honest list, and the
 [roadmap](docs/product/README.md) is public.
@@ -270,7 +270,6 @@ runs the full suite, including the hidden-window screen tests on Windows. Run it
 
 ## License
 
-Faber is source-available, not open source. It is under the [Functional Source License 1.1, Apache 2.0 Future License](LICENSE)
-(`FSL-1.1-ALv2`): anyone may use, modify and share it for any purpose except a Competing Use, as `LICENSE` defines it,
-and each version becomes available under Apache 2.0 two years after its release. See [NOTICE](NOTICE) and
+Faber is open source under the [MIT License](LICENSE): anyone may use, modify, share and sell it, as long as the
+copyright notice and the license text stay with every copy. See [NOTICE](NOTICE) and
 [license and distribution](docs/product/distribution.md). What you create with Faber belongs to you.
