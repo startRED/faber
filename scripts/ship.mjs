@@ -14,11 +14,17 @@ export function localeNeeded(files, diff, english) {
     return line.includes('${') || keys.some((key) => line.includes(key) || literals.some((literal) => key.startsWith(literal)) || key.split('.').slice(0, -1).some((_, i, parts) => line.includes(parts.slice(0, i + 1).join('.') + '.')));
   });
 }
+const COMMAND_LIST = /^(host\/src\/(table|reach|agent_commands)\.rs|engine-core\/src\/commands\.rs|cli\/commands\.json)$/;
 export function proofsFor(files, locale = false) {
   if (files.every(words)) return [['npm', 'run', 'docs']];
   const proofs = [['npm', 'run', 'lint'], ['npm', 'run', 'typecheck'], ['npm', 'run', 'docs'],
     ['npm', 'run', 'build'], ['cargo', 'fmt', '--all', '--check']];
   if (files.some((f) => f.startsWith('scripts/'))) proofs.push(['npm', 'run', 'test:scripts']);
+  // The two list checks CI failed on most (the sharing lists, the command line's list): seconds here, a revert there.
+  if (files.some((f) => f.endsWith('.rs') || f === 'ui/locales/en.ts' || f.startsWith('engine/src/sharing-')))
+    proofs.push(['node', 'scripts/sharing-lists.mjs', '--check']);
+  if (files.some((f) => COMMAND_LIST.test(f)))
+    proofs.push(['node', 'scripts/cargo.mjs', 'test', '-p', 'faber-host', '--lib', 'the_command_line_lists_every_command']);
   if (files.some((f) => /(^|\/)(Cargo\.toml|Cargo\.lock)$|\.rs$/.test(f)))
     // Clippy is the check pass: one compile proves both, it is the line CI reverts on, and a lane's own Clippy on the
     // same files is reused from the results ledger instead of compiled again.
