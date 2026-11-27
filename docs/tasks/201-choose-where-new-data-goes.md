@@ -16,3 +16,11 @@ Build:
 Leave out: moving existing data (next task).
 
 Done: tests that a chosen folder is used for a new copy and a new tool download and that an unreachable choice falls back with a notice; a screen check of the setting. Stored data and paths: review by a fresh session of the other vendor (R146).
+
+State (2026-11-27): landed twice and reverted twice. The second time the full macOS Rust suite failed four checks its
+landing never ran: `storage_choice_rejects_system_roots_home_and_the_profile` and
+`storage_choice_refuses_a_folder_inside_a_repository_or_another_storage_folder` (macOS temporary folders sit under
+`/private/var`, which the system-root rule refuses, and `/var` is a link), and
+`conversation_export_uses_the_saved_chat_project_and_copy_working_folder` and
+`rewind_deletion_waits_for_capture_without_holding_the_engine_or_losing_the_unsaved_check` (a copy outside the storage
+roots now needs a link-free real path). Run the macOS suite on a branch (`gh workflow run ci.yml --ref <branch>`) before it lands again.

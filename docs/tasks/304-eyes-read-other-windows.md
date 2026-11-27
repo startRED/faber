@@ -32,3 +32,11 @@ Done:
 - A measured run of the example suite on the maintainer's PC, before and after, recorded in the design page.
 - The memory and processor cost of a tree and of a picture.
 - Permissions and privacy: two reviews from different vendors (R146).
+
+State (2026-11-27): built on the branch `night/eyes-parked` and fixed after two review rounds (R146), parked, not landed.
+The second round still finds: the final delivery does not re-read `programsOutOfReach`, and a tree's child filter keeps
+the list read at its start; an entry without `.exe` never matches; a picture checks only the outer window's owner, so an
+embedded window of a blocked program can show; `PrintWindow` and `AccessibleObjectFromWindow` have no deadline once past
+the hung check; a handle recycled inside the same process keeps its consent; the key's epoch is read after the window
+lookup; the pending card stores the full caption before consent; `is_self_change` omits the `faber.eyes.*` cards; and
+the final-reply race and same-process reuse have no test.
