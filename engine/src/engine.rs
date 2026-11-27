@@ -543,6 +543,8 @@ struct Core {
     media: media::Media,
     sharing: Arc<crate::sharing::Sharing>,
     catalog_store: Option<crate::tools::Store>,
+    new_storage: Option<PathBuf>,
+    storage_roots: Vec<Arc<PathBuf>>,
     kit_checks: HashMap<String, mcp_servers::LaunchCheck>,
     kit_check_gate: Arc<tokio::sync::Semaphore>,
     #[cfg(test)]
@@ -791,6 +793,14 @@ impl Engine {
     /// The temporary conversations the last run left go here, before any answer, so the screen never reopens one: which
     /// files are temporary comes from the rows the list keeps (`Store::temporary_ids`), and only changed files are read.
     pub fn begin(opts: EngineOptions, emit: Emit) -> std::io::Result<Engine> {
+        Self::begin_with_storage(opts, emit, Default::default())
+    }
+
+    pub fn begin_with_storage(
+        opts: EngineOptions,
+        emit: Emit,
+        (new_storage, storage_roots): (Option<PathBuf>, std::collections::BTreeSet<PathBuf>),
+    ) -> std::io::Result<Engine> {
         let data_directory = crate::workspace::DataDirectory::open(&opts.data_dir)?;
         #[cfg(windows)]
         let chat_directory = crate::workspace::relocation::open(&opts.data_dir, &opts.chat_dir)?;
@@ -800,7 +810,7 @@ impl Engine {
         #[cfg(not(windows))]
         let chat_dir = crate::workspace::unix_chat::open(&opts.data_dir)?;
         // Snapshot verification and cleanup run outside Core; an unready catalog never delays a session.
-        let catalog_store = crate::tools::Store::new(&opts.data_dir);
+        let catalog_store = crate::tools::Store::new(&opts.data_dir).with_new_storage(new_storage.as_deref());
         catalog_store.set_runtime(opts.runtime.clone());
         let catalog_emit = emit.clone();
         catalog_store.set_on_ready(Arc::new(move || catalog_emit(AppEvent::Catalog)));
@@ -846,6 +856,8 @@ impl Engine {
                     media: Default::default(),
                     sharing,
                     catalog_store: Some(catalog_store),
+                    new_storage,
+                    storage_roots: storage::protect_roots(storage_roots),
                     kit_checks: HashMap::new(),
                     worker_memory: Default::default(),
                     kit_check_gate: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2599,7 +2611,6 @@ impl Core {
         crate::permissions::checked_folder(&folder)
     }
 
-    /// Where conversation `c` works, before it is checked (`cwd_of`). Reads only the engine's own state.
     /// A project's `.faber/rules.md` follows its sources: rebuilt in the project folder (where Memory reads) at each turn start
     /// of one of its conversations, and written only when it differs. A project that refuses it (a link, a read-only file)
     /// keeps its turn: the rules are an addition, never a condition.
@@ -2617,14 +2628,18 @@ impl Core {
         if c.area == Area::Chat {
             return Ok(self.workspace_of(&c.id));
         }
-        self.store
+        let project = self
+            .store
             .projects()
             .into_iter()
             .find(|p| Some(&p.id) == c.project_id.as_ref())
             // A conversation with a copy of its own works there; one removed after its work was merged comes back at the
             // next message, before anything runs.
-            .map(|p| c.copy.as_ref().map_or_else(|| PathBuf::from(p.path), |copy| copy.folder()))
-            .ok_or_else(|| "error.projectGone".to_string())
+            .ok_or("error.projectGone")?;
+        match &c.copy {
+            Some(copy) => self.checked_copy_folder(&c.id, copy).ok_or_else(|| "error.copy.failed".into()),
+            None => Ok(PathBuf::from(project.path)),
+        }
     }
 
     /// A copy of conversation `id` as the screen reads it, its last reply saying whether it waits for the person.
@@ -5747,7 +5762,13 @@ impl Core {
             .filter(|_| {
                 self.opts.windows && pick.vendor == Vendor::Claude && area == Area::Project && permissions.guarded() && !c.temporary
             })
-            .map(|copy| crate::claude::GuardedCopy { data: self.opts.data_dir.clone(), conversation: conv.into(), copy: copy.clone() });
+            .and_then(|copy| {
+                self.copy_storage(conv, copy).filter(|root| self.copy_storage_available(root)).map(|data| crate::claude::GuardedCopy {
+                    data,
+                    conversation: conv.into(),
+                    copy: copy.clone(),
+                })
+            });
         let leave_plan = c.codex_plan && permissions != Permissions::Plan;
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
         let user_name = c.user_name.clone();

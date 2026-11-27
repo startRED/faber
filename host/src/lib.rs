@@ -199,6 +199,8 @@ pub trait Shell: Send + Sync + 'static {
     }
     /// Sends one event, as the screen receives it, to the window if there is one.
     fn emit(&self, _event: &Value) {}
+    /// Replaces the shell's external storage roots before the browser pane can load extensions from them.
+    fn storage_roots(&self, _roots: Vec<PathBuf>) {}
     /// The version of the program that runs; the screen shows it.
     fn version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
@@ -309,6 +311,9 @@ pub fn default_data_dir(config_dir: &std::path::Path) -> PathBuf {
     config_dir.join("Faber")
 }
 
+mod storage_choice;
+pub use storage_choice::Choice as StorageChoice;
+
 /// The data folder: `FABER_DATA_DIR` when set (tests, a second copy), else the default under the config folder.
 pub fn data_dir_from_env() -> Option<PathBuf> {
     match std::env::var_os("FABER_DATA_DIR") {
@@ -383,7 +388,7 @@ impl Wiring {
             feed: self.feed,
             voice: Voice { shell: self.shell.clone(), events: self.events },
             shell: self.shell,
-            data_dir,
+            data_dir: data_dir.clone(),
             hidden,
             runtime,
             models: Arc::default(),
@@ -393,6 +398,7 @@ impl Wiring {
             asks: Mutex::default(),
             #[cfg(test)]
             live_modes: Mutex::default(),
+            storage_choice: Mutex::new(storage_choice::Choice::locked(&data_dir)),
         }
     }
 }
@@ -423,6 +429,7 @@ pub struct Host {
     /// The sessions a test pretends are running, by conversation, with their mode (`live_mode`).
     #[cfg(test)]
     live_modes: Mutex<std::collections::HashMap<String, faber_engine::model::Permissions>>,
+    storage_choice: Mutex<storage_choice::Choice>,
 }
 
 impl Host {
@@ -695,6 +702,7 @@ fn camel(snake: &str) -> String {
 /// What [`start`] needs from the front end that is not the engine's own default.
 pub struct StartOptions {
     pub data_dir: PathBuf,
+    pub storage_choice: StorageChoice,
     /// A test or automated run: no visible dialog, and the engine reads no real installed Faber.
     pub hidden: bool,
     /// Where the engine's sessions and timers run.
@@ -712,7 +720,7 @@ pub struct StartOptions {
 /// every conversation file (the owed reports, last run's temporary conversations, the pull requests followed, the work that
 /// goes on by itself) runs right after on a thread of its own, with the engine free between its steps.
 pub fn start(options: StartOptions, shell: Arc<dyn Shell>) -> std::io::Result<Arc<Host>> {
-    let StartOptions { data_dir, hidden, runtime, installed_data_dir, game_guard, browser } = options;
+    let StartOptions { data_dir, storage_choice, hidden, runtime, installed_data_dir, game_guard, browser } = options;
     let _data_directory = faber_engine::workspace::DataDirectory::open(&data_dir)?;
     let clis = setup::detect_clis();
     faber_engine::startup::mark("clis");
@@ -735,7 +743,8 @@ pub fn start(options: StartOptions, shell: Arc<dyn Shell>) -> std::io::Result<Ar
         runtime: runtime.clone(),
         ask: None,
     };
-    let engine = Engine::begin(opts, wiring.emitter())?;
+    let engine = Engine::begin_with_storage(opts, wiring.emitter(), storage_choice.configuration(&data_dir))?;
+    storage_choice.publish_roots(wiring.shell.as_ref());
     faber_engine::startup::mark("engine");
     engine.measure_unix_worker_memory();
     // A project's first request gets one cheap read before its agent starts (R574).
@@ -761,7 +770,9 @@ pub fn start(options: StartOptions, shell: Arc<dyn Shell>) -> std::io::Result<Ar
         let engine = engine.clone();
         runtime.spawn_blocking(move || engine.sweep_copies());
     }
-    let host = Arc::new(wiring.host(engine, data_dir.clone(), hidden, runtime));
+    let mut host = wiring.host(engine, data_dir.clone(), hidden, runtime);
+    host.storage_choice = Mutex::new(storage_choice);
+    let host = Arc::new(host);
     faber_engine::startup::mark("host");
     // R161 step 7: Faber's own browser, for a project's agent, set before any turn can resume.
     if let Some(browser) = browser {
