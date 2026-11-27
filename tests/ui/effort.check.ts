@@ -8,6 +8,12 @@ import { lang, t, useLanguage } from '../../ui/i18n.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+/** Waits until `done` holds, up to `limit` ms: a deletion clears the saved choice only after the state refresh that follows it,
+ * which takes longer than one settle on a slow machine. */
+const until = async (done: () => boolean, limit = 3000) => {
+  const end = performance.now() + limit;
+  while (!done() && performance.now() < end) await settle();
+};
 
 check('effort: only a manual model shows low, medium and high; medium is the default, a new model resets it, and changes are for the next message', async () => {
   const root = document.createElement('div');
@@ -123,7 +129,7 @@ check('effort: choices restore independently; review 8: successful deletion remo
       await settle();
       ok(localStorage.getItem('faber.choice.effort-one'), 'a pending deletion keeps the saved choice');
       complete();
-      await settle();
+      await until(() => localStorage.getItem('faber.choice.effort-one') === null);
       equal(localStorage.getItem('faber.choice.effort-one'), null, 'review 8: successful deletion removes its saved choice');
       ok(localStorage.getItem('faber.choice.effort-two'), 'another conversation keeps its choice');
     } finally {
