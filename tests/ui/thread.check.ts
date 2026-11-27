@@ -206,6 +206,94 @@ check('thread: 300 messages open at the newest 40, prepend without a jump and lo
   }
 });
 
+check('thread: reading 400 messages from the first and back keeps at most 120 drawn, and the view never jumps', async () => {
+  const original = { ...api };
+  const storage = new Map(['faber.place', 'faber.reading'].map((key) => [key, localStorage.getItem(key)]));
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;inset:0;z-index:100';
+  document.body.append(root);
+  let dispose = () => {};
+  const id = 'window-400';
+  const messages: Message[] = Array.from({ length: 400 }, (_, i) => ({
+    id: `window-${i}`, role: i % 2 ? 'assistant' : 'user', at: i + 1,
+    text: `Message ${i + 1}. ` + 'Words that stay at the same reading position. '.repeat(6),
+    ...(i % 2 ? { status: 'done' as const } : {}),
+  }));
+  const waitFor = async (ready: () => boolean, why: string) => {
+    for (let i = 0; i < 150 && !ready(); i++) await new Promise((done) => setTimeout(done, 20));
+    ok(ready(), why);
+    await frames();
+  };
+  try {
+    const base = await original.state();
+    const initial: AppState = { ...base, conversations: [{ id, title: 'Long conversation', area: 'chat', updatedAt: 1 }],
+      groups: [], projects: [], vendors: ['claude'], running: { revision: 0, items: [] }, background: { revision: 0, items: [] }, quotas: [], usage: [],
+      look: { ...base.look, motion: 'none' },
+      settings: { ...base.settings, appearance: { ...base.look.appearance, motion: 'none' }, language: 'en', setup: 'done', tutorialDone: true } };
+    Object.assign(api, {
+      state: async () => initial, versions: async () => [], visualAnswers: async () => [],
+      open: async (): Promise<Conversation> => ({ id, title: 'Long conversation', area: 'chat', sessions: {}, createdAt: 1, updatedAt: 1,
+        earlier: messages.length - 40, messages: messages.slice(-40) }),
+      rewindRedos: async () => [], rewindPoints: async () => [], commands: async () => [],
+      warm: async () => {}, seen: async () => {}, notesSeen: async () => Number.MAX_SAFE_INTEGER,
+      updateStatus: async () => ({ phase: 'none' }), onUpdate: async () => () => {},
+      messagesBefore: async (_: string, first: string) => {
+        const at = messages.findIndex((m) => m.id === first);
+        return messages.slice(Math.max(0, at - 40), at);
+      },
+    });
+    localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id }));
+    localStorage.removeItem('faber.reading');
+    dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), root);
+    await waitFor(() => !!root.querySelector('[data-message-index="399"]'), 'the newest message opens');
+    const thread = root.querySelector<HTMLDivElement>('.thread')!;
+    const drawn = () => [...thread.querySelectorAll<HTMLElement>('[data-message-index]')].map((node) => Number(node.dataset.messageIndex));
+    let most = 0;
+    // Up to the first message, one page at a time, as a person scrolling to the top does.
+    for (let step = 0; step < 200 && !drawn().includes(0); step++) {
+      const first = drawn()[0]!;
+      // A page still settling answers the scroll that asked for it; the next scroll asks for the page above.
+      for (let i = 0; i < 150 && drawn()[0]! >= first; i++) {
+        thread.scrollTop = 1;
+        thread.dispatchEvent(new Event('scroll'));
+        await new Promise((done) => setTimeout(done, 20));
+      }
+      await waitFor(() => drawn()[0]! < first, `scrolling up from message ${first} draws earlier ones`);
+      most = Math.max(most, drawn().length);
+    }
+    ok(drawn().includes(0), 'the first message is reached');
+    ok(most <= 120, `at most 120 messages drawn on the way up: ${most}`);
+    ok(!drawn().includes(399), 'the newest message is let go far above it');
+    // Back down to the newest in half-screen steps, as a person scrolls: the earliest drawn messages go, and at every step,
+    // including the ones that let messages go, the row at the top of the view moves exactly as far as the scroll.
+    const atTop = () => [...thread.querySelectorAll<HTMLElement>('[data-message-index]')]
+      .find((node) => node.getBoundingClientRect().bottom > thread.getBoundingClientRect().top + 1)!;
+    let trimmed = 0;
+    for (let step = 0; step < 600 && !drawn().includes(399); step++) {
+      const row = atTop();
+      const index = row.dataset.messageIndex;
+      const before = row.getBoundingClientRect().top;
+      const first = drawn()[0];
+      const top = thread.scrollTop;
+      thread.scrollTop = top + Math.round(thread.clientHeight / 2);
+      const moved = thread.scrollTop - top;
+      thread.dispatchEvent(new Event('scroll'));
+      await new Promise((done) => requestAnimationFrame(done));
+      await new Promise((done) => requestAnimationFrame(done));
+      if (drawn()[0] !== first) trimmed++;
+      const after = thread.querySelector<HTMLElement>(`[data-message-index="${index}"]`)!.getBoundingClientRect().top;
+      ok(Math.abs(after - (before - moved)) < 3, `scrolling ${moved} px keeps message ${index} in step: ${before} -> ${after}`);
+      most = Math.max(most, drawn().length);
+    }
+    ok(trimmed >= 5, `earlier messages were let go on the way down: ${trimmed} times`);
+    ok(drawn().includes(399), 'the newest message is reached again');
+    ok(most <= 120, `at most 120 messages drawn on the way down: ${most}`);
+  } finally {
+    dispose(); root.remove(); Object.assign(api, original);
+    for (const [key, value] of storage) { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); }
+  }
+});
+
 check('thread: restoring a known reading anchor measures only that row and still skips hidden or removed messages', () => {
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;z-index:9999;top:50px;left:300px;width:300px;height:100px;overflow:auto';

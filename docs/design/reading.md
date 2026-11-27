@@ -24,8 +24,10 @@ How conversation text reads and keeps its place, in Chat and Projects.
   the anchor. Capturing a reading position starts with viewport hit testing, with a geometry fallback; restoring it
   matches message identity before measuring that row. Unchanged positions never write to the native scroll offset.
   Search and version links, and a saved reading position, load as many pages as their target needs. Message indices and
-  saved positions include the unloaded `Conversation.earlier` offset. Loaded pages are retained; nothing adds a setting,
-  a second scroll view or motion. Chat and Projects share this behavior, including reduced motion and narrow windows.
+  saved positions include the unloaded `Conversation.earlier` offset. Loaded pages stay in memory, but at most 120
+  messages (three pages) are drawn: past that, paging up lets go of the newest drawn ones and paging down of the earliest,
+  with the row being read kept in place, so reading a thousand messages from the first stays as light as reading the last
+  ones (a thousand drawn messages took the window past 850 MB, R125). Nothing adds a setting, a second scroll view or motion. Chat and Projects share this behavior, including reduced motion and narrow windows.
 - User messages share the native `content-visibility: auto` skipping used by answers, with a remembered intrinsic height
   of 160 px until measured; offscreen rows stay in the same DOM for selection, find and reading anchors. Bottom padding
   contains the action bar's negative margin, so native paint containment never clips its hit targets.

@@ -108,6 +108,9 @@ function remember(key: string, value: unknown) {
 
 // A long conversation opens its latest page and keeps older pages only when requested.
 const PAGE = 40;
+/** The most messages the thread keeps drawn. Paging past it lets go of the far end, so reading a long conversation from its
+ * first message stays as light as reading its last ones (R125): a thousand drawn messages took the window past 850 MB. */
+const KEEP = 3 * PAGE;
 /** How long a pointer rests on the left edge before the stepped-aside sidebar floats over the stage, and how long it stays after the pointer leaves. */
 const PEEK_DWELL = 100;
 const PEEK_GRACE = 300;
@@ -908,6 +911,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   let historyGeneration = 0;
   let olderPage: Promise<void> | undefined;
   onCleanup(() => { historyGeneration++; olderPage = undefined; });
+  /** After earlier messages appear above: past KEEP, the latest drawn ones go. Nothing above moves, so neither does the view;
+   * scrolling back down draws them again (`onScroll`). */
+  const dropBelow = () => {
+    const end = from() + KEEP;
+    if (end < (until() ?? current()?.messages.length ?? 0)) setUntil(end);
+  };
   const loadOlder = (): Promise<void> => {
     if (olderPage) return olderPage;
     const c = current();
@@ -942,6 +951,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
             setSearchIndex((at) => at === undefined ? undefined : at + page.length);
             setCurrent((latest) => latest && ({ ...latest, earlier: Math.max(0, (latest.earlier ?? 0) - page.length), messages: [...page, ...latest.messages] }));
           });
+          dropBelow();
           if (el) {
             if (searchAt !== undefined) {
               searchMark?.classList.remove('search-focus');
@@ -1417,8 +1427,24 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     lastScrollTop = top;
     if (moved || !reading || stick) keepReading();
     if (below < 400 && end !== undefined) {
-      const next = end + PAGE;
-      setUntil(next < (current()?.messages.length ?? 0) ? next : undefined);
+      const total = current()?.messages.length ?? 0;
+      const next = Math.min(end + PAGE, total);
+      const start = Math.max(from(), next - KEEP);
+      // Later messages appear below; past KEEP the earliest drawn ones go, and what the user is reading stays in place:
+      // the first row that stays and reaches the view is measured before and after.
+      const earlier = current()?.earlier ?? 0;
+      const edge = el.getBoundingClientRect().top;
+      const held = start > from() ? [...el.querySelectorAll<HTMLElement>('[data-message-index]')]
+        .find((node) => Number(node.dataset.messageIndex) - earlier >= start && node.getBoundingClientRect().bottom > edge) : undefined;
+      const was = held?.getBoundingClientRect().top;
+      batch(() => {
+        setUntil(next < total ? next : undefined);
+        setFrom(start);
+      });
+      if (held && was !== undefined) {
+        el.scrollTop += held.getBoundingClientRect().top - was;
+        lastScrollTop = el.scrollTop;
+      }
     }
     if (el.scrollTop < 400 && from() > 0) {
       // The earlier messages appear above; keep what the user is reading in place.
@@ -1429,6 +1455,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       const focused = searchMark === document.activeElement;
       const searchAt = marked || focused ? searchMark?.dataset.messageIndex : undefined;
       setFrom((f) => Math.max(0, f - PAGE));
+      dropBelow();
       if (searchAt !== undefined) {
         searchMark?.classList.remove('search-focus');
         searchMark = el.querySelector<HTMLElement>(`[data-message-index="${searchAt}"]`) ?? undefined;
