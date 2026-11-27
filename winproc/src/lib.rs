@@ -34,6 +34,153 @@ pub fn background_thread() -> std::io::Result<()> {
     if error == 0 { Ok(()) } else { Err(std::io::Error::from_raw_os_error(error)) }
 }
 
+/// Linux applies the nice value to the calling thread.
+#[cfg(target_os = "linux")]
+pub fn background_thread() -> std::io::Result<()> {
+    rustix::process::nice(10).map(|_| ()).map_err(Into::into)
+}
+
+/// Publishes a staged directory or pin on the same drive without replacing a Windows destination.
+pub fn publish_storage_path(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    return move_storage_windows(from, to, false);
+    #[cfg(any(target_os = "linux", target_vendor = "apple"))]
+    return rustix::fs::renameat_with(rustix::fs::CWD, from, rustix::fs::CWD, to, rustix::fs::RenameFlags::NOREPLACE).map_err(Into::into);
+    #[cfg(not(any(windows, target_os = "linux", target_vendor = "apple")))]
+    return std::fs::rename(from, to);
+}
+
+#[cfg(windows)]
+fn move_storage_windows(from: &std::path::Path, to: &std::path::Path, replace: bool) -> std::io::Result<()> {
+    use std::{io, os::windows::ffi::OsStrExt, path::Path};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_NORMAL, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW, SetFileAttributesW,
+    };
+    let wide = |path: &Path| -> io::Result<Vec<u16>> {
+        let parent = path.parent().ok_or(io::ErrorKind::InvalidInput)?.canonicalize()?;
+        let path = parent.join(path.file_name().ok_or(io::ErrorKind::InvalidInput)?);
+        Ok(path.as_os_str().encode_wide().chain([0]).collect())
+    };
+    let (from, to) = (wide(from)?, wide(to)?);
+    let flags = MOVEFILE_WRITE_THROUGH | if replace { MOVEFILE_REPLACE_EXISTING } else { 0 };
+    // SAFETY: both arguments are live, NUL-terminated Windows paths.
+    if !unsafe {
+        (!replace || SetFileAttributesW(from.as_ptr(), FILE_ATTRIBUTE_NORMAL) != 0) && MoveFileExW(from.as_ptr(), to.as_ptr(), flags) != 0
+    } {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Atomically replaces a storage record whose file contents were already synced.
+pub fn publish_storage_record(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    return move_storage_windows(from, to, true);
+    #[cfg(unix)]
+    return std::fs::rename(from, to);
+}
+
+/// Flush the final payload renames; Windows does this in MoveFileEx.
+pub fn sync_storage_publication(root: &std::path::Path, parts: &[std::path::PathBuf]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut parents = std::collections::BTreeSet::new();
+        for part in parts {
+            let path = root.join(part);
+            parents.extend(path.ancestors().skip(1).take_while(|path| path.starts_with(root)).map(std::path::Path::to_path_buf));
+        }
+        for parent in parents.iter().rev() {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
+    }
+    #[cfg(windows)]
+    let _ = (root, parts);
+    Ok(())
+}
+
+/// Complete the item's data durability pass after copying and verifying all of its parts.
+pub fn sync_storage_item(root: &std::path::Path, parts: &[std::path::PathBuf]) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = parts;
+        rustix::fs::syncfs(&std::fs::File::open(root)?).map_err(Into::into)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        use std::{fs, io, path::Path};
+        // Flush in a separate pass, after validation, away from the streaming copy loop.
+        fn sync(path: &Path) -> io::Result<()> {
+            let metadata = fs::symlink_metadata(path)?;
+            if metadata.file_type().is_symlink() {
+                return Ok(());
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                if metadata.file_attributes() & 0x400 != 0 {
+                    return Err(io::ErrorKind::InvalidData.into());
+                }
+            }
+            if metadata.is_dir() {
+                for entry in fs::read_dir(path)? {
+                    sync(&entry?.path())?;
+                }
+                #[cfg(unix)]
+                fs::File::open(path)?.sync_all()?;
+            } else if metadata.is_file() {
+                #[cfg(windows)]
+                flush_storage_file(path)?;
+                #[cfg(unix)]
+                fs::File::open(path)?.sync_all()?;
+            } else {
+                return Err(io::ErrorKind::InvalidData.into());
+            }
+            Ok(())
+        }
+        for part in parts {
+            let path = root.join(part);
+            sync(&path)?;
+            #[cfg(unix)]
+            for parent in path.ancestors().skip(1).take_while(|parent| parent.starts_with(root)) {
+                fs::File::open(parent)?.sync_all()?;
+            }
+        }
+        #[cfg(windows)]
+        {
+            use std::io::Write;
+            let mut barrier = fs::File::create_new(root.join(".flushed"))?;
+            barrier.write_all(&[0])?;
+            barrier.sync_all()?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn flush_storage_file(path: &std::path::Path) -> std::io::Result<()> {
+    use std::{fs, io, os::windows::io::AsRawHandle};
+    use windows_sys::Wdk::Storage::FileSystem::NtFlushBuffersFileEx;
+    use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
+    const FLUSH_FLAGS_NO_SYNC: u32 = 2;
+    let file = fs::OpenOptions::new().write(true).open(path)?;
+    let mut result = IO_STATUS_BLOCK::default();
+    // SAFETY: the writable handle and output block live across the call. The flag submits cached writes
+    // without flushing the device after each file. The caller then flushes the staging volume once.
+    let status = unsafe { NtFlushBuffersFileEx(file.as_raw_handle(), FLUSH_FLAGS_NO_SYNC, std::ptr::null(), 0, &mut result) };
+    if status >= 0 {
+        return Ok(());
+    }
+    unsafe extern "system" {
+        fn RtlNtStatusToDosError(status: i32) -> u32;
+    }
+    // SAFETY: this pure conversion takes an NTSTATUS and no pointers.
+    let error = unsafe { RtlNtStatusToDosError(status) } as i32;
+    match error {
+        1 | 50 | 87 => file.sync_all(), // Some filesystems do not support flushing without device sync.
+        _ => Err(io::Error::from_raw_os_error(error)),
+    }
+}
+
 #[cfg(windows)]
 pub use imp::{
     background_thread, end_programs, full_screen_in_front, job_accounting, job_active_processes, job_cpu_cap, job_memory_cap,

@@ -110,6 +110,7 @@ let lastSection: Section = 'general';
 export const forgetSection = (): void => { lastSection = 'general'; };
 
 export function Settings(props: Props) {
+  const [storageRevision, setStorageRevision] = createSignal(0);
   const defaultOptions = createMemo(() => modelOptions(props.vendors, props.models, props.antigravityModels));
   const [section, setSectionNow] = createSignal<Section>(props.start ?? lastSection);
   const setSection = (id: Section) => { hookRequest++; setHookLines([]); lastSection = id; setSectionNow(id); };
@@ -351,8 +352,8 @@ export function Settings(props: Props) {
             {/* The data folder holds both areas (Chat conversations too), so its size sits in General; closed, it measures nothing. */}
             <Group title={t('set.group.storage')}>
               <Fold id="set-storage" title={t('set.storage')} hint={t('set.storage.line')}>
-                <StorageLocation />
-                <StorageUse projects={props.projects ?? []} />
+                <StorageLocation onRemoved={() => setStorageRevision((revision) => revision + 1)} />
+                <StorageUse projects={props.projects ?? []} revision={storageRevision()} />
               </Fold>
             </Group>
           </Match>

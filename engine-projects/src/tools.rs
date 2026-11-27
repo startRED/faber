@@ -10,8 +10,10 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+mod catalog_move;
 pub mod kits;
 mod location;
+pub use catalog_move::{MoveControl, MoveEnd, MoveEvent};
 mod npm;
 pub use crate::store::retry_busy;
 pub use npm::Package;
@@ -632,6 +634,9 @@ impl Store {
     }
 
     fn discard_at(&self, root: &Path, dir: &Path) -> io::Result<()> {
+        if root == self.root && self.retains_old_move(dir) {
+            return Ok(());
+        }
         match std::fs::symlink_metadata(dir) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error),
@@ -728,13 +733,14 @@ impl Store {
         if self.plugin_definition(&item.id).is_none() && item.server.is_none() && item.runtime.is_none() {
             self.write_manifest().map_err(|e| e.to_string())?;
         }
+        let kept_location = self.recorded_root(&item.id).map_err(|e| e.to_string())?;
         self.record_location(&item.id, &root).map_err(|e| e.to_string())?;
         // A first install that does not finish forgets its location too, so a later one is not held to a drive that
         // never got the files.
         let first = !ledger.contains_key(&item.id);
         let forget = |store: &Self| {
-            if first {
-                let _ = store.record_location(&item.id, &store.root);
+            if first && kept_location.as_ref() != Some(&root) {
+                let _ = store.record_location(&item.id, kept_location.as_deref().unwrap_or(&store.root));
             }
         };
         retry_busy(|| std::fs::rename(staging, &dest)).map_err(|e| {

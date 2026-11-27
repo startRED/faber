@@ -798,6 +798,20 @@ export interface StorageChoice {
   notice: 'reason.storage.default' | 'reason.storage.unreadable' | null;
   ask: boolean;
 }
+export interface StorageMove {
+  running: boolean;
+  stopping: boolean;
+  stopped: boolean;
+  /** Change or Reset picked another folder while it ran: it stopped and dropped the tool it was copying. */
+  superseded: boolean;
+  available: boolean;
+  oldCopies: boolean;
+  target: string | null;
+  item: { id: string; number: number; total: number; copied: number; size: number | null } | null;
+  moved: number;
+  failures: { id: string; error: 'error.storage.moveItem' }[];
+  error: 'error.storage.move' | 'error.storage.unreachable' | null;
+}
 /** Kept only in memory; the engine caps each conversation at 32 commands and each output at 20 lines / 8 KB. */
 export interface BackgroundCommand {
   id: string;
@@ -1287,6 +1301,11 @@ export const api = {
   storageUsage: () => invoke<StorageUsage>('storage_usage'),
   storageChoice: () => invoke<StorageChoice>('storage_choice'),
   storageChoose: (reset: boolean) => invoke<StorageChoice | null>('storage_choose', { reset }),
+  storageMoveStatus: () => invoke<StorageMove>('storage_move_status'),
+  storageMoveStart: () => invoke<void>('storage_move_start'),
+  storageMoveStop: () => invoke<void>('storage_move_stop'),
+  /** The moved originals kept because a running conversation may still use them. */
+  storageMoveRemove: () => invoke<{ id: string; error: 'reason.storage.inUse' }[]>('storage_move_remove'),
   saveTheme: (appearance: Appearance, name: string) => invoke<boolean>('save_theme', { appearance, name }),
   openTheme: () => invoke<ThemeFile | null>('open_theme'),
   saveFile: (id: string, path: string) => invoke<boolean>('save_file', { id, path }),

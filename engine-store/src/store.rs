@@ -496,6 +496,10 @@ impl Store {
         *self.budget_owner.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
+    pub fn owns_budget(&self) -> bool {
+        self.budget_owner.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+    }
+
     fn write<T: Serialize>(&self, path: &Path, value: &T) -> Result<(), Fault> {
         self.write_with(path, value, true)
     }

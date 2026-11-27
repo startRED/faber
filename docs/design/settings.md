@@ -46,7 +46,8 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   folder. General explains the rule and offers the folder choice.
 - General ends with *Storage*, one closed fold (`ui/StorageUse.tsx`). "Where new copies and tools go" shows the effective
   folder, opens the system folder picker with Change and offers Reset to default. A choice applies immediately to new
-  project copies and catalog installs, including audio runtimes. Existing items stay where they were created.
+  project copies and catalog installs, including audio runtimes. Existing project copies stay in place and retire
+  through the regular project flow.
   `Faber-storage.json` beside the main data folder retains the choice. `FABER_DATA_DIR` overrides it. An unavailable
   choice at startup uses the default with a notice. If the record cannot be read, Faber keeps it and finds existing
   external copies through their saved paths. A drive lost during use stops a new copy or download with a notice.
@@ -55,10 +56,30 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   chosen drive are locked in Git, so making another copy while that drive is away never makes Git forget them.
   Accepted limits: a CLI in Full Access, or Antigravity (it runs without a sandbox), can change this record and the
   folder's owner mark like Faber's other records, and the chosen folder keeps the drive's own permissions.
+- With a chosen folder and installed catalog tools in Faber's main data folder, *Move tools* starts a background move
+  (`storage_move_start`, one worker thread at background priority, its status only in memory). Storage shows the
+  destination, the current item out of the total, and its copied bytes. Each item is copied into
+  `<chosen>/Faber-storage/tools/.storage-move/<id>`, checked by count, sizes and SHA-256 and flushed once, all without
+  the catalog store lock, so the catalog, installs and kits never wait behind a copy. The lock is taken only to read the
+  item before the copy and to publish it after: Faber checks that the item's commit, folders and their names, sizes and
+  times did not change meanwhile, renames the copy into place, writes the receipt and switches
+  `tools/locations/<id>.json`. An item updated during its copy stays where it was and is reported; one removed meanwhile
+  is skipped. The move includes disabled tools, replacement folders and the interpreter pins used by moved runtimes.
+  Running servers keep their existing files until they restart, and new sessions use the new location.
+  Stop lets the current item finish and leaves the rest in place. An item error leaves its old location active and
+  the worker continues. Losing the destination stops the move with a notice and leaves unfinished items in place.
+  Change and Reset remain available during a move. The worker checks the choice before each item and before publishing:
+  once the folder is no longer the chosen one it drops the item it was copying and stops, and Storage says the folder
+  changed. A retry clears unfinished staging.
+- *Remove the old copies* asks before deleting retained tool folders from the main data folder. An item that a live
+  conversation's kit holds keeps its original, with a note naming it (`reason.storage.inUse`): an audio runtime reaches
+  a session by its path in the store, so a session started before the move may still run it. Removing again after that
+  conversation closes deletes it. A moved tool can be removed from Catalog first. For installed tools, removal requires
+  their verified files at the recorded location. Interpreter pin records remain in the registry.
 - The fold measures the main data folder on opening and "Measure again" (`storage_usage`, bounded, at background priority).
   It shows total and free space, kinds by size and copies by project, including removed projects and loose copies.
   Unreadable sizes say "Unknown". A partial scan says sizes may be larger. Loading keeps old figures and announces
-  "Measuring…"; failure offers "Try again". Copy cleanup runs automatically and has no button here. Below 600 px the
+  "Measuring…"; failure offers "Try again". Project copy cleanup runs automatically. Below 600 px the
   bars go under their rows.
 - Reply style is one select row for both AIs in General, before the Codex fold: AI's own way (default), Short, Explained,
   My own words. My own words opens a three-line text field below the row, named by the row's label, limited to 400

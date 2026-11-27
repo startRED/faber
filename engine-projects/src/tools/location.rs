@@ -10,11 +10,12 @@ fn record(store: &Path, id: &str) -> PathBuf {
     store.join(FOLDER).join(format!("{id}.json"))
 }
 
-fn external(store: &Path, root: &Path) -> bool {
+pub(super) fn external(store: &Path, root: &Path) -> bool {
     store.parent().zip(root.parent()).is_some_and(|(data, parent)| {
         root.file_name().is_some_and(|name| name == "tools")
             && crate::storage::external_root_name(parent)
             && real_path(root).is_ok()
+            && real_path(&parent.join(".faber-owner")).is_ok()
             && crate::storage::owns_external_root(data, parent)
     })
 }
@@ -38,6 +39,22 @@ pub(super) fn source_root(store: &Path, id: &str) -> PathBuf {
 }
 
 impl Store {
+    pub(super) fn recorded_root(&self, id: &str) -> io::Result<Option<PathBuf>> {
+        if !valid_id(id) {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        let file = record(&self.root, id);
+        real_path(&file).map_err(|_| io::ErrorKind::InvalidInput)?;
+        match fs::symlink_metadata(&file) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Ok(_) => {
+                let bytes = small_file(&file).ok_or(io::ErrorKind::InvalidData)?;
+                serde_json::from_slice(&bytes).map(Some).map_err(io::Error::other)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn with_new_storage(mut self, root: Option<&Path>) -> Self {
         self.new_root = root.map(|root| root.join("tools"));
         self
@@ -59,7 +76,7 @@ impl Store {
             // Its recorded drive is away: say so, and never install a second copy somewhere else.
             return Err(if valid_id(&item.id) { "error.storage.unreachable" } else { "error.tools.install" }.into());
         }
-        if self.initial_ledger()?.contains_key(&item.id) || self.occupied_install(item)? {
+        if self.initial_ledger()?.contains_key(&item.id) || self.occupied_install(item)? || self.has_old_move(&item.id) {
             return Ok(existing);
         }
         let root = self.new_root.as_ref().unwrap_or(&self.root);
@@ -92,7 +109,9 @@ impl Store {
         let mut temp = tempfile::NamedTempFile::new_in(parent)?;
         temp.write_all(&serde_json::to_vec(root).map_err(io::Error::other)?)?;
         temp.as_file().sync_all()?;
-        temp.persist(file).map_err(|failure| failure.error)?;
+        faber_winproc::publish_storage_record(temp.path(), &file)?;
+        // Once published, the location is authoritative even if a later metadata flush fails.
+        let _ = faber_winproc::sync_storage_publication(&self.root, &[Path::new(FOLDER).join(format!("{id}.json"))]);
         Ok(())
     }
 
@@ -113,7 +132,8 @@ impl Store {
             return Err("error.storage.unreachable".into());
         }
         for path in std::iter::once(root.to_path_buf()).chain(
-            ["plugin", "plugin/skills", "servers", "plugins", "runtimes", "disabled", "removed", "replacements"].map(|sub| root.join(sub)),
+            ["plugin", "plugin/skills", "servers", "plugins", "runtimes", "disabled", "removed", "replacements", "runtime-pins"]
+                .map(|sub| root.join(sub)),
         ) {
             match fs::symlink_metadata(&path) {
                 Ok(_) => super::replacement::plain(&path, true)?,

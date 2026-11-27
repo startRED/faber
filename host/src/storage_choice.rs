@@ -12,6 +12,8 @@ const UNREADABLE: &str = "reason.storage.unreadable";
 const CHANGE_UNREADABLE: &str = "error.storage.unreadable";
 const LIMIT: u64 = 64 * 1024;
 
+pub(crate) mod storage_move;
+
 #[derive(Default, Deserialize, Serialize)]
 struct Saved {
     folder: Option<PathBuf>,

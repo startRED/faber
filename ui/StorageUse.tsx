@@ -1,45 +1,124 @@
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
-import { api, type Project, type StorageChoice, type StorageUsage } from './api.ts';
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { api, type Project, type StorageChoice, type StorageMove, type StorageUsage } from './api.ts';
 import { Opt } from './controls.tsx';
 import { bytes, failureText, t } from './i18n.ts';
 
 // How much disk Faber's data folder takes, inside General > Storage. It measures when its fold opens (this component is
 // only in the page while the fold is open) and when "Measure again" is pressed; there is no timer. A size the engine
-// could not read is null and reads "Unknown", never 0. Nothing here removes anything: Faber already removes copies it no
-// longer needs by itself, and no clean-up command is offered to the screen yet.
+// could not read is null and reads "Unknown", never 0.
 
 type Kind = keyof StorageUsage['byKind'];
 const KINDS: Kind[] = ['copies', 'reports', 'tools', 'rewind', 'helperTranscripts', 'conversations', 'rest'];
 
-export function StorageLocation() {
+export function StorageLocation(props: { onRemoved: () => void }) {
   const [choice, setChoice] = createSignal<StorageChoice>();
+  const [move, setMove] = createSignal<StorageMove>();
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<unknown>();
-  onMount(() => void api.storageChoice().then(setChoice, setError));
-  const change = async (reset: boolean) => {
+  const [confirm, setConfirm] = createSignal(false);
+  const [kept, setKept] = createSignal<{ id: string; error: 'reason.storage.inUse' }[]>([]);
+  let request = 0;
+  const refresh = async () => {
+    const mine = ++request;
+    const status = await api.storageMoveStatus();
+    if (mine === request) setMove(status);
+  };
+  onCleanup(() => { request++; });
+  const moving = createMemo(() => move()?.running === true);
+  createEffect(() => {
+    if (!moving()) return;
+    let reading = false;
+    const timer = setInterval(() => {
+      if (busy() || reading) return;
+      reading = true;
+      void refresh().catch(setError).finally(() => { reading = false; });
+    }, 250);
+    onCleanup(() => clearInterval(timer));
+  });
+  const run = async (action: () => Promise<void>) => {
     if (busy()) return;
     setBusy(true);
     setError(undefined);
     try {
-      const saved = await api.storageChoose(reset);
-      if (saved) setChoice(saved);
+      await action();
+      await refresh();
     } catch (failure) {
       setError(failure);
     } finally {
       setBusy(false);
     }
   };
+  onMount(() => void run(async () => { setChoice(await api.storageChoice()); }));
+  const change = (reset: boolean) => run(async () => {
+    const saved = await api.storageChoose(reset);
+    if (saved) {
+      setChoice(saved);
+      setConfirm(false);
+    }
+  });
+  const remove = () => run(async () => {
+    setKept(await api.storageMoveRemove());
+    setConfirm(false);
+    props.onRemoved();
+  });
+  const locked = () => busy() || !choice() || choice()?.locked;
+  const progress = () => {
+    const item = move()?.item;
+    if (!item) return t('set.storage.movePreparing');
+    const position = { name: item.id, number: item.number, total: item.total };
+    return item.size === null
+      ? t('set.storage.moveItem', position)
+      : t('set.storage.moveProgress', { ...position, copied: bytes(item.copied), size: bytes(item.size) });
+  };
   return (
     <div class="storage-location" aria-busy={busy()}>
       <Opt id="set-storage-location" label={t('set.storage.location')} hint={choice()?.folder} more={t('set.storage.locationMore')}>
-        <button type="button" class="btn" aria-disabled={busy() || !choice() || choice()?.locked} onClick={() => {
-          if (choice() && !choice()?.locked) void change(false);
+        <button type="button" class="btn" aria-disabled={!!locked()} onClick={() => {
+          if (!locked()) void change(false);
         }}>{t('set.storage.change')}</button>
-        <button type="button" class="btn" aria-disabled={busy() || !choice()?.custom || choice()?.locked} onClick={() => {
-          if (choice()?.custom && !choice()?.locked) void change(true);
+        <button type="button" class="btn" aria-disabled={!!locked() || !choice()?.custom} onClick={() => {
+          if (!locked() && choice()?.custom) void change(true);
         }}>{t('set.storage.reset')}</button>
       </Opt>
       <Show when={choice()?.notice}>{(key) => <p class="hint store-note" role="status">{t(key())}</p>}</Show>
+      <Show when={move()?.running || move()?.available}>
+        <Opt id="set-storage-move" label={t('set.storage.move')} hint={move()?.running ? move()?.target ?? undefined : t('set.storage.moveHint')}>
+          <button type="button" class="btn" disabled={busy() || move()?.stopping}
+            onClick={() => void run(move()?.running ? api.storageMoveStop : api.storageMoveStart)}>
+            {t(move()?.stopping ? 'set.storage.moveStopping' : move()?.running ? 'set.storage.moveStop' : 'set.storage.moveAction')}
+          </button>
+        </Opt>
+      </Show>
+      <Show when={move()?.running}>
+        <p class="hint store-note" role="status">{progress()}</p>
+      </Show>
+      <Show when={move()?.stopped}><p class="hint store-note" role="status">{t('set.storage.moveStopped')}</p></Show>
+      <Show when={move()?.superseded}><p class="hint store-note" role="status">{t('set.storage.moveSuperseded')}</p></Show>
+      <Show when={move()?.moved || move()?.failures.length}>
+        <p class="hint store-note" role="status">{t('set.storage.moveResult', { moved: move()!.moved, failed: move()!.failures.length })}</p>
+      </Show>
+      <For each={move()?.failures}>{(item, index) => (
+        <Opt id={`set-storage-failed-${index()}`} label={item.id} hint={t(item.error)} />
+      )}</For>
+      <Show when={move()?.oldCopies && !move()?.running}>
+        <Opt id="set-storage-left" label={t('set.storage.left')} hint={confirm() ? t('set.storage.removeConfirm') : undefined}>
+          <Show when={confirm()}>
+            <button type="button" class="btn" disabled={busy()} onClick={() => {
+              document.getElementById('set-storage-remove')?.focus();
+              setConfirm(false);
+            }}>{t('set.storage.moveCancel')}</button>
+          </Show>
+          <button type="button" id="set-storage-remove" class="btn" classList={{ danger: confirm() }}
+            disabled={busy()} aria-describedby={confirm() ? 'set-storage-left-hint' : 'set-storage-left-name'}
+            onClick={() => confirm() ? void remove() : setConfirm(true)}>
+            {t('set.storage.removeAction')}
+          </button>
+        </Opt>
+      </Show>
+      <For each={move()?.oldCopies ? kept() : []}>{(item) => (
+        <p class="hint store-note" role="status">{t(item.error, { name: item.id })}</p>
+      )}</For>
+      <Show when={move()?.error}>{(key) => <p class="note err store-note" role="alert">{t(key())}</p>}</Show>
       <Show when={error()}>{(failure) => <p class="note err store-note" role="alert">{failureText(failure())}</p>}</Show>
     </div>
   );
@@ -60,7 +139,7 @@ function Row(props: { name: string; size: number | null; of: number | null }) {
   );
 }
 
-export function StorageUse(props: { projects: Project[] }) {
+export function StorageUse(props: { projects: Project[]; revision?: number }) {
   const [usage, setUsage] = createSignal<StorageUsage>();
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<unknown>();
@@ -74,7 +153,10 @@ export function StorageUse(props: { projects: Project[] }) {
       (failure) => { if (mine === request) setError(failure); },
     ).finally(() => { if (mine === request) setBusy(false); });
   };
-  onMount(measure);
+  createEffect(() => {
+    void props.revision;
+    measure();
+  });
   // A reading that arrives after the fold closed is dropped.
   onCleanup(() => { request++; });
 

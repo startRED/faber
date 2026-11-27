@@ -1,7 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import { api, type AppState, type Appearance, type CheckResult, type Look, type QuotaReading, type Settings as Saved, type Vendor, type VendorUsage } from '../../ui/api.ts';
+import { api, type AppState, type Appearance, type CheckResult, type Look, type QuotaReading, type Settings as Saved, type StorageMove, type Vendor, type VendorUsage } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
 import { AppearanceSection } from '../../ui/Appearance.tsx';
 import { previewer } from '../../ui/appearance.ts';
@@ -12,7 +12,7 @@ import { en } from '../../ui/locales/en.ts';
 import { es } from '../../ui/locales/es.ts';
 import { fr } from '../../ui/locales/fr.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
-import { useLanguage } from '../../ui/i18n.ts';
+import { bytes, useLanguage } from '../../ui/i18n.ts';
 import { level } from '../../ui/motion.ts';
 import { accountLine, seedQuotas, usageRows } from '../../ui/sidebar.ts';
 import { forgetSection, Settings } from '../../ui/Settings.tsx';
@@ -1803,6 +1803,9 @@ check('storage: pressing every control of the view reads and asks nothing, and a
   }
   let fail = true;
   shared.storageUsage = async () => { calls.push('storageUsage'); if (fail) throw 'error.store.read'; return { ...STORAGE, partial: false, copiesByProject: {}, unassignedCopyBytes: 0 }; };
+  // The location row beside it reads its own state once; this check is about the measuring view.
+  shared.storageChoice = async () => ({ folder: 'C:/Profile/Faber', custom: false, locked: false, notice: null, ask: false });
+  shared.storageMoveStatus = async () => STORAGE_MOVE;
   const view = storageView([]);
   try {
     view.host.querySelector<HTMLButtonElement>('#set-storage')!.click();
@@ -1826,13 +1829,14 @@ check('storage: pressing every control of the view reads and asks nothing, and a
 });
 
 check('storage: the new destination is shown and Reset restores the default folder', async () => {
-  const saved = { storageChoice: api.storageChoice, storageChoose: api.storageChoose, storageUsage: api.storageUsage };
+  const saved = { storageChoice: api.storageChoice, storageChoose: api.storageChoose, storageUsage: api.storageUsage, storageMoveStatus: api.storageMoveStatus };
   const initial = { folder: 'D:/Faber-storage', custom: true, locked: false, notice: null, ask: false };
   const resetTo = { ...initial, folder: 'C:/Profile/Faber', custom: false };
   const calls: boolean[] = [];
   api.storageChoice = async () => initial;
   api.storageChoose = async (reset) => { calls.push(reset); return reset ? resetTo : null; };
   api.storageUsage = async () => STORAGE;
+  api.storageMoveStatus = async () => STORAGE_MOVE;
   const view = storageView();
   try {
     view.host.querySelector<HTMLButtonElement>('#set-storage')!.click();
@@ -1858,9 +1862,114 @@ check('storage: the new destination is shown and Reset restores the default fold
   }
 });
 
+const STORAGE_MOVE: StorageMove = {
+  running: false, stopping: false, stopped: false, superseded: false, available: false, oldCopies: false,
+  item: null, target: null, moved: 0, failures: [], error: null,
+};
+
+check('storage: live item and byte progress, Stop and removal are in General', async () => {
+  const saved = {
+    storageChoice: api.storageChoice, storageUsage: api.storageUsage, storageMoveStatus: api.storageMoveStatus,
+    storageMoveStart: api.storageMoveStart, storageMoveStop: api.storageMoveStop, storageMoveRemove: api.storageMoveRemove,
+  };
+  const calls: string[] = [];
+  let state: StorageMove = { ...STORAGE_MOVE, available: true };
+  api.storageChoice = async () => ({ folder: 'D:/Faber-storage', custom: true, locked: false, notice: null, ask: false });
+  api.storageUsage = async () => STORAGE;
+  api.storageMoveStatus = async () => state;
+  api.storageMoveStart = async () => {
+    calls.push('start');
+    state = { ...state, running: true, item: { id: 'voice', number: 1, total: 2, copied: 0, size: 4096 } };
+  };
+  api.storageMoveStop = async () => {
+    calls.push('stop');
+    state = { ...state, stopping: true };
+  };
+  api.storageMoveRemove = async () => {
+    calls.push('remove');
+    state = { ...state, oldCopies: false };
+    return [];
+  };
+  const view = storageView();
+  const button = (words: string) => [...view.host.querySelectorAll('button')].find((b) => b.textContent?.trim() === words)!;
+  const updated = async (words: string) => {
+    for (let waited = 0; waited < 1500 && !view.host.textContent?.includes(words); waited += 50) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    ok(view.host.textContent?.includes(words), words);
+  };
+  try {
+    view.host.querySelector<HTMLButtonElement>('#set-storage')!.click();
+    await tick();
+    button(en['set.storage.moveAction']).click();
+    await tick();
+    deepEqual(calls, ['start']);
+    equal(button(en['set.storage.change']).getAttribute('aria-disabled'), 'false');
+    equal(button(en['set.storage.reset']).getAttribute('aria-disabled'), 'false');
+    const progress = en['set.storage.moveProgress']
+      .replace('{name}', 'voice').replace('{number}', '1').replace('{total}', '2')
+      .replace('{copied}', bytes(1024)).replace('{size}', bytes(4096));
+    state = { ...state, item: { ...state.item!, copied: 1024 } };
+    await updated(progress);
+    button(en['set.storage.moveStop']).click();
+    await tick();
+    deepEqual(calls, ['start', 'stop']);
+    ok(button(en['set.storage.moveStopping']).disabled);
+    state = { ...state, running: false, stopping: false, stopped: true, moved: 1, item: null, oldCopies: true };
+    await updated(en['set.storage.moveStopped']);
+    button(en['set.storage.removeAction']).click();
+    ok(view.host.textContent?.includes(en['set.storage.removeConfirm']));
+    deepEqual(calls, ['start', 'stop']);
+    button(en['set.storage.removeAction']).click();
+    await tick();
+    deepEqual(calls, ['start', 'stop', 'remove']);
+    ok(!button(en['set.storage.removeAction']));
+  } finally {
+    Object.assign(api, saved);
+    view.stop();
+  }
+});
+
+check('storage: Change during a move stops it and says so, and an original in use stays with its reason', async () => {
+  const saved = {
+    storageChoice: api.storageChoice, storageChoose: api.storageChoose, storageUsage: api.storageUsage,
+    storageMoveStatus: api.storageMoveStatus, storageMoveRemove: api.storageMoveRemove,
+  };
+  const chosen = { folder: 'D:/Faber-storage', custom: true, locked: false, notice: null, ask: false };
+  let state: StorageMove = { ...STORAGE_MOVE, running: true, target: 'D:/Faber-storage', item: { id: 'voice', number: 1, total: 2, copied: 0, size: null } };
+  api.storageChoice = async () => chosen;
+  api.storageUsage = async () => STORAGE;
+  api.storageMoveStatus = async () => state;
+  api.storageChoose = async () => {
+    // The worker sees the new choice before its next item and drops the one it was copying.
+    state = { ...state, running: false, superseded: true, item: null, oldCopies: true };
+    return { ...chosen, folder: 'E:/Faber-storage' };
+  };
+  api.storageMoveRemove = async () => [{ id: 'voice', error: 'reason.storage.inUse' }];
+  const view = storageView();
+  const button = (words: string) => [...view.host.querySelectorAll('button')].find((b) => b.textContent?.trim() === words)!;
+  try {
+    view.host.querySelector<HTMLButtonElement>('#set-storage')!.click();
+    await tick();
+    equal(button(en['set.storage.change']).getAttribute('aria-disabled'), 'false', 'Change stays possible during a move');
+    button(en['set.storage.change']).click();
+    await tick();
+    ok(view.host.textContent?.includes(en['set.storage.moveSuperseded']));
+    ok(!view.host.textContent?.includes(en['set.storage.moveStopped']));
+    button(en['set.storage.removeAction']).click();
+    button(en['set.storage.removeAction']).click();
+    await tick();
+    ok(view.host.textContent?.includes(en['reason.storage.inUse'].replace('{name}', 'voice')));
+    ok(button(en['set.storage.removeAction']), 'the kept original can be removed later');
+  } finally {
+    Object.assign(api, saved);
+    view.stop();
+  }
+});
+
 check('storage: every language has the view written by hand, and the closed line fits its row', () => {
-  const keys = Object.keys(en).filter((key) => key.startsWith('set.storage') || key === 'set.group.storage') as (keyof typeof en)[];
-  equal(keys.length, 28);
+  const keys = Object.keys(en).filter((key) => /^(set|reason|error)\.storage\b/.test(key) || key === 'set.group.storage') as (keyof typeof en)[];
+  ok(keys.includes('set.storage.moveProgress'));
   for (const [code, words] of Object.entries({ ptBR, es, fr, de })) {
     for (const key of keys) ok(typeof words[key] === 'string' && words[key].length > 0, `${code}: ${key}`);
     for (const key of ['set.storage', 'set.storage.kind.copies', 'set.storage.kind.rewind', 'set.storage.sweep', 'set.storage.unknown'] as const) ok(words[key] !== en[key], `${code}: ${key} is not left in English`);

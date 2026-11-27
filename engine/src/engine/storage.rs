@@ -9,11 +9,21 @@ pub(super) fn protect_roots(roots: BTreeSet<PathBuf>) -> Vec<Arc<PathBuf>> {
 }
 
 impl Engine {
+    pub fn owns_storage_profile(&self) -> bool {
+        self.with(|core| core.store.owns_budget())
+    }
+
     pub fn set_new_storage(&self, root: Option<PathBuf>, roots: BTreeSet<PathBuf>) {
         self.with(|core| {
             core.new_storage = root;
             core.storage_roots = protect_roots(roots);
         });
+    }
+
+    /// The catalog items in a live session's kit. A runtime reaches a session by its path in the tool store, not as a copy
+    /// in the kit, so the originals of a moved item stay while a session that may have started before the move lives.
+    pub fn catalog_ids_in_live_sessions(&self) -> BTreeSet<String> {
+        self.with(|core| core.live.values().flat_map(|live| live.tool_kit.ids.iter().cloned()).collect())
     }
 
     pub fn tool_store(&self) -> crate::tools::Store {

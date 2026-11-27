@@ -227,10 +227,19 @@ impl Root {
         if !path.is_absolute() {
             return Err(io::ErrorKind::InvalidInput.into());
         }
-        let path = path.canonicalize()?;
+        Self::open_no_links(&path.canonicalize()?)
+    }
+
+    pub fn open_no_links(path: &Path) -> io::Result<Self> {
+        if !path.is_absolute() {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
         let mut full = PathBuf::new();
         let mut ancestors = vec![];
         for part in path.components() {
+            if matches!(part, Component::ParentDir) {
+                return Err(io::ErrorKind::InvalidInput.into());
+            }
             full.push(part);
             if matches!(part, Component::Prefix(_)) {
                 continue;
@@ -244,7 +253,7 @@ impl Root {
         }
         let dir = ancestors.pop().ok_or(io::ErrorKind::InvalidInput)?;
         let id = file_identity(&dir)?;
-        Ok(Self { dir, path, id, _ancestors: ancestors })
+        Ok(Self { dir, path: path.to_path_buf(), id, _ancestors: ancestors })
     }
     pub fn identity(&self) -> io::Result<Vec<u8>> {
         Ok(self.id.clone())
@@ -274,6 +283,19 @@ impl Root {
             full.push(part);
         }
         Ok((dir, full, parents))
+    }
+    pub fn remove_storage_path(&self, path: &Path, directory: bool) -> io::Result<()> {
+        let (_dir, parent, _ancestors) = self.parent(path, false)?;
+        let leaf = parent.join(path.file_name().ok_or(io::ErrorKind::InvalidInput)?);
+        if directory {
+            // The pinned ancestors cannot be renamed, and Windows' recursive removal unlinks reparse points.
+            if std::fs::symlink_metadata(&leaf)?.file_attributes() & REPARSE != 0 {
+                return Err(io::ErrorKind::PermissionDenied.into());
+            }
+            std::fs::remove_dir_all(leaf)
+        } else {
+            std::fs::remove_file(leaf)
+        }
     }
     pub fn open_file(&self, path: &str) -> io::Result<File> {
         self.open_with(path, || {})

@@ -737,6 +737,7 @@ mod tests {
             assert!(core.kit_checks.is_empty());
             assert_eq!(core.live["kit"].tool_kit.ids, ["debug"]);
         });
+        assert!(engine.catalog_ids_in_live_sessions().contains("debug"), "removing moved originals asks for these");
         engine.shutdown();
     }
 

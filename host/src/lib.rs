@@ -396,7 +396,8 @@ impl Wiring {
             asks: Mutex::default(),
             #[cfg(test)]
             live_modes: Mutex::default(),
-            storage_choice: Mutex::new(storage_choice::Choice::locked(&data_dir)),
+            storage_choice: Arc::new(Mutex::new(storage_choice::Choice::locked(&data_dir))),
+            storage_move: Default::default(),
         }
     }
 }
@@ -426,7 +427,9 @@ pub struct Host {
     /// The sessions a test pretends are running, by conversation, with their mode (`live_mode`).
     #[cfg(test)]
     live_modes: Mutex<std::collections::HashMap<String, faber_engine::model::Permissions>>,
-    storage_choice: Mutex<storage_choice::Choice>,
+    /// Shared with a storage move, which stops when the choice it moves to is no longer the chosen one.
+    storage_choice: Arc<Mutex<storage_choice::Choice>>,
+    storage_move: storage_choice::storage_move::State,
 }
 
 impl Host {
@@ -757,7 +760,7 @@ pub fn start(options: StartOptions, shell: Arc<dyn Shell>) -> std::io::Result<Ar
         runtime.spawn_blocking(move || engine.sweep_copies());
     }
     let mut host = wiring.host(engine, data_dir.clone(), hidden, runtime);
-    host.storage_choice = Mutex::new(storage_choice);
+    host.storage_choice = Arc::new(Mutex::new(storage_choice));
     let host = Arc::new(host);
     faber_engine::startup::mark("host");
     // R161 step 7: Faber's own browser, for a project's agent, set before any turn can resume.

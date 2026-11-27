@@ -715,6 +715,29 @@ table! {
     Write Person fn storage_choose(h, reset: bool) -> Option<crate::storage_choice::Status> {
         crate::storage_choice::change(h, reset).await
     }
+    Read Screen fn storage_move_status(h) -> crate::storage_choice::storage_move::MoveStatus {
+        if let Some(status) = crate::storage_choice::storage_move::running_status(&h.storage_move) {
+            return Ok(status);
+        }
+        let target = lock(&h.storage_choice).configuration(&h.data_dir).0;
+        let (state, tools) = (h.storage_move.clone(), h.engine.tool_store());
+        off("error.store.read", move || crate::storage_choice::storage_move::status(&state, target.as_deref(), &tools)).await
+    }
+    Write Person fn storage_move_start(h) -> () {
+        crate::storage_choice::storage_move::start(h)
+    }
+    Write Person fn storage_move_stop(h) -> () {
+        crate::storage_choice::storage_move::stop(&h.storage_move)
+    }
+    /// Returns the moved originals kept because a live session's kit may still read them (`reason.storage.inUse`).
+    Write Person fn storage_move_remove(h) -> Vec<crate::storage_choice::storage_move::ItemFailure> {
+        if !h.engine.owns_storage_profile() {
+            return Err("error.storage.removeOld".into());
+        }
+        let (tools, live) = (h.engine.tool_store(), h.engine.catalog_ids_in_live_sessions());
+        let flag = request_flag();
+        off("error.storage.removeOld", move || crate::storage_choice::storage_move::remove(&tools, &live, flag.as_deref())).await?
+    }
     /// A theme file comes from other people, so an appearance is checked here before anything is saved.
     Write Ask fn save_settings(h, patch: Settings) -> SavedSettings [Failure] {
         let mut patch = patch;

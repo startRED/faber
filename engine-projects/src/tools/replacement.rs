@@ -59,7 +59,7 @@ pub(super) fn plain(path: &Path, directory: bool) -> Result<(), String> {
     Ok(())
 }
 // These uv links are data in receipts: never follow them while fingerprinting or copying.
-fn runtime_link(root: &Path, path: &Path) -> Result<Option<PathBuf>, String> {
+pub(super) fn runtime_link(root: &Path, path: &Path) -> Result<Option<PathBuf>, String> {
     #[cfg(not(unix))]
     let _ = root;
     if !std::fs::symlink_metadata(path).map_err(|e| e.to_string())?.file_type().is_symlink() {
@@ -234,16 +234,22 @@ impl Store {
         self.check_file_root(&self.root)
     }
     pub(super) fn initial_ledger(&self) -> Result<BTreeMap<String, String>, String> {
-        let Some(bytes) = checked_bytes(&self.ledger())? else { return Ok(BTreeMap::new()) };
+        self.read_ledger(false)
+    }
+
+    pub(super) fn replacement_ledger(&self) -> Result<BTreeMap<String, String>, String> {
+        self.read_ledger(true)
+    }
+
+    fn read_ledger(&self, required: bool) -> Result<BTreeMap<String, String>, String> {
+        let Some(bytes) = checked_bytes(&self.ledger())? else {
+            return if required { Err("The tool is not installed".into()) } else { Ok(BTreeMap::new()) };
+        };
         let ledger: BTreeMap<String, String> = serde_json::from_slice(&bytes).map_err(|_| "Could not read the catalog ledger")?;
         if ledger.iter().any(|(id, commit)| !valid_id(id) || commit.is_empty()) {
             return Err("Invalid catalog ledger".into());
         }
         Ok(ledger)
-    }
-    fn replacement_ledger(&self) -> Result<BTreeMap<String, String>, String> {
-        checked_bytes(&self.ledger())?.ok_or("The tool is not installed")?;
-        self.initial_ledger()
     }
     pub(super) fn physical_copy(&self, item: &Item) -> Result<bool, String> {
         self.check_file_root(&self.source_root(&item.id))?;
@@ -419,13 +425,38 @@ impl Store {
     }
 
     pub(super) fn recover_replacements_at(&self, storage: &Path) -> Result<(), String> {
-        self.check_file_root(storage)?;
+        self.recover_replacements_in(storage, None)
+    }
+
+    pub(super) fn verified_replacement(&self, dir: &Path, item: &Item, commit: &str) -> bool {
+        let Some(journal) =
+            checked_bytes(&dir.join("state.json")).ok().flatten().and_then(|bytes| serde_json::from_slice::<Journal>(&bytes).ok())
+        else {
+            return false;
+        };
+        journal.finished
+            && !journal.rolled_back
+            && journal.plan.item == *item
+            && item.commit == commit
+            && fingerprint(&dir.join("old")).is_ok_and(|digest| digest == journal.plan.old_digest)
+    }
+
+    pub(super) fn recover_replacements_in(&self, storage: &Path, only: Option<&str>) -> Result<(), String> {
+        if only.is_none() {
+            self.check_file_root(storage)?;
+        }
         let root = storage.join("replacements");
         if !exists(&root)? {
             return Ok(());
         }
         for entry in std::fs::read_dir(&root).map_err(|e| e.to_string())? {
             let dir = entry.map_err(|e| e.to_string())?.path();
+            if only.is_some_and(|id| dir.file_name().and_then(|name| name.to_str()) != Some(id)) {
+                continue;
+            }
+            if storage == self.root && self.retains_old_move(&dir) {
+                continue;
+            }
             plain(&dir, true)?;
             let bytes = checked_bytes(&dir.join("state.json"))?.ok_or("Missing replacement journal")?;
             let mut journal: Journal = serde_json::from_slice(&bytes).map_err(|_| "Invalid replacement journal")?;

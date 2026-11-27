@@ -2655,6 +2655,40 @@
     "reach": "person"
   },
   {
+    "name": "storage_move_start",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "storage_move_stop",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "storage_move_remove",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "Returns the moved originals kept because a live session's kit may still read them (`reason.storage.inUse`)."
+  },
+  {
     "name": "save_settings",
     "args": [
       [

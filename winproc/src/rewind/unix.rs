@@ -75,15 +75,23 @@ impl Root {
         if !path.is_absolute() {
             return Err(io::ErrorKind::InvalidInput.into());
         }
-        let path = path.canonicalize()?;
+        Self::open_no_links(&path.canonicalize()?)
+    }
+
+    pub fn open_no_links(path: &Path) -> io::Result<Self> {
+        if !path.is_absolute() {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
         let mut dir: File = open("/", FLAGS | OFlags::DIRECTORY, Mode::empty())?.into();
         for part in path.components() {
-            if let std::path::Component::Normal(name) = part {
-                dir = openat(&dir, name, FLAGS | OFlags::DIRECTORY, Mode::empty())?.into();
+            match part {
+                std::path::Component::Normal(name) => dir = openat(&dir, name, FLAGS | OFlags::DIRECTORY, Mode::empty())?.into(),
+                std::path::Component::ParentDir => return Err(io::ErrorKind::InvalidInput.into()),
+                _ => {}
             }
         }
         let id = file_identity(&dir)?;
-        Ok(Self { dir, path, id })
+        Ok(Self { dir, path: path.to_path_buf(), id })
     }
 
     pub fn identity(&self) -> io::Result<Vec<u8>> {
@@ -122,6 +130,37 @@ impl Root {
             }
         }
         Ok((parent, path.file_name().unwrap().to_owned()))
+    }
+
+    pub fn remove_storage_path(&self, path: &Path, directory: bool) -> io::Result<()> {
+        use rustix::fs::{Dir, FileType, statat};
+        fn remove(parent: &File, name: &OsStr, dev: u64) -> io::Result<()> {
+            let dir: File = openat(parent, name, FLAGS | OFlags::DIRECTORY, Mode::empty())?.into();
+            if dir.metadata()?.dev() != dev {
+                return Err(io::ErrorKind::PermissionDenied.into());
+            }
+            for entry in Dir::read_from(&dir)? {
+                let entry = entry?;
+                let name = entry.file_name();
+                if matches!(name.to_bytes(), b"." | b"..") {
+                    continue;
+                }
+                let metadata = statat(&dir, name, AtFlags::SYMLINK_NOFOLLOW)?;
+                if FileType::from_raw_mode(metadata.st_mode).is_dir() {
+                    remove(&dir, OsStr::from_bytes(name.to_bytes()), dev)?;
+                } else {
+                    unlinkat(&dir, name, AtFlags::empty())?;
+                }
+            }
+            unlinkat(parent, name, AtFlags::REMOVEDIR)?;
+            Ok(())
+        }
+        use std::os::unix::ffi::OsStrExt;
+        let (parent, name) = self.parent(path, false)?;
+        if parent.metadata()?.dev() != self.dir.metadata()?.dev() {
+            return Err(io::ErrorKind::PermissionDenied.into());
+        }
+        if directory { remove(&parent, &name, self.dir.metadata()?.dev()) } else { Ok(unlinkat(&parent, name, AtFlags::empty())?) }
     }
 
     pub fn open_file(&self, path: &str) -> io::Result<File> {
