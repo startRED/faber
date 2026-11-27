@@ -2,8 +2,8 @@
 
 Area: Settings screen
 Files: engine-core/src/model.rs, engine-store/src/settings.rs, host/src/reach.rs, ui/Settings.tsx, ui/FirstRun.tsx, ui/locales/, tests/ui/settings.check.ts, tests/ui/first-run.check.ts, docs/design/settings.md, docs/design/first-run.md, docs/product-map.md, docs/decisions.md
-Depends: move-existing-data
 Size: about 400 changed lines
+State: built on task 201 (storage choice); the key, its program list, the Settings switch and the first-run switch are in. The eyes come next.
 
 Why: plan item E4, owner's answers 1 to 4 (25/11/2026):
 - eyes come in this update, hands only after the signed installer;

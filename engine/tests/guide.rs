@@ -92,7 +92,7 @@ fn every_word_the_guide_quotes_is_a_screen_word_and_is_in_the_table_unless_all_l
 
 /// The settings of the map that a person changes in Settings, with the key of the label each shows in the screen. A new one
 /// stops here: name it in the guide and add it.
-const SETTINGS: [(&str, &str); 20] = [
+const SETTINGS: [(&str, &str); 22] = [
     ("appearance", "set.appearance"),
     ("language", "set.language"),
     ("userName", "set.name"),
@@ -113,6 +113,8 @@ const SETTINGS: [(&str, &str); 20] = [
     ("experience", "first.xp.title"),
     ("blockedHosts", "set.blockedHosts"),
     ("extensionsDeveloperMode", "set.extensionsDeveloperMode"),
+    ("seeOtherWindows", "set.otherWindows"),
+    ("programsOutOfReach", "set.outOfReach"),
 ];
 
 #[test]

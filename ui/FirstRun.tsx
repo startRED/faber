@@ -223,15 +223,18 @@ export function LookStep(props: {
   experience?: Experience;
   /** The name typed so far, or the one already saved. */
   userName?: string;
+  /** The key to other windows as chosen so far or saved; it starts off (the owner's answer 4, 2026-11-25). */
+  otherWindows?: boolean;
   /** Going back keeps the choices made so far, for when the person comes forward again. */
-  onBack: (appearance: Appearance, experience: Experience | undefined, name: string) => void;
+  onBack: (appearance: Appearance, experience: Experience | undefined, name: string, otherWindows: boolean) => void;
   /** Saves everything. Resolves to false when the save failed, and the step stays open. */
-  onContinue: (appearance: Appearance, experience: Experience | undefined, name: string) => Promise<boolean>;
+  onContinue: (appearance: Appearance, experience: Experience | undefined, name: string, otherWindows: boolean) => Promise<boolean>;
   onError: (err: unknown) => void;
 }) {
   const [draft, setDraft] = createSignal<Appearance>(props.initial ?? { base: themes.default });
   const [experience, setExperience] = createSignal<Experience | undefined>(props.experience);
   const [name, setName] = createSignal(props.userName ?? '');
+  const [otherWindows, setOtherWindows] = createSignal(props.otherWindows === true);
   const [busy, setBusy] = createSignal(false);
   // Every choice goes to the look engine at once, and only the answer to the newest request is applied to the page.
   const preview = previewer(api.previewLook, (look) => applyLook(look), props.onError);
@@ -250,7 +253,7 @@ export function LookStep(props: {
     // The saved look is applied when the save answers, so no preview may land after it.
     preview.cancel();
     try {
-      await props.onContinue(draft(), experience(), name());
+      await props.onContinue(draft(), experience(), name(), otherWindows());
     } finally {
       setBusy(false);
     }
@@ -341,10 +344,30 @@ export function LookStep(props: {
             {t('first.name.hint')}
           </p>
         </div>
+        {/* The key is the one first-run choice a default covers (R585): it is here, off, so the risk is read before it is used. */}
+        <div class="ctl first-key">
+          <div class="first-key-row">
+            <input
+              id="fr-other-windows"
+              class="sw2"
+              type="checkbox"
+              role="switch"
+              aria-describedby="fr-other-windows-hint"
+              checked={otherWindows()}
+              onChange={(e) => setOtherWindows(e.currentTarget.checked)}
+            />
+            <label class="lbl" for="fr-other-windows">
+              {t('set.otherWindows')}
+            </label>
+          </div>
+          <p class="hint" id="fr-other-windows-hint">
+            {t('first.otherWindowsHint')}
+          </p>
+        </div>
       </div>
       <div class="first-foot">
         <p>{t('first.foot')}</p>
-        <button type="button" class="btn ghost" disabled={busy()} onClick={() => props.onBack(draft(), experience(), name())}>
+        <button type="button" class="btn ghost" disabled={busy()} onClick={() => props.onBack(draft(), experience(), name(), otherWindows())}>
           <Icon name="left" small />
           {t('first.back')}
         </button>

@@ -24,11 +24,11 @@ The run button in the top bar (Ctrl+.) opens "Running now": every working conver
 
 ## Settings
 Open with Ctrl+, or "Settings" at the bottom of the sidebar; Esc goes back. Five sections:
-- "General". "You": "Language" (system, English, Portuguese, Spanish, French, German), "Your name", "Do you already use AI?" (picks which tutorial plays), "Tutorial" with "Watch again", "Keyboard shortcuts". "How the AI works": "Default model" for new Chat and Projects conversations, "Permissions for Chat and Projects" (the same choice as "Permission mode", both areas), "Web search", "Reply style", "Projects run my automatic actions", "Full trust for Faber’s own setup" (off: asks on a card before installing a catalog tool; on: installs without asking, never sends, publishes, pays or deletes), "Stronger AI if stuck", "Chat working folder" (only when Settings was opened from Chat), "Reasoning summary" (Codex only). "Notifications and system": "Notify me", "Play a sound", "Resume interrupted work when Faber opens", and on Windows only "Keep the computer awake while Faber works" and "Start Faber when I sign in". "Updates": "Receive previews".
+- "General". "You": "Language" (system, English, Portuguese, Spanish, French, German), "Your name", "Do you already use AI?", "Tutorial" with "Watch again", "Keyboard shortcuts". "How the AI works": "Default model" for new Chat and Projects conversations, "Permissions for Chat and Projects" (the same as "Permission mode"), "Web search", "Reply style", "Projects run my automatic actions", "Full trust for Faber’s own setup" (off: catalog installs ask first; never sends, publishes, pays or deletes), "Stronger AI if stuck", "Chat working folder" (when opened from Chat), "Reasoning summary" (Codex only). "Notifications and system": "Notify me", "Play a sound", "Resume interrupted work when Faber opens", and on Windows "Keep the computer awake while Faber works" and "Start Faber when I sign in". "Updates": "Receive previews".
 - "Projects": each project's "Checks" and "A separate copy for each conversation".
 - "Appearance": "Look" has six looks (default "Dark Room"; "Morning" is the light one), plus "Accent color", "Text size", "Motion", background, spacing, corners and fonts. Nothing applies until "Use this look"; "Back to default" restores it; "Look file" saves or opens a theme file.
-- "Accounts and limits": a card per AI with its plan and quota bars (5-hour and 7-day, with the reset time). "Manage accounts" connects or installs an AI. Faber never sees the login.
-- "Privacy": "Blocked sites" (sites Faber’s browser never opens) and "Developer mode for extensions" (off by default; the browser menu can then load a local unpacked extension in a separate profile without sign-ins); AI tool logins are never read.
+- "Accounts and limits": a card per AI with its plan and quota bars (5-hour and 7-day, with reset times). "Manage accounts" connects or installs an AI.
+- "Privacy": "Blocked sites" (sites Faber’s browser never opens), "Developer mode for extensions" (off by default; loads unpacked extensions in a separate profile), "Let the AI see other windows" (off; only the person turns it on) and "Kept out of reach"; AI tool logins are never read.
 
 Permission modes: "Ask" (every change waits for OK), "Accept edits" (edits run, commands may ask), "Plan" (plans, changes wait), "Auto" (the AI's own reviewer approves safe actions), "Full access" (the default: no cards, the whole computer). A change applies from the next message. "Reply style": "AI's own way", "Short", "Explained" or "My own words". "Web search" is "Off" or "Live" (Codex also has a cached copy).
 
@@ -125,6 +125,8 @@ Manage accounts | Gerenciar contas | Gestionar cuentas | Gérer les comptes | Ko
 Privacy | Privacidade | Privacidad | Confidentialité | Datenschutz
 Blocked sites | Sites bloqueados | Sitios bloqueados | Sites bloqués | Gesperrte Websites
 Developer mode for extensions | Modo desenvolvedor para extensões | Modo de desarrollador para extensiones | Mode développeur pour les extensions | Entwicklermodus für Erweiterungen
+Let the AI see other windows | Deixar a IA ver outras janelas | Dejar que la IA vea otras ventanas | Laisser l’IA voir les autres fenêtres | Die KI andere Fenster sehen lassen
+Kept out of reach | Fora do alcance | Fuera de alcance | Tenus à l’écart | Außer Reichweite
 Ask | Perguntar | Preguntar | Demander | Nachfragen
 Accept edits | Aceitar edições | Aceptar ediciones | Accepter les modifications | Änderungen annehmen
 Plan | Planejar | Planificar | Planifier | Planen

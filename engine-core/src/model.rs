@@ -1578,6 +1578,51 @@ pub fn clean_name(raw: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
+/// The programs kept out of reach of the AI's sight until the person edits the list: password managers, authenticators,
+/// disk encryption and key tools, a finance app, and the system's own sign-in and elevation prompts. Executable names in
+/// lower case; banks mostly live in a browser, which Blocked sites covers, so only an installed finance app is named.
+pub const DEFAULT_OUT_OF_REACH: &[&str] = &[
+    "1password.exe",
+    "bitwarden.exe",
+    "keepass.exe",
+    "keepassxc.exe",
+    "lastpass.exe",
+    "nordpass.exe",
+    "proton pass.exe",
+    "enpass.exe",
+    "roboform.exe",
+    "keeperpasswordmanager.exe",
+    "keeper password manager.exe",
+    "authenticator.exe",
+    "veracrypt.exe",
+    "kleopatra.exe",
+    "qw.exe",
+    "consent.exe",
+    "credentialuibroker.exe",
+];
+
+/// How many programs the list keeps, and the longest name, in characters.
+pub const OUT_OF_REACH_LIMIT: usize = 100;
+pub const PROGRAM_NAME_LIMIT: usize = 128;
+
+/// The list as Faber keeps it: each entry reduced to its file name (a pasted full path keeps only the last part), control
+/// characters and quotes dropped, trimmed, lower case and at most [`PROGRAM_NAME_LIMIT`] characters; empty and repeated entries are
+/// dropped and at most [`OUT_OF_REACH_LIMIT`] are kept, in the person's order.
+pub fn clean_programs(raw: &[String]) -> Vec<String> {
+    let mut kept: Vec<String> = Vec::new();
+    for entry in raw {
+        // A quote is never part of a Windows file name: a pasted quoted path keeps what lies between them.
+        let name: String = entry.chars().filter(|c| !c.is_control() && *c != '"').collect();
+        let name = name.rsplit(['/', '\\']).next().unwrap_or_default().trim().to_lowercase();
+        let name: String = name.chars().take(PROGRAM_NAME_LIMIT).collect();
+        let name = name.trim_end().to_string();
+        if !name.is_empty() && !kept.contains(&name) && kept.len() < OUT_OF_REACH_LIMIT {
+            kept.push(name);
+        }
+    }
+    kept
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     pub id: String,
@@ -1907,6 +1952,15 @@ pub struct Settings {
     /// tool of the agent does (in Full access the agent could still edit the file itself, so this is no wall against it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub faber_trust: Option<bool>,
+    /// The key (task 303): with it on, the AI may later see other windows, so what is on screen goes to the AI of the person's
+    /// own subscription. Off by default; only the person changes it, on the screen (`PERSON_SETTINGS`). Once on, the
+    /// conversation's permission mode still decides: an ask mode asks before each new window, Full access does not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub see_other_windows: Option<bool>,
+    /// Programs the AI never sees, by executable name, edited by the person beside the key; none means
+    /// [`DEFAULT_OUT_OF_REACH`]. Only the person changes it, on the screen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub programs_out_of_reach: Option<Vec<String>>,
     /// A project's agent lists the guesses it made without asking before it works (`persona::ASSUMPTIONS`, E6 of the
     /// 2026-11-13 harness study). Off by default until the owner chooses it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1957,6 +2011,14 @@ impl Settings {
         self.faber_trust.unwrap_or(false)
     }
 
+    pub fn see_other_windows(&self) -> bool {
+        self.see_other_windows.unwrap_or(false)
+    }
+
+    pub fn programs_out_of_reach(&self) -> Vec<String> {
+        self.programs_out_of_reach.clone().unwrap_or_else(|| DEFAULT_OUT_OF_REACH.iter().map(|p| p.to_string()).collect())
+    }
+
     /// What the screen is sent: every switch with its value, so the screen keeps no default of its own. The file keeps
     /// only what the person changed, since saving is a patch.
     pub fn shown(self) -> Self {
@@ -1969,6 +2031,8 @@ impl Settings {
             resume_interrupted: Some(self.resume_interrupted()),
             autostart: Some(self.autostart()),
             stronger_when_stuck: Some(self.stronger_when_stuck()),
+            see_other_windows: Some(self.see_other_windows()),
+            programs_out_of_reach: Some(self.programs_out_of_reach()),
             ..self
         }
     }
@@ -2440,14 +2504,43 @@ mod tests {
 
     #[test]
     fn the_screen_is_sent_every_switch_and_the_file_keeps_only_what_the_person_changed() {
+        let mut shown = serde_json::to_value(Settings::default().shown()).unwrap();
+        let programs = shown.as_object_mut().unwrap().remove("programsOutOfReach");
+        assert_eq!(programs, Some(serde_json::json!(DEFAULT_OUT_OF_REACH)), "the key's list starts with the default programs");
         assert_eq!(
-            serde_json::to_value(Settings::default().shown()).unwrap(),
-            serde_json::json!({ "userHooks": false, "permissions": "dontAsk", "notifications": true, "notificationSound": true, "keepAwake": true, "resumeInterrupted": true, "autostart": false, "strongerWhenStuck": false })
+            shown,
+            serde_json::json!({ "userHooks": false, "permissions": "dontAsk", "notifications": true, "notificationSound": true, "keepAwake": true, "resumeInterrupted": true, "autostart": false, "strongerWhenStuck": false, "seeOtherWindows": false })
         );
         let mine = Settings { keep_awake: Some(false), language: Some("de".into()), ..Settings::default() };
         assert_eq!(serde_json::to_value(&mine).unwrap(), serde_json::json!({ "keepAwake": false, "language": "de" }));
         let shown = mine.shown();
         assert_eq!((shown.keep_awake, shown.notifications, shown.language.as_deref()), (Some(false), Some(true), Some("de")));
+    }
+
+    #[test]
+    fn the_key_starts_off_and_its_list_keeps_file_names_once_in_lower_case() {
+        let none = Settings::default();
+        assert!(!none.see_other_windows());
+        assert!(none.programs_out_of_reach().iter().any(|p| p == "keepass.exe"));
+        let raw = [
+            "  KeePass.EXE ",
+            r"C:\Program Files\Bitwarden\Bitwarden.exe",
+            "/usr/bin/keepassxc",
+            "keepass.exe",
+            "",
+            " \t",
+            "a\u{0}b.exe",
+            r#""C:\Vault\Vault.exe""#,
+        ];
+        let raw: Vec<String> = raw.iter().map(|s| s.to_string()).collect();
+        assert_eq!(clean_programs(&raw), ["keepass.exe", "bitwarden.exe", "keepassxc", "ab.exe", "vault.exe"]);
+        let long = format!(r"C:\{}deep.exe", r"folder\".repeat(60));
+        assert_eq!(clean_programs(&[long]), ["deep.exe"], "a long path keeps its file name");
+        let many: Vec<String> = (0..150).map(|n| format!("{n}.exe")).collect();
+        assert_eq!(clean_programs(&many).len(), OUT_OF_REACH_LIMIT);
+        assert_eq!(clean_programs(&["x".repeat(300)])[0].chars().count(), PROGRAM_NAME_LIMIT);
+        let cleared = Settings { programs_out_of_reach: Some(vec![]), ..Settings::default() };
+        assert!(cleared.programs_out_of_reach().is_empty(), "an emptied list stays empty");
     }
 
     #[test]

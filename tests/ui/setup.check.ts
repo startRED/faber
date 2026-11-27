@@ -6,10 +6,11 @@ import { en } from '../../ui/locales/en.ts';
 import { es } from '../../ui/locales/es.ts';
 import { fr } from '../../ui/locales/fr.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
+import { LookStep } from '../../ui/FirstRun.tsx';
 import { noteSetupProgress, Setup } from '../../ui/Setup.tsx';
 import { continuePatch, firstRunStep, lookDue, setupCard, setupPatch, shouldOpenSetup, toggleSubscription, type Subscription } from '../../ui/setup.ts';
 import { check, deepEqual, doesNotMatch, equal, notEqual, ok } from './check.ts';
-import { t } from '../../ui/i18n.ts';
+import { t, useLanguage } from '../../ui/i18n.ts';
 
 const languages: Record<string, Record<string, string | { one: string; other: string }>> = { en, 'pt-BR': ptBR, es, fr, de };
 function text(messages: Record<string, unknown>, key: string): string {
@@ -314,5 +315,59 @@ check('setup: without agy, Antigravity is offered with Install, and a failed ins
     host.remove();
     noteSetupProgress({ type: 'setup', vendor: 'gemini', step: 'done' });
     api.setupCheck = oldCheck; api.setupInstall = oldInstall; api.openLink = oldLink;
+  }
+});
+
+check('first run: the key to other windows is a switch that starts off, says what it sends and the risk, and is saved when turned on or off again', async () => {
+  const look = { base: 'sala' } as const;
+  equal('seeOtherWindows' in continuePatch(look, undefined, undefined), false, 'no answer saves nothing');
+  equal('seeOtherWindows' in continuePatch(look, undefined, undefined, '', false), false, 'left off saves nothing');
+  deepEqual(continuePatch(look, undefined, true, '', true), { appearance: look, seeOtherWindows: true });
+  deepEqual(continuePatch(look, undefined, true, '', false, true), { appearance: look, seeOtherWindows: false }, 'turning off a key saved on is saved');
+  ok(/goes to the AI of your subscription/.test(en['first.otherWindowsHint']) && /trick/.test(en['first.otherWindowsHint']), 'what it sends and the risk');
+  ok(/subscription/.test(en['set.otherWindowsMore']) && /trick an AI/.test(en['set.otherWindowsMore']) && /Full access it does not ask/.test(en['set.otherWindowsMore']));
+  const host = document.createElement('div');
+  document.body.append(host);
+  try {
+    for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
+      useLanguage(language);
+      const words = languages[language];
+      for (const key of ['set.otherWindows', 'first.otherWindowsHint', 'set.otherWindowsMore'] as const) {
+        if (language !== 'en') notEqual(text(words, key), en[key], `${language}: ${key} is written in the language`);
+      }
+      const sent: boolean[] = [];
+      const back: boolean[] = [];
+      const stop = render(() => createComponent(LookStep, {
+        initial: look,
+        onBack: (_appearance, _experience, _name, on) => { back.push(on); },
+        onContinue: async (_appearance, _experience, _name, on) => { sent.push(on); return false; },
+        onError: () => {},
+      }), host);
+      try {
+        const box = host.querySelector<HTMLInputElement>('#fr-other-windows')!;
+        ok(box, `${language}: the look step has the key`);
+        equal(box.getAttribute('role'), 'switch');
+        equal(box.checked, false, `${language}: the key starts off`);
+        equal(host.querySelector('label[for="fr-other-windows"]')?.textContent?.trim(), text(words, 'set.otherWindows'), `${language}: the same words as Settings`);
+        equal(document.getElementById(box.getAttribute('aria-describedby')!)?.textContent?.trim(), text(words, 'first.otherWindowsHint'));
+        const go = host.querySelector<HTMLButtonElement>('.first-foot .btn.primary')!;
+        go.click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        box.click();
+        equal(box.checked, true);
+        go.click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        deepEqual(sent, [false, true], `${language}: Continue carries the switch`);
+        host.querySelector<HTMLButtonElement>('.first-foot .btn.ghost')!.click();
+        deepEqual(back, [true], `${language}: Back keeps the choice`);
+        const row = host.querySelector('.first-key')!.getBoundingClientRect();
+        ok(row.width > 0 && row.right <= window.innerWidth + 1, `${language}: the key fits the step`);
+      } finally {
+        stop();
+      }
+    }
+  } finally {
+    host.remove();
+    useLanguage('en');
   }
 });

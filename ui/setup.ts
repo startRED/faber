@@ -90,11 +90,15 @@ export function continuePatch(
   experience: Experience | undefined,
   tutorialDone: boolean | undefined,
   name?: string,
+  otherWindows?: boolean,
+  otherWindowsSaved?: boolean,
 ): Settings {
   const patch: Settings = { appearance };
   if (experience) patch.experience = experience;
   // The name is optional: a field left empty is a skip, and nothing is saved for it.
   if (name?.trim()) patch.userName = name;
+  // The key starts off, so a switch left off saves nothing; turning off a key saved on before is saved.
+  if (otherWindows === true || (otherWindows === false && otherWindowsSaved === true)) patch.seeOtherWindows = otherWindows;
   if (tutorialDone !== true) patch.tutorialDone = false;
   return patch;
 }

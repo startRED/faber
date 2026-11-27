@@ -326,6 +326,75 @@ check('sharing: the Privacy screen exposes its switch only when the endpoint is 
   }
 });
 
+check('the key: Privacy has the other-windows switch, off until saved on, and the programs out of reach are added and removed in every language at 720 px', async () => {
+  const motion = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'none';
+  try {
+    for (const [language, words] of [['en', en], ['pt-BR', ptBR], ['es', es], ['fr', fr], ['de', de]] as const) {
+      useLanguage(language);
+      ok(words['set.otherWindowsHint'].length <= 70 && words['set.outOfReachHint'].length <= 70, `${language}: the hints fit the row`);
+      const [saved, setSaved] = createSignal<Saved>({ seeOtherWindows: false, programsOutOfReach: ['keepass.exe', 'bitwarden.exe'] });
+      const patches: Saved[] = [];
+      let accept = true;
+      const view = mount(() => createComponent(Settings, {
+        look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0, start: 'privacy',
+        onClose: () => {}, onOpenSetup: () => {},
+        onSave: async (patch) => { patches.push(patch); if (accept) setSaved({ ...saved(), ...patch }); return accept; },
+      }));
+      try {
+        view.host.querySelector<HTMLElement>('.settings')!.style.cssText = 'position:fixed;inset:0;width:720px;height:700px';
+        await tick();
+        const key = view.host.querySelector<HTMLInputElement>('#set-other-windows-switch')!;
+        ok(key, `${language}: Privacy has the key`);
+        equal(key.getAttribute('role'), 'switch');
+        equal(key.checked, false, `${language}: off by default`);
+        ok(view.host.textContent?.includes(words['set.otherWindows']));
+        key.click();
+        await tick();
+        deepEqual(patches.at(-1), { seeOtherWindows: true });
+        equal(saved().seeOtherWindows, true);
+        equal(key.checked, true);
+        const input = view.host.querySelector<HTMLInputElement>('#out-of-reach')!;
+        ok(input, `${language}: the list has its add field`);
+        const form = input.closest('form')!;
+        const add = form.querySelector<HTMLButtonElement>('button')!;
+        const names = () => [...view.host.querySelectorAll('.out-of-reach li span')].map((span) => span.textContent);
+        deepEqual(names(), ['keepass.exe', 'bitwarden.exe']);
+        equal(add.disabled, true, 'nothing typed, nothing to add');
+        input.value = 'Vault.exe';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        accept = false;
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await tick();
+        equal(input.value, 'Vault.exe', 'a failed save keeps what was typed');
+        deepEqual(saved().programsOutOfReach, ['keepass.exe', 'bitwarden.exe']);
+        accept = true;
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await tick();
+        deepEqual(patches.at(-1), { programsOutOfReach: ['keepass.exe', 'bitwarden.exe', 'Vault.exe'] });
+        equal(input.value, '');
+        equal(document.activeElement, input);
+        const remove = view.host.querySelector<HTMLButtonElement>('.out-of-reach button')!;
+        equal(remove.getAttribute('aria-label'), words['set.outOfReachRemove'].replace('{name}', 'keepass.exe'));
+        remove.click();
+        await tick();
+        deepEqual(saved().programsOutOfReach, ['bitwarden.exe', 'Vault.exe']);
+        setSaved({ ...saved(), programsOutOfReach: [] });
+        await tick();
+        equal(view.host.querySelector('.out-of-reach-empty')?.textContent, words['set.outOfReachEmpty'], `${language}: an emptied list says so`);
+        setSaved({ ...saved(), programsOutOfReach: Array.from({ length: 100 }, (_, n) => `${n}-${'a'.repeat(100)}.exe`) });
+        await tick();
+        equal(input.disabled, true, 'a full list takes no more');
+        const main = view.host.querySelector<HTMLElement>('.s-main')!;
+        ok(main.scrollWidth <= main.clientWidth + 1, `${language}: long names do not overflow at 720 px`);
+      } finally { view.stop(); }
+    }
+  } finally {
+    document.documentElement.dataset.motion = motion;
+    useLanguage('en');
+  }
+});
+
 check('blocked sites: Settings adds and removes saved hosts, retains failed edits and fits at 720 px in every language', async () => {
   const motion = document.documentElement.dataset.motion;
   document.documentElement.dataset.motion = 'none';
@@ -960,7 +1029,7 @@ check('settings: switching sections is a short cross-fade (the old one leaves as
     phase = 'after tick';
     equal(main.scrollTop, 0, 'a section opens at its top');
     equal(view.host.querySelectorAll('.facts').length, 1, 'only the new section is in the page');
-    equal(view.host.querySelectorAll('.st-group').length, 1, 'and none of General: only the Blocked sites group of Privacy is live');
+    equal(view.host.querySelectorAll('.st-group').length, 2, 'and none of General: only the Blocked sites and Other windows groups of Privacy are live');
     const departing = document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.st-group');
     ok(departing, `the old section leaves as an inert copy${departing ? '' : `; diagnostic ${JSON.stringify({
       motion: document.documentElement.dataset.motion, effectiveLevel: level(main),

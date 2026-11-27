@@ -690,6 +690,10 @@ export interface Settings {
   previews?: boolean;
   /** Full trust for Faber's own setup: the project agent installs from the catalog without a card. Off by default; only Settings writes it. */
   faberTrust?: boolean;
+  /** The key: the AI may see other windows (off by default). Only the person changes it, on the screen. */
+  seeOtherWindows?: boolean;
+  /** Executable names the AI never sees, lower case; the shell sends the default list when none is saved. */
+  programsOutOfReach?: string[];
 }
 export interface ModelInfo {
   id: string;

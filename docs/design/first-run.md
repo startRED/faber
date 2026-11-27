@@ -35,8 +35,11 @@ How the first-run steps and the tutorial look and behave. The Settings screen is
 - A failed install explains the problem and next step in the card, with Try again and the official page together. The same card appears in Settings. A rejected install request also leaves the card ready to retry when no progress event arrived.
 - Step 2 shows the three themes side by side, each a small live render drawn with its own tokens. A choice changes the whole
   screen at once and saves nothing. Under the cards: text size (the same 13 to 18 px slider as Appearance), density, motion, "Do you already use
-  AI?" (Never, A lot) and "Your name" (optional), in the words Settings uses. Continue saves the appearance, the answer, the name and, unless the tutorial
-  was already done, `tutorialDone: false`, in one call. Back keeps the
+  AI?" (Never, A lot) and "Your name" (optional), in the words Settings uses. Under them, across the whole width, the key: a
+  switch "Let the AI see other windows", off, with one line saying that with it on what is on screen goes to the AI of the
+  person's subscription and that text on screen written to trick it can try to steer it (R586, the one first-run choice a
+  default covers, by the owner's answer 4 of 2026-11-25). Continue saves the appearance, the answer, the name, the key when
+  it was switched on (or off, when it was saved on), and, unless the tutorial was already done, `tutorialDone: false`, in one call. Back keeps the
   choices. An install saved by an older version, whose appearance has no `base`, sees step 2 once.
 - The tutorial starts at the new conversation, with an AI connected, while `tutorialDone` is false. A beginner gets three
   cards (Chat, Projects, Follow along); someone who answered "A lot" gets two (Auto, the running list); no answer counts as

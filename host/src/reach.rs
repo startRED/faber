@@ -59,8 +59,8 @@ impl Reach {
 }
 
 /// The settings only the person changes on the screen, even through `save_settings`: the permission mode and what decides
-/// it, the sites the agent's browser must not open, hooks that run commands, full trust, updates from the preview channel
-/// and starting with the system.
+/// it, the sites the agent's browser must not open, hooks that run commands, full trust, updates from the preview channel,
+/// starting with the system, and the key that lets the AI see other windows with the programs it keeps out of reach.
 pub const PERSON_SETTINGS: &[&str] = &[
     "permissions",
     "userHooks",
@@ -72,6 +72,8 @@ pub const PERSON_SETTINGS: &[&str] = &[
     "previews",
     "autostart",
     "extensionsDeveloperMode",
+    "seeOtherWindows",
+    "programsOutOfReach",
 ];
 
 /// Refusals, as the keys a caller reads.
@@ -216,6 +218,24 @@ mod tests {
         }
         assert_eq!(check(&Caller::Screen, "answer", Reach::Person, &json!({}), families()), Ok(()));
         assert_eq!(check(&Caller::Screen, "save_settings", Reach::Ask, &json!({"patch": {"permissions": "ask"}}), families()), Ok(()));
+    }
+
+    #[test]
+    fn no_ai_and_no_terminal_turns_on_the_key_or_edits_its_list() {
+        let patches = [
+            json!({"patch": {"seeOtherWindows": true}}),
+            json!({"patch": {"seeOtherWindows": false}}),
+            json!({"patch": {"programsOutOfReach": []}}),
+            json!({"patch": {"language": "de", "programsOutOfReach": ["keepass.exe"]}}),
+        ];
+        for caller in [Caller::Person, agent("c1"), Caller::Agent { conversation: None }] {
+            for patch in &patches {
+                assert_eq!(check(&caller, "save_settings", Reach::Ask, patch, families()), Err(PERSON_ONLY), "{caller:?} {patch}");
+            }
+        }
+        for patch in &patches {
+            assert_eq!(check(&Caller::Screen, "save_settings", Reach::Ask, patch, families()), Ok(()), "the person on the screen");
+        }
     }
 
     #[test]

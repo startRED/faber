@@ -378,6 +378,11 @@ export function Settings(props: Props) {
                 <ExtensionMode enabled={props.saved.extensionsDeveloperMode === true} />
               </Show>
             </Group>
+            {/* The key (task 303): off by default and only the person's (PERSON_SETTINGS). Once on, the permission mode still decides. */}
+            <Group title={t('set.group.otherWindows')}>
+              <Toggle id="set-other-windows" label={t('set.otherWindows')} hint={t('set.otherWindowsHint')} more={t('set.otherWindowsMore')} checked={props.saved.seeOtherWindows === true} onChange={(on) => save({ seeOtherWindows: on })} />
+              <OutOfReach saved={props.saved} onSave={save} onError={props.onError} />
+            </Group>
             <div class="st-card">
               <ul class="facts">
                 <For each={['telemetry', 'history', 'logins'] as const}>
@@ -448,6 +453,44 @@ function BlockedSites(props: Pick<Props, 'saved' | 'onSave' | 'onError'>) {
         <For each={hosts()}>{(entry) => <li>
           <span>{entry}</span>
           <button class="btn" disabled={saving()} aria-label={t('set.blockedHostsRemove', { host: entry })} onClick={() => void save(hosts().filter((host) => host !== entry))}>{t('set.blockedHostsRemoveButton')}</button>
+        </li>}</For>
+      </ul>
+    </Show>
+  </>;
+}
+
+/** The programs the AI never sees, edited like Blocked sites. The engine keeps each entry's file name in lower case. */
+function OutOfReach(props: Pick<Props, 'saved' | 'onSave' | 'onError'>) {
+  const [name, setName] = createSignal('');
+  const [saving, setSaving] = createSignal(false);
+  let field: HTMLInputElement | undefined;
+  const programs = () => props.saved.programsOutOfReach ?? [];
+  const full = () => programs().length >= 100;
+  const save = async (next: string[], added = false) => {
+    if (saving()) return;
+    const focused = document.activeElement;
+    setSaving(true);
+    let saved = false;
+    try {
+      saved = await props.onSave({ programsOutOfReach: next });
+      if (saved && added) setName('');
+    } catch (error) { props.onError?.(error); }
+    finally { setSaving(false); }
+    if (saved) field?.focus();
+    else if (focused instanceof HTMLElement && focused.isConnected) focused.focus();
+  };
+  return <>
+    <Opt id="set-out-of-reach" label={t('set.outOfReach')} hint={t('set.outOfReachHint')} more={t('set.outOfReachMore')} htmlFor="out-of-reach">
+      <form class="blocked-host-add" onSubmit={(event) => { event.preventDefault(); if (name().trim() && !full()) void save([...programs(), name().trim()], true); }}>
+        <input ref={(el) => { field = el; }} id="out-of-reach" class="field" value={name()} maxLength={1024} disabled={saving() || full()} autoCapitalize="none" spellcheck={false} onInput={(event) => setName(event.currentTarget.value)} />
+        <button type="submit" class="btn" disabled={saving() || !name().trim() || full()}>{t('set.outOfReachAdd')}</button>
+      </form>
+    </Opt>
+    <Show when={programs().length} fallback={<p class="st-extra st-hint out-of-reach-empty">{t('set.outOfReachEmpty')}</p>}>
+      <ul class="st-extra blocked-hosts out-of-reach" aria-labelledby="set-out-of-reach-name">
+        <For each={programs()}>{(entry) => <li>
+          <span>{entry}</span>
+          <button class="btn" disabled={saving()} aria-label={t('set.outOfReachRemove', { name: entry })} onClick={() => void save(programs().filter((program) => program !== entry))}>{t('set.outOfReachRemoveButton')}</button>
         </li>}</For>
       </ul>
     </Show>

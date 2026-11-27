@@ -321,7 +321,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (!['checking', 'downloading', 'installing'].includes(status.phase)) setStartScreen(false);
   };
   // The choices of step 2 while the person is back at step 1, so going back and forward loses nothing.
-  const [kept, setKept] = createSignal<{ appearance: Appearance; experience?: Experience; name: string }>();
+  const [kept, setKept] = createSignal<{ appearance: Appearance; experience?: Experience; name: string; otherWindows: boolean }>();
   const [from, setFrom] = createSignal(0);
   const [until, setUntil] = createSignal<number>();
   // True from the moment the user picks a conversation until its snapshot is in: the screen still shows the old
@@ -2010,13 +2010,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               initial={kept()?.appearance ?? state().settings.appearance}
               experience={kept()?.experience ?? state().settings.experience}
               userName={kept()?.name ?? state().settings.userName}
-              onBack={(appearance, experience, name) => {
-                setKept({ appearance, experience, name });
+              otherWindows={kept()?.otherWindows ?? state().settings.seeOtherWindows}
+              onBack={(appearance, experience, name, otherWindows) => {
+                setKept({ appearance, experience, name, otherWindows });
                 setStep('accounts');
               }}
               onError={(err) => setSaveError(failureText(err))}
-              onContinue={async (appearance, experience, name) => {
-                const saved = await saveSettings(continuePatch(appearance, experience, state().settings.tutorialDone, name));
+              onContinue={async (appearance, experience, name, otherWindows) => {
+                const saved = await saveSettings(continuePatch(appearance, experience, state().settings.tutorialDone, name, otherWindows, state().settings.seeOtherWindows));
                 if (saved) {
                   // The first conversation is a new one, whatever place was remembered from an older version.
                   setStep(undefined);

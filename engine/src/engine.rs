@@ -2981,6 +2981,11 @@ impl Core {
             permissions_revision: before.permissions_revision,
             previews: patch.previews.or(before.previews),
             faber_trust: patch.faber_trust.or(before.faber_trust),
+            see_other_windows: patch.see_other_windows.or(before.see_other_windows),
+            programs_out_of_reach: patch
+                .programs_out_of_reach
+                .map(|list| crate::model::clean_programs(&list))
+                .or(before.programs_out_of_reach),
             show_assumptions: patch.show_assumptions.or(before.show_assumptions),
         };
         // A stricter mode revokes every remembered "Always allow" in the very save that changes the mode, by replacing the grants

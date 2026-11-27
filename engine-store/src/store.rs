@@ -1428,6 +1428,8 @@ impl Store {
                 });
             }
             settings.reply_style_text = settings.reply_style_text.as_deref().map(crate::model::clean_reply_style_text);
+            // A list restored or edited on disk is read as the screen would have saved it.
+            settings.programs_out_of_reach = settings.programs_out_of_reach.as_deref().map(crate::model::clean_programs);
             if let Some(epoch) = recovery.clone() {
                 settings.grants_epoch = Some(epoch.clone());
                 settings.permissions_revision = Some(epoch);
