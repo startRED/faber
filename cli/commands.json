@@ -2852,6 +2852,29 @@
     "reach": "person"
   },
   {
+    "name": "show_panel",
+    "args": [
+      [
+        "panel",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "panel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "panel"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask",
+    "about": "Open a panel on the person's screen to show them something: a Settings section (`general`, `projects`, `appearance`, `accounts`, `privacy`) or the Catalog (`catalog`). It changes nothing; the window decides how to open it."
+  },
+  {
     "name": "forget_recent",
     "args": [
       [

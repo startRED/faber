@@ -64,7 +64,7 @@ import { openedFile, showFile } from './fileref.ts';
 import { answered, btw, heardAsides, openedAside, showAside } from './QuickQuestion.tsx';
 import { agentSteps, helperNumbers, helpersAtWork } from './worklog.ts';
 import { createAutoOpen, doneCards, isWaiting, openPlace, type Place, placeOfRunning, shownRunning, stopOffered, store, waitingKeys } from './running.ts';
-import { type Keep, type Section, Settings } from './Settings.tsx';
+import { type Keep, type Section, SECTION_NAMES, Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
 import { SharingQuestion } from './Sharing.tsx';
 import { continuePatch, finishSharingChoice, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
@@ -1172,6 +1172,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         void go(place());
       }
       if (e.type === 'asks') { asksRevision++; receiveAsks(e.asks); }
+      // The AI shows the person a panel (`show_panel`, run at once in Full access, else after the person allows it).
+      if (e.type === 'showPanel') {
+        if (e.panel === 'catalog') { closeSide(false); setFocus(false); setCatalogOpen(true); }
+        else if (SECTION_NAMES.includes(e.panel)) openSettings(e.panel as Section);
+      }
       if (e.type === 'background') setState((s) => !s.background || e.revision > s.background.revision ? { ...s, background: { revision: e.revision, items: e.items } } : s);
       if (e.type === 'commands' && (e.conversationId === current()?.id || !commandVendor() || e.vendor === commandVendor())) {
         setCommandsVersion((n) => n + 1);

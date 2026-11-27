@@ -928,6 +928,7 @@ mod faber_tool {
         let (host, _dir) = host().await;
         seed_conversation(&host, "c1", None, None);
         let host = Arc::new(host);
+        set_mode(&host, faber_engine::model::Permissions::Ask);
         let commands = Host::agent_commands(&host);
         let rename = json!({"id": "c1", "title": "Renamed"});
         let refused = commands.run("c1".into(), "rename".into(), rename.clone(), SCOPES[2]).await;
@@ -977,6 +978,179 @@ mod faber_tool {
         assert_eq!(mine["items"], json!([]));
         let screen = host.dispatch_as(&Caller::Screen, "background_commands", json!({})).await.unwrap();
         assert!(screen["items"].is_array());
+        host.engine.shutdown();
+    }
+
+    /// Saves the person's mode as Chat and Projects read it.
+    fn set_mode(host: &Host, mode: faber_engine::model::Permissions) {
+        host.engine.save_settings(faber_engine::model::Settings { permissions: Some(mode), ..Default::default() }).unwrap();
+    }
+
+    /// Pretends a session runs in `id` in `mode`, as the engine would hold it while the agent's turn runs.
+    fn run_session(host: &Host, id: &str, mode: faber_engine::model::Permissions) {
+        lock(&host.live_modes).insert(id.into(), mode);
+    }
+
+    /// A conversation with one reply, where the line of a command run without asking goes when no reply is under way.
+    fn seed_replied(host: &Host, id: &str) {
+        let conv: faber_engine::model::Conversation = serde_json::from_value(json!({
+            "id": id, "title": id, "area": "chat", "createdAt": 1, "updatedAt": 2,
+            "messages": [{"id": "r1", "role": "assistant", "text": "done", "at": 1}]
+        }))
+        .unwrap();
+        faber_engine::store::Store::new(&host.data_dir).save(&conv);
+    }
+
+    /// The lines Faber left on the conversation's last reply, as the keys the screen words.
+    fn lines(host: &Host, id: &str) -> Vec<String> {
+        let conv = host.engine.open(id).unwrap();
+        conv.messages.last().unwrap().acts.iter().map(|act| act.what.clone()).collect()
+    }
+
+    /// The owner's answer 6 of 2026-11-25 (R587): in Full access, an `Ask` command from the conversation's own agent runs at
+    /// once and the conversation says what was done; in every other mode the same call records a request for the person.
+    #[tokio::test]
+    async fn in_full_access_an_ask_command_runs_at_once_and_the_conversation_says_so() {
+        use faber_engine::model::Permissions;
+        let (host, _dir) = host().await;
+        seed_replied(&host, "c1");
+        run_session(&host, "c1", Permissions::FullAccess);
+        let host = Arc::new(host);
+        let commands = Host::agent_commands(&host);
+        let words = json!({"patch": {"language": "de"}});
+        set_mode(&host, Permissions::FullAccess);
+        let saved = commands.run("c1".into(), "save_settings".into(), words.clone(), CHAT).await.unwrap();
+        assert_eq!(saved["settings"]["language"], "de", "it ran");
+        assert!(lock(&host.asks).pending().is_empty(), "no request in Full access");
+        assert_eq!(lines(&host, "c1"), ["act.reach.settings"]);
+        for mode in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Auto] {
+            set_mode(&host, mode);
+            let asked = commands.run("c1".into(), "save_settings".into(), words.clone(), CHAT).await.unwrap_err();
+            let asked: Value = serde_json::from_str(&asked).unwrap();
+            assert_eq!(asked["key"], "error.reach.ask", "{mode:?}");
+            assert!(asked["data"]["request"].is_string(), "{mode:?}: {asked}");
+        }
+        assert_eq!(lock(&host.asks).pending().len(), 3);
+        assert_eq!(lines(&host, "c1"), ["act.reach.settings"], "a request leaves no line");
+        host.engine.shutdown();
+    }
+
+    /// The mode is the one the engine holds, stored and of the session running: whatever the agent writes in its arguments, a
+    /// stored Ask still asks; a stored Full access with no session running, or with one in Plan or Isolated, asks too; and an
+    /// agent naming a conversation that does not exist has no mode to follow.
+    #[tokio::test]
+    async fn an_agent_cannot_claim_full_access_and_the_mode_needs_its_session() {
+        use faber_engine::model::Permissions;
+        let (host, _dir) = host().await;
+        seed_replied(&host, "c1");
+        let agent = Caller::Agent { conversation: Some("c1".into()) };
+        let words = json!({"patch": {"language": "de"}});
+        set_mode(&host, Permissions::Ask);
+        run_session(&host, "c1", Permissions::FullAccess);
+        let claims = json!({"patch": {"language": "de"}, "permissions": "dontAsk", "fullAccess": true, "mode": "fullAccess"});
+        let failure = host.dispatch_as(&agent, "save_settings", claims).await.unwrap_err();
+        assert_eq!(failure.key, "error.reach.ask");
+        assert!(failure.data.is_some(), "a request is recorded");
+        set_mode(&host, Permissions::FullAccess);
+        lock(&host.live_modes).clear();
+        assert_eq!(host.dispatch_as(&agent, "save_settings", words.clone()).await.unwrap_err().key, "error.reach.ask", "no session");
+        for mode in [Permissions::Plan, Permissions::Isolated] {
+            run_session(&host, "c1", mode);
+            assert_eq!(host.dispatch_as(&agent, "save_settings", words.clone()).await.unwrap_err().key, "error.reach.ask", "{mode:?}");
+        }
+        run_session(&host, "gone", Permissions::FullAccess);
+        let stranger = Caller::Agent { conversation: Some("gone".into()) };
+        let failure = host.dispatch_as(&stranger, "save_settings", words).await.unwrap_err();
+        assert_eq!(failure.key, "error.reach.ask", "no such conversation, no Full access");
+        assert_eq!(lines(&host, "c1"), Vec::<String>::new());
+        host.engine.shutdown();
+    }
+
+    /// In Full access a command naming a conversation runs at once only on the caller's own family; another family's
+    /// conversation keeps the card.
+    #[tokio::test]
+    async fn in_full_access_another_family_s_conversation_keeps_the_card() {
+        use faber_engine::model::Permissions;
+        let (host, _dir) = host().await;
+        seed_replied(&host, "c1");
+        seed_replied(&host, "c9");
+        set_mode(&host, Permissions::FullAccess);
+        run_session(&host, "c1", Permissions::FullAccess);
+        let agent = Caller::Agent { conversation: Some("c1".into()) };
+        let failure = host.dispatch_as(&agent, "show_conversation", json!({"id": "c9"})).await.unwrap_err();
+        assert_eq!(failure.key, "error.reach.ask");
+        assert!(failure.data.is_some(), "the person is asked");
+        let failure = host.dispatch_as(&agent, "stop_background", json!({"id": "nobody's"})).await.unwrap_err();
+        assert_eq!(failure.key, "error.reach.ask", "a background command it cannot place keeps the card");
+        assert_eq!(lines(&host, "c9"), Vec::<String>::new());
+        assert_eq!(lines(&host, "c1"), Vec::<String>::new());
+        let mine = host.dispatch_as(&agent, "show_conversation", json!({"id": "c1"})).await;
+        assert_ne!(mine.as_ref().err().map(|f| f.key.as_str()), Some("error.reach.ask"), "its own conversation runs: {mine:?}");
+        assert_eq!(lines(&host, "c1").len(), 1, "and says so");
+        host.engine.shutdown();
+    }
+
+    /// What only the person decides never follows the mode, and some `Ask` commands keep their card in every mode: deleting
+    /// for good, the installer, the person's own browser, settings that spend, and a tool's install.
+    #[tokio::test]
+    async fn in_full_access_the_person_s_commands_stay_the_person_s() {
+        use faber_engine::model::Permissions;
+        let (host, _dir) = host().await;
+        seed_replied(&host, "c1");
+        set_mode(&host, Permissions::FullAccess);
+        run_session(&host, "c1", Permissions::FullAccess);
+        let agent = Caller::Agent { conversation: Some("c1".into()) };
+        for (command, args) in [
+            ("setup_sign_in", json!({"vendor": "claude"})),
+            ("approve_credits", json!({"id": "c1", "turnId": "t1", "vendor": "claude"})),
+            ("answer", json!({"id": "c1", "turnId": "t1", "requestId": "r1", "allow": true, "always": true})),
+            ("save_settings", json!({"patch": {"permissions": "ask"}})),
+            ("save_settings", json!({"patch": {"faberTrust": true}})),
+            ("save_settings", json!({"patch": {"userHooks": true, "language": "de"}})),
+        ] {
+            assert_eq!(host.dispatch_as(&agent, command, args.clone()).await.unwrap_err().key, "error.reach.person", "{command} {args}");
+        }
+        assert!(lock(&host.asks).pending().is_empty());
+        for (command, args) in [
+            ("remove_chat_group", json!({"id": "g1"})),
+            ("remove_project", json!({"id": "p1"})),
+            ("update_restart", json!({})),
+            ("open_link", json!({"url": "https://example.com"})),
+            ("save_settings", json!({"patch": {"webSearch": "live"}})),
+            ("save_settings", json!({"patch": {"strongerWhenStuck": true}})),
+            ("tools_install", json!({"id": "x"})),
+        ] {
+            assert_eq!(host.dispatch_as(&agent, command, args.clone()).await.unwrap_err().key, "error.reach.ask", "{command} {args}");
+        }
+        assert_eq!(lock(&host.asks).pending().len(), 7, "each one is a request for the person");
+        assert_eq!(lines(&host, "c1"), Vec::<String>::new());
+        assert_eq!(host.engine.settings().permissions(), Permissions::FullAccess);
+        host.engine.shutdown();
+    }
+
+    /// In Full access the AI may open a panel to show the person something; a name that is not a panel opens nothing, and the
+    /// failed try is said too.
+    #[tokio::test]
+    async fn in_full_access_the_ai_opens_a_panel_to_show_the_person() {
+        use faber_engine::model::Permissions;
+        let (host, _dir) = host().await;
+        seed_replied(&host, "c1");
+        set_mode(&host, Permissions::FullAccess);
+        run_session(&host, "c1", Permissions::FullAccess);
+        let mut events = host.subscribe();
+        let agent = Caller::Agent { conversation: Some("c1".into()) };
+        host.dispatch_as(&agent, "show_panel", json!({"panel": "privacy"})).await.unwrap();
+        let shown = loop {
+            let event = events.recv().await.unwrap();
+            if event["type"] == "showPanel" {
+                break event;
+            }
+        };
+        assert_eq!(shown["panel"], "privacy");
+        assert_eq!(host.dispatch_as(&agent, "show_panel", json!({"panel": "x"})).await.unwrap_err().key, "error.host.badArgs");
+        assert_eq!(lines(&host, "c1"), ["act.reach.panel", "act.reach.failed.panel"], "the panel that opened, and the try that failed");
+        set_mode(&host, Permissions::Ask);
+        assert_eq!(host.dispatch_as(&agent, "show_panel", json!({"panel": "catalog"})).await.unwrap_err().key, "error.reach.ask");
         host.engine.shutdown();
     }
 }

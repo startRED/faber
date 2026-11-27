@@ -28,6 +28,8 @@ pub enum ActKind {
     Wake,
     Recovery,
     Helper,
+    /// An agent's `Ask` command ran without the person's yes, because the conversation is in Full Access (R587).
+    Reach,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "who", rename_all = "camelCase")]
@@ -110,11 +112,49 @@ impl FaberAct {
         }
         act
     }
+    /// Faber ran an agent's `Ask` command without asking, because the conversation is in Full Access (R587); `done` is false
+    /// when the command failed, which may have changed part of what it touched. `label` is the group the request card would
+    /// have named (`host/src/ask.rs`); the line says what was done in Faber's own words, never the agent's.
+    pub fn ran_unasked(label: &str, done: bool) -> Self {
+        let group = match label {
+            "wake" | "settings" | "projects" | "environments" | "rewind" | "panel" => label,
+            _ => "organize",
+        };
+        let what = match (group, done) {
+            ("wake", true) => "act.reach.wake",
+            ("settings", true) => "act.reach.settings",
+            ("projects", true) => "act.reach.projects",
+            ("environments", true) => "act.reach.environments",
+            ("rewind", true) => "act.reach.rewind",
+            ("panel", true) => "act.reach.panel",
+            (_, true) => "act.reach.organize",
+            ("wake", false) => "act.reach.failed.wake",
+            ("settings", false) => "act.reach.failed.settings",
+            ("projects", false) => "act.reach.failed.projects",
+            ("environments", false) => "act.reach.failed.environments",
+            ("rewind", false) => "act.reach.failed.rewind",
+            ("panel", false) => "act.reach.failed.panel",
+            (_, false) => "act.reach.failed.organize",
+        };
+        let mut act = Self::new(ActKind::Reach, what);
+        act.why = Some("act.why.fullAccess".into());
+        act.change = Some(ActChange::Settings);
+        act
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_command_run_without_asking_names_its_group_in_faber_s_own_words() {
+        let act = FaberAct::ran_unasked("settings", true);
+        assert_eq!((act.kind, act.what.as_str(), act.why.as_deref()), (ActKind::Reach, "act.reach.settings", Some("act.why.fullAccess")));
+        assert_eq!(act.change, Some(ActChange::Settings), "the person can change the mode from the line");
+        assert_eq!(FaberAct::ran_unasked("anything else", true).what, "act.reach.organize");
+        assert_eq!(FaberAct::ran_unasked("rewind", false).what, "act.reach.failed.rewind", "a failure is said too");
+    }
+
     #[test]
     fn wake_reasons_are_specific_and_never_repeated() {
         for (key, why) in [

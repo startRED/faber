@@ -76,6 +76,8 @@ mod faber_tool;
 mod failed_writes;
 #[path = "failure.rs"]
 mod failure;
+#[path = "full_access.rs"]
+mod full_access;
 #[path = "git_maintenance.rs"]
 mod git_maintenance;
 #[path = "goals.rs"]

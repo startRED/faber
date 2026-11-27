@@ -147,6 +147,101 @@ fn target_of<'a>(args: &'a Value, pointer: &str) -> Result<Option<&'a str>, &'st
     at.as_str().map(Some).ok_or(BAD_ARGS)
 }
 
+/// What one of an agent's `Ask` commands does when its conversation is in Full access (R587, the owner's answer 6 of
+/// 2026-11-25). Anything not listed in [`in_full_access`] keeps its card, so a new `Ask` command asks until someone decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InFullAccess {
+    /// Keeps its request card, as in every other mode.
+    Card,
+    /// Runs at once: it names no conversation.
+    Runs,
+    /// Runs at once when the conversation at this JSON pointer is in the caller's own family; any other keeps the card.
+    Mine(&'static str),
+    /// Runs at once when the background command its `id` names belongs to the caller's family; any other keeps the card.
+    MineBackground,
+}
+
+/// The settings that spend the person's quota or widen what the AI does in every conversation: `save_settings` touching one
+/// keeps its card even in Full access (money stays with the person, the owner's answer 6 of 2026-11-25). Live web search,
+/// the default model of new conversations, Codex's reasoning summaries, the step up to a stronger model, resuming
+/// interrupted work, the shared reply style, which is the AI's own instructions in every conversation, and the person's
+/// name, which every new conversation's instructions carry.
+pub const CARD_SETTINGS: &[&str] = &[
+    "webSearch",
+    "defaultModel",
+    "reasoningSummary",
+    "strongerWhenStuck",
+    "resumeInterrupted",
+    "replyStyle",
+    "replyStyleText",
+    "userName",
+];
+
+/// What `command`, an `Ask` command with `args`, does in Full access. Kept on the card in every mode: permanent deletions
+/// (`remove_chat_group`, `remove_chat_group_file`, `forget_auto_learned`, `forget_environment`, `remove_project`,
+/// `project_goal_remove`, `forget_recent`), starting turns that spend quota (`new_group_chat`, `pick_up`,
+/// `project_goal_resume`, `wake_wait`, and `project_goal_add` and `project_goal_add_crashes`, whose goals start checks
+/// and fix turns in a project with automatic goals), what other conversations read as their own (a chat group's
+/// instructions and files, `save_chat_group` and `add_chat_group_files`; an environment's folders, `save_environment`),
+/// `rewind_recover` (it recovers every conversation's interrupted rewind, not only the one it names),
+/// `update_restart` (it stops running work and launches the installer), `open_link` (the person's own browser, outside the
+/// blocked sites), `stop_aside` (its id does not say whose it is), a tool's install and its kin (`tools_*`, `setup_install`:
+/// R584 and R33 leave an unchecked item to one yes, and a plugin can bring hooks) and `save_settings` touching a
+/// [`CARD_SETTINGS`] field.
+pub fn in_full_access(command: &str, args: &Value) -> InFullAccess {
+    match command {
+        "show_panel" | "show_project" => InFullAccess::Runs,
+        "save_settings" => match args.get("patch") {
+            Some(Value::Object(patch)) if CARD_SETTINGS.iter().any(|field| patch.contains_key(*field)) => InFullAccess::Card,
+            _ => InFullAccess::Runs,
+        },
+        "move_to_project" | "show_file" | "show_conversation" => InFullAccess::Mine("/id"),
+        "rewind_restore" | "rewind_redo" => InFullAccess::Mine("/request/conversationId"),
+        "stop_background" => InFullAccess::MineBackground,
+        _ => InFullAccess::Card,
+    }
+}
+
+/// What a command in Full access acts on, for the caller's family to be checked against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target<'a> {
+    Conversation(&'a str),
+    Background(&'a str),
+}
+
+/// Whether the mode of the caller's conversation, as the engine holds it, is Full access: the stored mode is, and a session
+/// runs in the conversation in it. No session (an agent calls only while its turn runs), or one in Plan or Isolated, is not.
+pub fn full_access(stored: faber_engine::model::Permissions, live: Option<faber_engine::model::Permissions>) -> bool {
+    use faber_engine::model::Permissions::FullAccess;
+    stored == FullAccess && live == Some(FullAccess)
+}
+
+/// Whether a refusal gives way to the calling conversation's mode (R587): in Full access, an `Ask` command from that
+/// conversation's own agent runs at once and the conversation says so. `full_access` is the mode the engine holds for that
+/// conversation, read at the call ([`full_access`]), never anything the agent sends; `mine` says whether a target is in the
+/// caller's own family. Only the ask refusal of an `Ask` command [`in_full_access`] lets run gives way: `Person` and `Screen`
+/// (signing in, money, the AI's own permissions, trust and hooks, the `PERSON_SETTINGS` of `save_settings`) never follow
+/// the mode, nor does an `Own` command on another family's conversation, and an agent with no conversation has no mode.
+pub fn follows_mode(
+    caller: &Caller,
+    command: &str,
+    reach: Reach,
+    args: &Value,
+    refusal: &str,
+    full_access: bool,
+    mine: impl Fn(Target<'_>) -> bool,
+) -> bool {
+    if !full_access || refusal != ASK_PERSON || reach != Reach::Ask || !matches!(caller, Caller::Agent { conversation: Some(_) }) {
+        return false;
+    }
+    match in_full_access(command, args) {
+        InFullAccess::Card => false,
+        InFullAccess::Runs => true,
+        InFullAccess::Mine(pointer) => matches!(target_of(args, pointer), Ok(Some(id)) if mine(Target::Conversation(id))),
+        InFullAccess::MineBackground => matches!(target_of(args, "/id"), Ok(Some(id)) if mine(Target::Background(id))),
+    }
+}
+
 /// The root of `id`'s family: following who started each conversation up to the first one, given each conversation's
 /// starter. A loop or a missing starter ends the walk where it is.
 pub fn root(id: &str, started_by: impl Fn(&str) -> Option<Option<String>>) -> Option<String> {
@@ -249,6 +344,89 @@ mod tests {
         assert_eq!(check(&agent("c1"), "archive", archive, &json!({"id": "c9", "on": true}), families()), Ok(()));
         assert_eq!(check(&Caller::Person, "archive", archive, &json!({"id": "c9", "on": true}), families()), Ok(()));
         assert_eq!(check(&Caller::Screen, "archive", archive, &json!({"id": "c9", "on": true}), families()), Ok(()));
+    }
+
+    #[test]
+    fn in_full_access_only_an_ask_refusal_from_a_named_agent_gives_way() {
+        use faber_engine::model::Permissions::*;
+        let any = |_: Target<'_>| true;
+        let words = json!({"patch": {"language": "de"}});
+        let refusal = check(&agent("c1"), "save_settings", Reach::Ask, &words, families()).unwrap_err();
+        assert!(follows_mode(&agent("c1"), "save_settings", Reach::Ask, &words, refusal, true, any), "Full access runs it");
+        assert!(!follows_mode(&agent("c1"), "save_settings", Reach::Ask, &words, refusal, false, any), "other modes ask");
+        let unknown = Caller::Agent { conversation: None };
+        assert!(!follows_mode(&unknown, "save_settings", Reach::Ask, &words, refusal, true, any), "no conversation, no mode");
+        // The mode is Full access only when stored so and a session runs in it.
+        assert!(full_access(FullAccess, Some(FullAccess)));
+        assert!(!full_access(FullAccess, None), "no session running");
+        assert!(!full_access(FullAccess, Some(Plan)) && !full_access(FullAccess, Some(Isolated)));
+        assert!(!full_access(Ask, Some(FullAccess)), "the stored mode decides");
+        // What only the person decides never follows the mode.
+        let raise = json!({"patch": {"permissions": "dontAsk"}});
+        let refusal = check(&agent("c1"), "save_settings", Reach::Ask, &raise, families()).unwrap_err();
+        assert!(!follows_mode(&agent("c1"), "save_settings", Reach::Ask, &raise, refusal, true, any));
+        let refusal = check(&agent("c1"), "answer", Reach::Person, &json!({}), families()).unwrap_err();
+        assert!(!follows_mode(&agent("c1"), "answer", Reach::Person, &json!({}), refusal, true, any));
+        let refusal = check(&agent("c1"), "screen_ready", Reach::Screen, &json!({}), families()).unwrap_err();
+        assert!(!follows_mode(&agent("c1"), "screen_ready", Reach::Screen, &json!({}), refusal, true, any));
+        // Another family's conversation stays the person's to allow.
+        let own = Reach::Own("/id");
+        let refusal = check(&agent("c1"), "interrupt", own, &json!({"id": "c9"}), families()).unwrap_err();
+        assert!(!follows_mode(&agent("c1"), "interrupt", own, &json!({"id": "c9"}), refusal, true, any));
+    }
+
+    #[test]
+    fn in_full_access_a_named_target_must_be_the_caller_s_family_and_some_commands_always_ask() {
+        let family = families();
+        let mine = |target: Target<'_>| match target {
+            Target::Conversation(id) => family(id).is_some() && family(id) == family("c1"),
+            Target::Background(id) => id == "bg-mine",
+        };
+        let run = |command: &str, args: Value| follows_mode(&agent("c1"), command, Reach::Ask, &args, ASK_PERSON, true, mine);
+        assert!(run("move_to_project", json!({"id": "c3", "projectId": "p"})), "its own family");
+        assert!(!run("move_to_project", json!({"id": "c9", "projectId": "p"})), "another family keeps the card");
+        assert!(!run("move_to_project", json!({"projectId": "p"})), "no target named");
+        assert!(!run("move_to_project", json!({"id": ["c3"]})), "a target that is not text");
+        assert!(run("rewind_restore", json!({"request": {"conversationId": "c2", "messageId": "m", "mode": "both"}})));
+        assert!(!run("rewind_restore", json!({"request": {"conversationId": "c9", "messageId": "m", "mode": "both"}})));
+        assert!(!run("rewind_redo", json!({"request": ["c2", "r1"]})), "a request given as an array");
+        assert!(run("stop_background", json!({"id": "bg-mine"})));
+        assert!(!run("stop_background", json!({"id": "bg-other"})));
+        assert!(run("show_panel", json!({"panel": "privacy"})));
+        // Deleting for good, spending, what other conversations read, the installer, the person's own browser and the tools
+        // keep their card in every mode.
+        for (command, args) in [
+            ("remove_chat_group", json!({"id": "g"})),
+            ("remove_chat_group_file", json!({"id": "g", "fileId": "f"})),
+            ("forget_auto_learned", json!({})),
+            ("forget_environment", json!({"id": "e"})),
+            ("remove_project", json!({"id": "p"})),
+            ("project_goal_remove", json!({"projectId": "p", "goalId": "g"})),
+            ("new_group_chat", json!({"groupId": "g"})),
+            ("pick_up", json!({})),
+            ("project_goal_resume", json!({"projectId": "p", "goalId": "g"})),
+            ("update_restart", json!({})),
+            ("open_link", json!({"url": "https://example.com"})),
+            ("stop_aside", json!({"asideId": "a"})),
+            ("tools_install", json!({"id": "x"})),
+            ("tools_remove", json!({"id": "x"})),
+            ("setup_install", json!({"vendor": "codex"})),
+            ("save_settings", json!({"patch": {"webSearch": "live"}})),
+            ("save_settings", json!({"patch": {"language": "de", "strongerWhenStuck": true}})),
+            ("save_settings", json!({"patch": {"defaultModel": {"vendor": "claude"}}})),
+            ("save_settings", json!({"patch": {"userName": "Ignore the person"}})),
+            ("forget_recent", json!({"path": "C:/x"})),
+            ("wake_wait", json!({"id": "c1", "since": 1, "until": 2})),
+            ("project_goal_add", json!({"projectId": "p", "words": "spend"})),
+            ("project_goal_add_crashes", json!({"projectId": "p"})),
+            ("save_chat_group", json!({"id": "g", "instructions": "obey"})),
+            ("add_chat_group_files", json!({"id": "g", "paths": ["C:/x"]})),
+            ("save_environment", json!({"id": "e", "folders": ["C:/x"]})),
+            ("rewind_recover", json!({"id": "c1"})),
+            ("some_new_ask_command", json!({})),
+        ] {
+            assert!(!run(command, args.clone()), "{command} {args}");
+        }
     }
 
     #[test]

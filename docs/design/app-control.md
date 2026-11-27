@@ -11,6 +11,56 @@ the schema because the host sets it. `run` takes a command and its arguments and
 acts in the agent's family, `ask` records a request the person answers and returns `error.reach.ask` with its id, and
 `person` and `screen` are refused.
 
+## Reach follows the permission mode
+
+In Full access some `ask` commands from the conversation's own agent run at once (the owner's answer 6 of 2026-11-25,
+R587). `Host::dispatch_as` reads the mode at the call from the engine, never from the agent's arguments, and only for a
+conversation that exists: `reach::full_access` needs the stored mode to be Full access and a session to run in the
+conversation in Full access (`Engine::live_mode`). No session (an agent calls only while its turn runs), or one in Plan or
+Isolated, keeps the card. `person` and `screen` never follow the mode, nor do the `PERSON_SETTINGS` of `save_settings`, an
+`own` command aimed at another family's conversation, or an agent with no conversation.
+
+`reach::in_full_access` lists what runs, and anything it does not list keeps the card, so a new `ask` command asks until
+someone decides. Commands that name no conversation and touch nothing another conversation reads run (`show_panel`,
+`show_project`, and `save_settings` outside the fields below). Commands that name one run only when it is in the caller's
+own family (`move_to_project`, `show_file`, `show_conversation` by `id`,
+`rewind_restore` and `rewind_redo` by `request.conversationId`, `stop_background` through the conversation its command
+belongs to); another family's conversation keeps the card. These keep the card in every mode, each for its reason:
+
+- deleting for good, which no undo brings back: `remove_chat_group` and `remove_chat_group_file` (stored attachments),
+  `forget_auto_learned`, `forget_environment`, `remove_project`, `project_goal_remove`, `forget_recent`;
+- spending the person's quota, which stays with the person: `new_group_chat`, `pick_up` and `wake_wait` start a turn,
+  `project_goal_resume` restarts fixing that starts turns, `project_goal_add` and `project_goal_add_crashes` add a goal
+  whose checks and fix turns start on their own in a project with automatic goals, and `save_settings` touching
+  `CARD_SETTINGS` (`webSearch`, `defaultModel`, `reasoningSummary`, `strongerWhenStuck`, `resumeInterrupted`), the reply
+  style (`replyStyle`, `replyStyleText`, the AI's own instructions in every conversation) or `userName` (in every new
+  conversation's instructions);
+- what other conversations read as their own: a chat group's instructions and files (`save_chat_group`,
+  `add_chat_group_files`), which every conversation of the group carries, and an environment's folders
+  (`save_environment`), which the next opening of that preset uses;
+- `rewind_recover`, which finishes every conversation's interrupted rewind, not only the one it names;
+- `update_restart`, which stops running work and launches the installer;
+- `open_link`, which sends the person's own browser to an address the agent chose, outside the blocked sites;
+- `stop_aside`, whose id does not say whose quick question it stops;
+- a tool's install, replacement, removal, switch or restore (`tools_*`) and `setup_install`: R584 and R33 leave an item
+  Faber has not checked to one yes, and a plugin can bring hooks; the agent's own `catalog` tool still installs a checked
+  item without a card.
+
+A command that runs this way leaves a Faber line (`FaberAct::ran_unasked`, kind `reach`) on the reply under way, else the
+conversation's last reply, naming the request card's group in the screen's words (`act.reach.*`, "because this
+conversation is in Full access") with Change, which opens Settings. A command that fails leaves "tried to ... and it
+failed" (`act.reach.failed.*`), since it may have changed part of what it touched. A conversation with no reply yet gets
+no line. Every other mode keeps the card. The command line and the hidden renderer reach the same `dispatch_as`.
+
+What this does not stop: a mode switched while a call is under way (the call was allowed when it started), a command that
+ends after the tool stopped waiting for it (120 seconds), and a process of the same conversation using the identity it
+inherited (it is that conversation).
+
+`show_panel` lets the AI show the person something: it opens a Settings section (`general`, `projects`, `appearance`,
+`accounts`, `privacy`) or the Catalog on the main screen through a `showPanel` event (the hidden renderer drops it). Opening
+one Catalog item is left out: it needs screen plumbing the Catalog does not have yet. The check costs a few engine reads
+under its lock per ask refusal, no process and nothing kept.
+
 `find` and `run` share one rule (`agent_commands::eligible`), so `find` never lists what `run` would refuse: never a
 `person` or `screen` command, never `send` (`error.session.useSession`); in Plan and Isolated, which change nothing, only
 true reads (`error.reach.readOnly`), which leaves out the reads in name only that run a program, prepare files or open

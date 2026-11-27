@@ -34,6 +34,8 @@ const SECTIONS = [
 ] as const;
 
 export type Section = (typeof SECTIONS)[number][0];
+/** Every section, as `show_panel` names them. */
+export const SECTION_NAMES: readonly string[] = SECTIONS.map(([name]) => name);
 
 /** What Settings keeps while the account cards are open: the section and the draft that is not applied yet. */
 export interface Keep {

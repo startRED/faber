@@ -56,6 +56,38 @@ impl Core {
     }
 }
 
+impl Engine {
+    /// The mode of the session running in `conv`, if one runs (R587): the host reads it, with the stored mode, at each call of
+    /// the conversation's agent, never from what the agent sends.
+    pub fn live_mode(&self, conv: &str) -> Option<Permissions> {
+        self.with(|c| c.live.get(conv).map(|live| live.permissions))
+    }
+
+    /// Leaves the line that says Faber ran one of the agent's `Ask` commands without asking (`label` is the group the request
+    /// card would have named; `done` false when it failed), on the reply under way, else on the conversation's last reply. A
+    /// conversation with no reply yet gets no line.
+    pub fn note_ran_unasked(&self, conv: &str, label: &str, done: bool) {
+        self.with(|c| {
+            let act = crate::act::FaberAct::ran_unasked(label, done);
+            let id = match c.turn(conv) {
+                Some(reply) => {
+                    reply.acts.push(act);
+                    reply.id.clone()
+                }
+                None => {
+                    let Some(reply) = c.load(conv).and_then(|cv| cv.messages.iter_mut().rev().find(|m| m.role == Role::Assistant)) else {
+                        return;
+                    };
+                    reply.acts.push(act);
+                    reply.id.clone()
+                }
+            };
+            c.save(conv);
+            c.emit_message(conv, &id);
+        })
+    }
+}
+
 /// The answer as the agent reads it: whole up to [`MAX_ANSWER`] characters, else a valid JSON envelope with the start of it,
 /// cut before any data address it would split (a half picture is useless and misleads).
 fn bounded(text: String) -> String {

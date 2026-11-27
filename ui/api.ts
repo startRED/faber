@@ -191,7 +191,7 @@ export interface Parked {
 }
 export type FaberActor = { who: 'faber' } | { who: 'ai'; vendor: 'claude' | 'codex'; model?: string; role: 'router' | 'helper' };
 export interface FaberAct {
-  kind: 'route' | 'kit' | 'wake' | 'recovery' | 'helper';
+  kind: 'route' | 'kit' | 'wake' | 'recovery' | 'helper' | 'reach';
   actor: FaberActor;
   what: string; why?: string; params?: Record<string, string>;
   change?: 'composerModel' | 'keepGoing' | 'toolKit' | 'checks' | 'settings';
@@ -1034,11 +1034,13 @@ export interface Aside {
   /** A translation key when it failed. */
   error?: string | null;
 }
-export interface AgentAsk { id: string; conversation: string; label: 'organize' | 'settings' | 'tools' | 'projects' | 'environments' | 'rewind'; state: 'pending' | 'allowed' | 'denied' | 'expired'; }
+export interface AgentAsk { id: string; conversation: string; label: 'organize' | 'wake' | 'settings' | 'tools' | 'projects' | 'environments' | 'rewind' | 'panel'; state: 'pending' | 'allowed' | 'denied' | 'expired'; }
 
 export type AppEvent =
   | { type: 'lagged' }
   | { type: 'asks'; asks: AgentAsk[] }
+  /** An agent's `show_panel`: a Settings section or the Catalog to open. */
+  | { type: 'showPanel'; panel: string }
   | { type: 'catalog' }
   | ({ type: 'background' } & BackgroundList)
   | { type: 'commands'; conversationId: string; vendor: Vendor }

@@ -78,3 +78,25 @@ check('faber-act: a helper joining a reply keeps an open group open, in place an
     equal(group.querySelectorAll(':scope > .faber-act').length, 3);
   } finally { dispose(); root.remove(); }
 });
+
+check('faber-act: a command the AI ran without asking in Full access says what was done or tried, why, and opens the mode', () => {
+  const ran: FaberAct = { kind: 'reach', actor: { who: 'faber' }, what: 'act.reach.settings', why: 'act.why.fullAccess', change: 'settings' };
+  const failed: FaberAct = { kind: 'reach', actor: { who: 'faber' }, what: 'act.reach.failed.rewind', why: 'act.why.fullAccess', change: 'settings' };
+  const messages: Message[] = [{ id: 'r', role: 'assistant', at: 2, text: 'Done.', acts: [ran, failed] }];
+  const root = document.createElement('div'); root.style.width = '720px'; document.body.append(root);
+  const old = lang(); useLanguage('pt-BR');
+  const changed: string[] = [];
+  const dispose = render(() => createComponent(Thread, { messages, from: 0, conversationId: 'test', options: [], onBranch: () => {}, onActChange: (target) => changed.push(target) }), root);
+  try {
+    const rows = root.querySelectorAll<HTMLElement>('.faber-act');
+    equal(rows.length, 2);
+    equal(rows[1]!.querySelector('.faber-act-line > span')!.textContent, `${t('act.faber')} · ${t('act.reach.failed.rewind')} · ${t('act.why', { why: t('act.why.fullAccess') })}`, 'a failed try is said too');
+    const line = rows[0]!.querySelector('.faber-act-line > span')!.textContent!;
+    equal(line, `${t('act.faber')} · ${t('act.reach.settings')} · ${t('act.why', { why: t('act.why.fullAccess') })}`);
+    ok(line.includes(t('set.permissions.dontAsk')), 'it names the mode as Settings does');
+    ok(!/\bact\.|settings|Full access/.test(line), `only the screen's own words, in its language: ${line}`);
+    const change = rows[0]!.querySelector('button')!;
+    equal(change.textContent, t('act.change')); change.click(); equal(changed[0], 'settings');
+    for (const row of rows) ok(row.getBoundingClientRect().right <= root.getBoundingClientRect().right + 1, 'the line fits the narrow window');
+  } finally { dispose(); root.remove(); useLanguage(old); }
+});

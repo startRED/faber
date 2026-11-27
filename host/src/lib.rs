@@ -391,6 +391,8 @@ impl Wiring {
             loading_models: Arc::default(),
             pane: OnceLock::new(),
             asks: Mutex::default(),
+            #[cfg(test)]
+            live_modes: Mutex::default(),
         }
     }
 }
@@ -418,6 +420,9 @@ pub struct Host {
     /// the host (the Electron shell); none in the Tauri shell, which answers them itself, and in the command line.
     pane: OnceLock<Arc<pane::Pane>>,
     asks: Mutex<ask::Book>,
+    /// The sessions a test pretends are running, by conversation, with their mode (`live_mode`).
+    #[cfg(test)]
+    live_modes: Mutex<std::collections::HashMap<String, faber_engine::model::Permissions>>,
 }
 
 impl Host {
@@ -499,6 +504,7 @@ impl Host {
     }
 
     pub async fn dispatch_as(&self, caller: &Caller, command: &str, args: Value) -> Result<Value, Failure> {
+        let mut unasked = None;
         if *caller != Caller::Screen {
             let reach = Host::reach(command).ok_or_else(|| Failure::key("error.host.unknownCommand"))?;
             if command == "send" && matches!(caller, Caller::Agent { .. }) {
@@ -508,6 +514,14 @@ impl Host {
                 let mut allowed = false;
                 let mut request = None;
                 if key == reach::ASK_PERSON
+                    && let Caller::Agent { conversation: Some(id) } = caller
+                    && reach::follows_mode(caller, command, reach, &args, key, self.full_access(id), |target| self.mine(id, target))
+                {
+                    // Full Access (R587): the command runs at once, and the conversation says what was done.
+                    check_revoked(request_flag().as_deref()).map_err(Failure::from)?;
+                    allowed = true;
+                    unasked = Some(id.as_str());
+                } else if key == reach::ASK_PERSON
                     && let Caller::Agent { conversation: Some(id) } = caller
                 {
                     let pending = {
@@ -546,7 +560,43 @@ impl Host {
             return serde_json::to_value(list).map_err(|_| Failure::key("error.host.badReply"));
         }
         let args = with_by(caller, args);
-        self.dispatch(command, args).await
+        let answer = self.dispatch(command, args).await;
+        if let Some(id) = unasked {
+            // Failed too: a command can change part of what it touches before it fails, and that is never silent.
+            self.engine.note_ran_unasked(id, ask::label(command), answer.is_ok());
+        }
+        answer
+    }
+
+    /// Whether the agent of `id`, an existing conversation, acts in Full access now: the mode the engine holds, stored and of
+    /// the session running in it, read at the call (R587).
+    fn full_access(&self, id: &str) -> bool {
+        self.family_of(id).is_some() && reach::full_access(self.engine.settings().permissions(), self.live_mode(id))
+    }
+
+    /// The mode of the session running in `id`, if one runs.
+    #[cfg(not(test))]
+    fn live_mode(&self, id: &str) -> Option<faber_engine::model::Permissions> {
+        self.engine.live_mode(id)
+    }
+
+    /// The tests start no CLI, so the session a test pretends is running stands in for the engine's.
+    #[cfg(test)]
+    fn live_mode(&self, id: &str) -> Option<faber_engine::model::Permissions> {
+        lock(&self.live_modes).get(id).copied()
+    }
+
+    /// Whether what a command in Full access acts on belongs to the family of `caller`, the agent's conversation.
+    fn mine(&self, caller: &str, target: reach::Target<'_>) -> bool {
+        let owner = match target {
+            reach::Target::Conversation(id) => id.to_string(),
+            reach::Target::Background(id) => match self.engine.background_commands().items.into_iter().find(|item| item.id == id) {
+                Some(item) => item.conversation_id,
+                None => return false,
+            },
+        };
+        let theirs = self.family_of(&owner);
+        theirs.is_some() && theirs == self.family_of(caller)
     }
 
     /// The first conversation of `id`'s family (who started whom), None for a conversation that does not exist.

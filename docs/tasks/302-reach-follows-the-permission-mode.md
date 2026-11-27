@@ -17,6 +17,10 @@ Build:
   person in every mode, so a malicious text cannot make the AI raise its own power.
 - In Full Access, the AI may open a panel to show the person something, such as a Settings section or a Catalog item.
 
+State (2026-11-26): built on `reach-follows-mode` (R587) and fixed after two reviews (R146), not landed. Deleting for
+good, spending quota, the installer, `open_link`, `stop_aside`, the tool commands and another family's conversation keep
+their card in Full access, and opening one Catalog item is left out (only the Catalog opens); each is the owner's to widen.
+
 Leave out: any change to which commands are `Person` (previous task).
 
 Done:

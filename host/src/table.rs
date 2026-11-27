@@ -14,6 +14,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use views::ListState;
 
+/// The panels `show_panel` opens: the Settings sections and the Catalog.
+const SHOWN_PANELS: &[&str] = &["general", "projects", "appearance", "accounts", "privacy", "catalog"];
+
 /// What `state` answers: the engine's state, with the look of the saved appearance (the screen applies it before it renders),
 /// the models this account can use, and the version running.
 #[derive(Serialize)]
@@ -841,6 +844,15 @@ table! {
     }
     Write Person fn open_folders(h, paths: Vec<String>) -> Vec<Project> {
         h.engine.open_folders(&paths)
+    }
+    /// Open a panel on the person's screen to show them something: a Settings section (`general`, `projects`, `appearance`,
+    /// `accounts`, `privacy`) or the Catalog (`catalog`). It changes nothing; the window decides how to open it.
+    Write Ask fn show_panel(h, panel: String) -> () {
+        if !SHOWN_PANELS.contains(&panel.as_str()) {
+            return Err(crate::reach::BAD_ARGS.into());
+        }
+        h.announce(&json!({"type": "showPanel", "panel": panel}));
+        Ok(())
     }
     Write Ask fn forget_recent(h, path: String) -> () {
         h.engine.forget_recent(&path)
