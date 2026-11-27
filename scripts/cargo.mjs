@@ -485,6 +485,9 @@ async function ledgerPrune(folder, now) {
   }
 }
 
+// How long a lock directory may stay without an owner before it counts as abandoned.
+const LOCK_GRACE = 60000;
+
 // A lock directory's owner died, or it never got one within `grace` milliseconds.
 async function abandoned(lock, grace) {
   const owner = Number(await readFile(path.join(lock, 'owner'), 'utf8').catch(() => ''));
@@ -494,11 +497,12 @@ async function abandoned(lock, grace) {
 
 // Moves an abandoned lock aside before deleting it: a rename succeeds for one waiter only, so two waiters that saw the
 // same dead owner cannot both take over, and the second never deletes the lock the first one just made. When the
-// moved lock turns out to be a live one (it was replaced between the check and the rename), it goes back.
-async function takeOver(lock) {
+// moved lock turns out to be a live one (it was replaced between the check and the rename), it goes back; one with no
+// owner yet counts as live while it is under a minute old, as it does for a waiter.
+export async function takeOver(lock) {
   const aside = `${lock}.stale-${randomUUID()}`;
   try { await rename(lock, aside); } catch (error) { if (['ENOENT', 'EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) return; throw error; }
-  if (!await abandoned(aside, 0)) {
+  if (!await abandoned(aside, LOCK_GRACE)) {
     try { await rename(aside, lock); return; } catch { /* someone holds the lock again; the moved one is released */ }
   }
   await rm(aside, { recursive: true, force: true });
@@ -511,16 +515,28 @@ export async function ledgerLock(root, key, signal, said = () => {}) {
   await directory(folder);
   const lock = path.join(folder, `${key}.lock`);
   let waited = false;
+  let refused = 0;
   for (;;) {
     signal?.throwIfAborted();
+    // The lock is made beside with its owner inside and then renamed into place, so no waiter ever finds it without one.
+    const fresh = `${lock}.new-${randomUUID()}`;
     try {
-      await mkdir(lock);
-      await writeFile(path.join(lock, 'owner'), String(process.pid));
+      await mkdir(fresh);
+      await writeFile(path.join(fresh, 'owner'), String(process.pid));
+      await rename(fresh, lock);
       return { waited, release: () => rm(lock, { recursive: true, force: true }) };
     } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-      // A lock without an owner yet is a moment old; one whose owner is gone is free.
-      if (await abandoned(lock, 60000)) { await takeOver(lock); continue; }
+      await rm(fresh, { recursive: true, force: true });
+      // A held lock refuses the rename: ENOTEMPTY or EEXIST on Unix, EPERM or EACCES on Windows. With no lock in the way,
+      // a refusal is a real error (Windows may refuse for a moment, so it gets a few tries).
+      if (!['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error;
+      if (!await lstat(lock).then(() => true, () => false)) {
+        if (++refused > 20) throw error;
+        await setTimeout(50, undefined, { signal });
+        continue;
+      }
+      // A lock left by an older script may have no owner yet for a moment; one whose owner is gone is free.
+      if (await abandoned(lock, LOCK_GRACE)) { await takeOver(lock); continue; }
       if (!waited) said();
       waited = true;
       await setTimeout(1000, undefined, { signal });

@@ -881,6 +881,24 @@ test('one lane runs a proof per key; the next waits, and a dead owner\'s lock is
   assert.deepEqual((await readdir(path.join(root, 'target', '.faber-ledger'))).filter((name) => name.includes('.lock')), []);
 });
 
+test('a lock moved aside as dead goes back when it was just made and its owner is not written yet', async (t) => {
+  const root = await fixture(t);
+  const folder = path.join(root, 'target', '.faber-ledger');
+  const lock = path.join(folder, 'k.lock');
+  // Another waiter saw a dead owner here, and meanwhile the lane that took over made this lock and is about to write its owner.
+  await mkdir(lock, { recursive: true });
+  await launcher.takeOver(lock);
+  assert.ok(existsSync(lock), 'a lock a moment old with no owner yet is a live one');
+  await writeFile(path.join(lock, 'owner'), String(process.pid));
+  assert.deepEqual((await readdir(folder)).filter((name) => name.includes('.stale-')), []);
+  // A lane makes its lock with the owner already inside: there is never a moment it can be taken for an empty one.
+  await rm(lock, { recursive: true });
+  const held = await launcher.ledgerLock(root, 'k');
+  assert.equal(await readFile(path.join(lock, 'owner'), 'utf8'), String(process.pid));
+  await held.release();
+  assert.deepEqual((await readdir(folder)).filter((name) => name.includes('.lock')), []);
+});
+
 test('the shared build budget is about half the processor and stays out of other jobservers and CI', () => {
   assert.equal(launcher.budgetTokens(16), 6);
   assert.equal(launcher.budgetTokens(4), 1);

@@ -110,6 +110,8 @@ stays running: each part works at the start or end of a command, or is a kernel 
   key: `FABER_FRESH=1` runs the proof anyway.
 - **No lock held forever.** A reaper or ledger lock whose owner process is dead (or that never got an
   owner within a minute) is moved aside and removed, by one waiter only; one left by a killed launcher held its cache until someone deleted it by hand (a lane waited 3.5 hours on 2026-11-11).
+  A ledger lock is made beside with its owner inside and renamed into place, so a waiter never finds one without an
+  owner and deletes it while the lane that made it is still writing (a macOS check failed that way on 2026-11-27).
 - **One compile per change.** The landing proof is Clippy (`ship.mjs`), which covers the check it replaced, so the lane's
   own Clippy on the same tree is reused instead of compiled again.
 
