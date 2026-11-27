@@ -944,3 +944,13 @@ mod processes {
 pub use processes::{ProcessInfo, processes};
 
 pub mod rewind;
+
+#[cfg(windows)]
+pub fn is_remote_drive(letter: char) -> bool {
+    use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
+
+    const DRIVE_REMOTE: u32 = 4;
+    let drive = [letter as u16, b':' as u16, b'\\' as u16, 0];
+    // The buffer is a NUL-terminated drive root, with no remote path to open.
+    unsafe { GetDriveTypeW(drive.as_ptr()) == DRIVE_REMOTE }
+}

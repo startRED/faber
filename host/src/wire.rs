@@ -89,6 +89,8 @@ pub enum Order {
     ShowConversation { id: String },
     /// Show a file or folder in the file manager, selected and never opened. The host checked the path already.
     Reveal { path: String },
+    /// Folders that browser extensions must not read, sent before the pane can use them.
+    StorageRoots { roots: Vec<std::path::PathBuf> },
     /// End the app at once, without waiting for the host: the update installer is about to replace it, and the host has
     /// already stopped the engine. The host ends right after.
     Quit,

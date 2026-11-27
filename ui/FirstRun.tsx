@@ -4,7 +4,7 @@ import { api, type Appearance, type Experience, type Look, type Motion } from '.
 import { appliedLook, applyLook, motion as motionNow, previewer, switchTheme } from './appearance.ts';
 import { Segmented } from './controls.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
-import { t } from './i18n.ts';
+import { failureText, t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
 import { Mark } from './Mark.tsx';
 
@@ -13,6 +13,39 @@ import { Mark } from './Mark.tsx';
 
 const THEMES = themes['user-controls'].themes;
 const STEPS = ['accounts', 'look', 'chat'] as const;
+
+export function StorageQuestion(props: { onDone: () => void; onError: (error: unknown) => void }) {
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<unknown>();
+  const save = async (reset: boolean) => {
+    if (busy()) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      if (await api.storageChoose(reset)) props.onDone();
+    } catch (failure) {
+      if (reset) {
+        props.onError(failure);
+        props.onDone();
+      } else {
+        setError(failure);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Stage labelledby="first-storage-title">
+      <Title id="first-storage-title" text={t('set.storage.location')} />
+      <p class="sub">{t('first.storage.low')}</p>
+      <div class="setup-card-actions">
+        <button type="button" class="btn" aria-disabled={busy()} onClick={() => void save(false)}>{t('set.storage.change')}</button>
+        <button type="button" class="btn" aria-disabled={busy()} onClick={() => void save(true)}>{t('first.storage.keep')}</button>
+      </div>
+      <Show when={error()}>{(failure) => <p class="note err" role="alert">{failureText(failure())}</p>}</Show>
+    </Stage>
+  );
+}
 
 /** Three steps: the ones before `at` are done, `at` is the current one. */
 export function Stepper(props: { at: 1 | 2 }) {

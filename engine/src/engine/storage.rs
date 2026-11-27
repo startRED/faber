@@ -1,7 +1,25 @@
 use super::Engine;
 use crate::storage::{self, StorageUsage};
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+pub(super) fn protect_roots(roots: BTreeSet<PathBuf>) -> Vec<Arc<PathBuf>> {
+    roots.into_iter().filter(|root| storage::external_root_name(root)).map(crate::store::Store::protect_external_storage).collect()
+}
 
 impl Engine {
+    pub fn set_new_storage(&self, root: Option<PathBuf>, roots: BTreeSet<PathBuf>) {
+        self.with(|core| {
+            core.new_storage = root;
+            core.storage_roots = protect_roots(roots);
+        });
+    }
+
+    pub fn tool_store(&self) -> crate::tools::Store {
+        self.with(|core| core.catalog_store())
+    }
+
     pub async fn storage_usage(&self) -> Result<StorageUsage, String> {
         static SCAN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
         let scan = SCAN.lock().await;

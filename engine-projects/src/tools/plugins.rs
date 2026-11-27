@@ -596,7 +596,7 @@ impl Store {
         if item.runtime.is_some() {
             return self.dir(item).join("instructions");
         }
-        resource_source(&self.root, item).unwrap_or_else(|| self.dir(item))
+        item.id.split_once("--").and_then(|(parent, _)| resource_source(&self.source_root(parent), item)).unwrap_or_else(|| self.dir(item))
     }
 
     pub fn installed_resources(&self) -> BTreeMap<String, String> {
@@ -638,7 +638,7 @@ impl Store {
             .filter(|definition| {
                 installed.get(&definition.item.id) == Some(&definition.item.commit)
                     && self.enabled(&definition.item.id)
-                    && verify_definition(&self.root, definition)
+                    && verify_definition(&self.source_root(&definition.item.id), definition)
             })
             .flat_map(|definition| {
                 definition.parts.iter().filter(|part| matches!(part.kind, PartKind::Command | PartKind::Agent)).map(move |part| {
@@ -653,7 +653,7 @@ impl Store {
         self.plugins
             .iter()
             .filter(|definition| installed.contains_key(&definition.item.id) && self.enabled(&definition.item.id))
-            .all(|definition| verify_definition(&self.root, definition))
+            .all(|definition| verify_definition(&self.source_root(&definition.item.id), definition))
     }
 }
 

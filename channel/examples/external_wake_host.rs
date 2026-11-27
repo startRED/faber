@@ -22,6 +22,7 @@ async fn main() -> io::Result<()> {
     let host = faber_host::start(
         faber_host::StartOptions {
             data_dir: data.clone(),
+            storage_choice: faber_host::StorageChoice::open(&data, true),
             hidden: true,
             runtime: tokio::runtime::Handle::current(),
             installed_data_dir: None,
