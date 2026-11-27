@@ -14,5 +14,6 @@
     "verbatimModuleSyntax": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["ui", "tests", "vite.config.ts"]
+  "include": ["ui", "tests", "vite.config.ts"],
+  "exclude": ["tests/fixtures"]
 }

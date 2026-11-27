@@ -25,6 +25,7 @@ pub mod permissions;
 pub mod projects;
 pub mod projects_ui;
 pub mod reading;
+pub mod readme_shots;
 pub mod real_work;
 mod reply_media;
 pub mod review;
@@ -292,9 +293,12 @@ pub fn run_all(
 ) -> Vec<Outcome> {
     // The real-work tier runs only when asked for by name: it is the benchmark's, not a check.
     let real_work = real_work::scenarios().into_iter().filter(|_| filter.is_some_and(|f| f.contains("real work")));
+    // The README's photographs too: they check nothing, they only stage a screen and photograph it.
+    let readme_shots = readme_shots::scenarios().into_iter().filter(|_| filter.is_some_and(|f| f.contains("readme shots")));
     let chosen: Vec<Scenario> = all()
         .into_iter()
         .chain(real_work)
+        .chain(readme_shots)
         .filter(|s| filter.is_none_or(|f| s.name.contains(f)) && only.is_none_or(|names| names.iter().any(|n| n == s.name)))
         .collect();
     let seconds: Vec<u32> = chosen.iter().map(|s| costs.of(s.name)).collect();
