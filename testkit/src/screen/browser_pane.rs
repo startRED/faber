@@ -621,14 +621,14 @@ fn browser_pane(ctx: &mut Ctx) -> Result {
     wait_page_load(page, &fixture, "two", reload_count)?;
 
     select_preview(page)?;
-    page.wait_visible(&css(".site-preview"))?;
+    page.wait_visible(&css(".site-preview:has(.site-fit)"))?;
     page.wait_for("the native page to finish applying its selected viewport",
         "window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(p => p.shown && p.page?.width===1920 && p.page?.height===1080)")?;
     let sized = probe(page, false)?;
     same(sized["page"]["width"].clone(), json!(1920), "the selected native browser page width")?;
     same(sized["page"]["height"].clone(), json!(1080), "the selected native browser page height")?;
     page.click(&css(".site-fit"))?;
-    page.wait_gone(&css(".site-preview"))?;
+    page.wait_gone(&css(".site-preview:has(.site-fit)"))?;
 
     page.click(&css(".site-wide"))?;
     page.wait_for("the browser column to widen", "document.querySelector('.runcol')?.classList.contains('wide')")?;

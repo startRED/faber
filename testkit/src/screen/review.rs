@@ -8,7 +8,7 @@ pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "pointer respects delayed finite layout motion before clicking", run: delayed_pointer },
         Scenario { name: "review 2: rapid column toggles on a large thread stay below 400 MB without stage clones", run: peak_memory },
-        Scenario { name: "review 12: natural column motion has intermediate frames without stretching text", run: natural_motion },
+        Scenario { name: "review 12: the running column slides while the stage takes its width in one step", run: natural_motion },
         Scenario { name: "review 5: retained layout motion stays within the frame budget on a large thread", run: layout_motion },
         Scenario { name: "review 2: paint containment keeps keyboard focus rings visible", run: focus_ring },
     ]
@@ -140,6 +140,8 @@ fn natural_motion(ctx: &mut Ctx) -> Result {
         "document.querySelector('.run-btn').getAttribute('aria-expanded') === 'true' && document.querySelector('.run-btn').click()",
     )?;
     pause(0.4);
+    // docs/design/looks.md: the running column slides over its direction's timing token; the stage takes its new width in
+    // one step, so the answer is laid out once instead of on every frame, and its text is never stretched.
     for _ in 0..2 {
         let samples = app.page.eval(r#"new Promise((resolve, reject) => {
           const thread = document.querySelector('.thread');
@@ -161,9 +163,10 @@ fn natural_motion(ctx: &mut Ctx) -> Result {
             if (!paragraph) throw new Error('the probe must find an actually painted answer glyph');
             const range = document.createRange(); range.setStart(paragraph.firstChild, 0); range.setEnd(paragraph.firstChild, 1);
             samples.push([now, view.width, range.getBoundingClientRect().width]);
-            if (duration === undefined && Math.abs(view.width - samples[0][1]) > .01) {
-              const animation = main.getAnimations().find(a => a.effect?.getKeyframes().some(f => f.width !== undefined));
-              duration = animation?.effect.getComputedTiming().duration;
+            if (duration === undefined) {
+              const slide = [...document.querySelectorAll('.runcol')].flatMap(el => el.getAnimations())
+                .find(a => a.effect?.getKeyframes().some(f => f.transform !== undefined && f.transform !== 'none'));
+              duration = slide?.effect.getComputedTiming().duration;
             }
           };
           sample(performance.now()); document.querySelector('.run-btn').click();
@@ -174,34 +177,23 @@ fn natural_motion(ctx: &mut Ctx) -> Result {
         let frames = samples["samples"].as_array().ok_or("missing frame samples")?;
         let expected = samples["expected"].as_f64().ok_or("missing column timing token")?;
         ensure(samples["duration"].as_f64() == Some(expected), || {
-            format!("the width animation did not use its direction's timing token: {samples}")
+            format!("the running column did not slide over its direction's timing token: {samples}")
         })?;
         let first = frames[0][1].as_f64().unwrap();
         let last = frames.last().unwrap()[1].as_f64().unwrap();
         let glyph = frames[0][2].as_f64().unwrap();
         let travel = (first - last).abs();
-        let intermediate: Vec<_> = frames
-            .iter()
-            .filter(|f| (f[1].as_f64().unwrap() - first).abs() > 0.01 && (f[1].as_f64().unwrap() - last).abs() > 0.01)
-            .collect();
-        ctx.notes.push(format!("natural toggle: {} frames, {travel:.1}px travel", frames.len()));
-        ensure(travel > 300.0 && intermediate.len() >= 4, || format!("no continuous width motion: {samples}"))?;
-        let mut intervals: Vec<_> = frames.windows(2).map(|f| f[1][0].as_f64().unwrap() - f[0][0].as_f64().unwrap()).collect();
-        intervals.sort_by(f64::total_cmp);
-        let p95 = intervals[(intervals.len() as f64 * 0.95) as usize];
-        // Sampled boundaries can differ by one frame; the effect itself must still use its exact timing token above.
-        let at = |f: &serde_json::Value| f[0].as_f64().unwrap();
-        let left = frames.iter().rev().find(|f| (f[1].as_f64().unwrap() - first).abs() <= 0.01).map(at).unwrap();
-        let arrived = frames.iter().find(|f| (f[1].as_f64().unwrap() - last).abs() <= 0.01).map(at).unwrap();
-        ensure(arrived - left + p95 >= expected, || {
-            format!("the width travelled faster than its timing token within one sampled frame: {samples}")
-        })?;
+        let intermediate =
+            frames.iter().filter(|f| (f[1].as_f64().unwrap() - first).abs() > 0.01 && (f[1].as_f64().unwrap() - last).abs() > 0.01).count();
+        ctx.notes.push(format!("natural toggle: {} frames, {travel:.1}px stage change", frames.len()));
+        ensure(travel > 300.0, || format!("the stage did not make room for the running column: {samples}"))?;
+        ensure(intermediate == 0, || format!("the stage was laid out at in-between widths instead of one step: {samples}"))?;
         ensure(frames.iter().all(|f| (f[2].as_f64().unwrap() - glyph).abs() < 0.1), || {
             format!("text is horizontally stretched: {samples}")
         })?;
-        ensure(frames.windows(2).all(|f| (f[1][1].as_f64().unwrap() - f[0][1].as_f64().unwrap()).abs() < travel * 0.5), || {
-            format!("thread jumps between adjacent frames: {samples}")
-        })?;
+        let mut intervals: Vec<_> = frames.windows(2).map(|f| f[1][0].as_f64().unwrap() - f[0][0].as_f64().unwrap()).collect();
+        intervals.sort_by(f64::total_cmp);
+        let p95 = intervals[(intervals.len() as f64 * 0.95) as usize];
         ctx.notes.push(format!("column p95 frame interval {p95:.1} ms"));
         ensure(p95 < 26.0, || format!("column motion missed the frame budget: {p95:.1} ms"))?;
     }

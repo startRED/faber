@@ -183,7 +183,7 @@ pub const SOLO: &[(&str, &str)] = &[
     ("C5.4: the open guide and the look step, with no conversation, use at most 400 MB", "memory"),
     ("projects: a warm CLI runs straight under the app, with no guard process, and its memory is measured", "memory"),
     ("review 2: rapid column toggles on a large thread stay below 400 MB without stage clones", "memory"),
-    ("review 12: natural column motion has intermediate frames without stretching text", "frame intervals"),
+    ("review 12: the running column slides while the stage takes its width in one step", "frame intervals"),
     ("review 5: retained layout motion stays within the frame budget on a large thread", "frame intervals"),
     ("pointer respects delayed finite layout motion before clicking", "motion timing"),
     ("sentinel: panels move through frames, and reduced motion moves nothing", "frame clock"),
