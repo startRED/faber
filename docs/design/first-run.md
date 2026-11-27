@@ -2,6 +2,11 @@
 
 How the first-run steps and the tutorial look and behave. The Settings screen is in [settings.md](settings.md).
 
+- On a new installation with no saved data, when the default drive has less than 10 GB free, a modal offers Change and
+  Keep default before the accounts. The account setup must still be due.
+  Change opens the system folder picker for new project copies and catalog installs. The choice also lives in
+  Settings > General > Storage.
+
 - The first run has three steps in a window with no sidebar: connected accounts, appearance, first conversation. A stepper
   at the top shows the place. Each step is a modal dialog: its heading takes focus when it opens, and Esc and the
   shortcuts of the shell (Ctrl N, Ctrl comma, Ctrl period) do nothing until a button is used.

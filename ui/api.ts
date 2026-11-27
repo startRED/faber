@@ -772,6 +772,7 @@ export interface VendorUsage {
   ownSpendUsd: number; spendDays?: [number, number, number][]; unmetered: number; counting: boolean; windows: WindowUsage[];
 }
 export interface AppState {
+  storageChoice?: StorageChoice;
   gitReason?: 'reason.git_missing';
   uncleanExit?: { at: number; started?: number; panic: boolean; panicOnly?: boolean };
   conversations: Summary[];
@@ -788,6 +789,14 @@ export interface AppState {
   quotas: QuotaReading[];
   usage?: VendorUsage[];
   version: string;
+}
+
+export interface StorageChoice {
+  folder: string;
+  custom: boolean;
+  locked: boolean;
+  notice: 'reason.storage.default' | 'reason.storage.unreadable' | null;
+  ask: boolean;
 }
 /** Kept only in memory; the engine caps each conversation at 32 commands and each output at 20 lines / 8 KB. */
 export interface BackgroundCommand {
@@ -1276,6 +1285,8 @@ export const api = {
   hookList: () => invoke<HookPreview[]>('hook_list'),
   saveSettings: (patch: Settings) => invoke<SavedSettings>('save_settings', { patch }),
   storageUsage: () => invoke<StorageUsage>('storage_usage'),
+  storageChoice: () => invoke<StorageChoice>('storage_choice'),
+  storageChoose: (reset: boolean) => invoke<StorageChoice | null>('storage_choose', { reset }),
   saveTheme: (appearance: Appearance, name: string) => invoke<boolean>('save_theme', { appearance, name }),
   openTheme: () => invoke<ThemeFile | null>('open_theme'),
   saveFile: (id: string, path: string) => invoke<boolean>('save_file', { id, path }),

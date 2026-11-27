@@ -1358,17 +1358,15 @@ async fn conversation_export_uses_the_saved_chat_project_and_copy_working_folder
     let store = Store::new(dir.path());
     let project = Project::new("export-project".into(), "Project".into(), "C:/export-private/Project Folder".into());
     store.save_projects(std::slice::from_ref(&project)).unwrap();
-    let copy = WorkCopy {
-        path: "C:/export-private/Copy Folder".into(),
-        branch: "faber/export".into(),
-        root: project.path.clone(),
-        sub: "app".into(),
-        base: None,
-    };
+    // A copy outside the storage roots needs an absolute, link-free path on this system.
+    let copy_path = if cfg!(windows) { "C:/export-private/Copy Folder" } else { "/export-private/Copy Folder" };
+    let copy_root = format!("{copy_path}/app");
+    let copy =
+        WorkCopy { path: copy_path.into(), branch: "faber/export".into(), root: project.path.clone(), sub: "app".into(), base: None };
     for (area, work_copy, root, expected) in [
         (Area::Chat, None, "C:/export-private/Chat Folder", "Chat Folder/sub/report.md"),
         (Area::Project, None, "C:/export-private/Project Folder", "Project Folder/sub/report.md"),
-        (Area::Project, Some(copy), "C:/export-private/Copy Folder/app", "app/sub/report.md"),
+        (Area::Project, Some(copy), copy_root.as_str(), "app/sub/report.md"),
     ] {
         let mut conversation = export_sample(&format!("`{root}/sub/report.md`"));
         conversation.area = area;

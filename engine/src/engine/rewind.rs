@@ -1354,7 +1354,9 @@ mod tests {
         }
         for (discard, admitted) in [(false, false), (true, false), (false, true), (true, true)] {
             let data = crate::workspace::TestRoot::new();
-            let folder = tempfile::tempdir().unwrap();
+            let temp = tempfile::tempdir().unwrap();
+            // A copy outside the storage roots needs a link-free path; macOS reaches its temporary folders through /var, a link.
+            let folder = if cfg!(windows) { temp.path().to_path_buf() } else { temp.path().canonicalize().unwrap() };
             let engine = Engine::new(
                 EngineOptions {
                     data_dir: data.path().into(),
@@ -1372,7 +1374,7 @@ mod tests {
                 Arc::new(|_| {}),
             )
             .unwrap();
-            let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+            let project = engine.add_project(&folder.to_string_lossy()).unwrap();
             let (capturing, capture_started) = tokio::sync::oneshot::channel();
             let capturing = Mutex::new(Some(capturing));
             engine.set_git(Arc::new(move || {
@@ -1394,8 +1396,8 @@ mod tests {
                 let id = core.blank(Area::Project, Some(project.id));
                 let c = core.convs.get_mut(&id).unwrap();
                 c.copy = Some(crate::project::copy::WorkCopy {
-                    path: folder.path().to_string_lossy().into(),
-                    root: folder.path().to_string_lossy().into(),
+                    path: folder.to_string_lossy().into(),
+                    root: folder.to_string_lossy().into(),
                     branch: "faber/held-capture".into(),
                     sub: String::new(),
                     base: None,
@@ -1411,7 +1413,7 @@ mod tests {
             });
             tokio::time::timeout(Duration::from_secs(30), capture_started).await.unwrap().unwrap();
             let admission = admitted.then(|| {
-                let folder = folder.path().canonicalize().unwrap();
+                let folder = folder.canonicalize().unwrap();
                 engine.with(|core| {
                     core.rewind.admission.push(folder.clone());
                     assert_eq!(core.remove(&id), Err("error.rewind.busy".into()), "the destructive boundary stays guarded");

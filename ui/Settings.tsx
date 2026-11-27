@@ -14,7 +14,7 @@ import { animateList } from './motion.ts';
 import { ProjectsSection } from './ProjectSettings.tsx';
 import { Recents } from './Recents.tsx';
 import { ReportProblem } from './ReportProblem.tsx';
-import { StorageUse } from './StorageUse.tsx';
+import { StorageLocation, StorageUse } from './StorageUse.tsx';
 import type { Quotas } from './sidebar.ts';
 import './settings.css';
 
@@ -351,6 +351,7 @@ export function Settings(props: Props) {
             {/* The data folder holds both areas (Chat conversations too), so its size sits in General; closed, it measures nothing. */}
             <Group title={t('set.group.storage')}>
               <Fold id="set-storage" title={t('set.storage')} hint={t('set.storage.line')}>
+                <StorageLocation />
                 <StorageUse projects={props.projects ?? []} />
               </Fold>
             </Group>

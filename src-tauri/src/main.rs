@@ -1086,6 +1086,7 @@ fn main() {
             #[cfg(windows)]
             app.manage(pane::app::Apps::default());
             let data_dir = data_dir(app.handle())?;
+            let storage_choice = faber_host::StorageChoice::open(&data_dir, is_test);
             app.manage(tray::Tray::default());
             // Only the first launch gets here (a second one ends in the single-instance plugin), so only it reads the marker.
             if crash_record_dir(is_test).is_some() {
@@ -1132,6 +1133,7 @@ fn main() {
             faber_channel::host::prepare()?;
             let host = faber_host::start(
                 StartOptions {
+                    storage_choice,
                     data_dir: data_dir.clone(),
                     hidden,
                     runtime: tauri::async_runtime::handle().inner().clone(),
