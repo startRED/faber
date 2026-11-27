@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/media/banner.png" alt="Faber: one app for everything AI can do. Chat and Projects on the AI subscriptions you already pay for." width="100%" />
+<img src="docs/media/banner.png" alt="Faber: the AI says done, Faber checks. Chat and Projects on the AI subscriptions you already pay for." width="100%" />
 
 <h3>
 
