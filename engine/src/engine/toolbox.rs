@@ -11,7 +11,7 @@ use crate::tools::{InstallError, Item};
 
 /// Plan changes nothing by its nature, and Isolated (the router, the side questions, the helpers: no setting can hold it) has no
 /// say over Faber at all.
-fn may_change(mode: Permissions) -> bool {
+pub(super) fn may_change(mode: Permissions) -> bool {
     !matches!(mode, Permissions::Plan | Permissions::Isolated)
 }
 

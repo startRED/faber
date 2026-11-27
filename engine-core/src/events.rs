@@ -219,6 +219,12 @@ pub enum EngineEvent {
         tool: &'static str,
         input: Value,
     },
+    /// The agent called the `faber` tool (`crate::commands`): it finds or runs one of Faber's own commands. The engine answers
+    /// with `Session::helper_reply`, a run once the host has.
+    FaberCall {
+        id: String,
+        input: Value,
+    },
     /// The agent called `plan`, `status` or `wrap_up` (`crate::progress`; `tool` is the name both drivers give it). The engine
     /// writes it down and answers at once with `Session::helper_reply`.
     ProgressCall {

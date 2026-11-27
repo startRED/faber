@@ -2,6 +2,7 @@ account.rs
 act.rs
 admit.rs
 agent.rs
+agent_commands.rs
 agy.rs
 answer.rs
 app.rs
@@ -56,6 +57,7 @@ events.rs
 evict.rs
 export.rs
 extensions.rs
+faber_tool.rs
 facts.rs
 failure.rs
 feed.rs

@@ -52,6 +52,7 @@ mod creative_judges;
 mod dry_run;
 mod ended;
 mod evict;
+mod faber_tool;
 pub mod media;
 mod slow_lock;
 pub use aside::Aside;
@@ -597,6 +598,8 @@ struct Core {
     copy_sweeps: crate::project::maintenance::Sweeps,
     /// Faber's own browser (R161 step 7), given by the shell where it has one; without it the tool is not offered.
     browser: Option<std::sync::Arc<dyn crate::browser::Browser>>,
+    /// Faber's own command table (R585), given by the front end that holds it; without it the `faber` tool is not offered.
+    table: Option<std::sync::Arc<dyn crate::commands::Commands>>,
     /// Runs a project's checks (`crate::verify`), given by the shell; without it the tool is not offered.
     verifier: Option<std::sync::Arc<crate::verify::Verifier>>,
     /// Where the catalog install of a project's agent downloads from instead of the real hosts (tests; a loopback address only).
@@ -966,6 +969,7 @@ impl Engine {
                     wait_timers: HashMap::new(),
                     pr_reader,
                     browser: None,
+                    table: None,
                     verifier: None,
                     setup_source: None,
                     node_missing: false,
@@ -1701,6 +1705,10 @@ impl Engine {
     /// Gives the engine Faber's own browser (R161 step 7). Sessions that start afterwards offer it to a project's agent.
     pub fn set_browser(&self, browser: std::sync::Arc<dyn crate::browser::Browser>) {
         self.with(|c| c.browser = Some(browser));
+    }
+    /// Gives the engine Faber's own command table (R585). Conversations that start afterwards offer the `faber` tool.
+    pub fn set_commands(&self, commands: std::sync::Arc<dyn crate::commands::Commands>) {
+        self.with(|c| c.table = Some(commands));
     }
     /// Makes the project agent's catalog install download from this loopback address instead of the real hosts (tests).
     #[doc(hidden)]
@@ -3446,6 +3454,7 @@ impl Core {
                 | EngineEvent::ConversationCall { id, .. }
                 | EngineEvent::VerifyCall { id, .. }
                 | EngineEvent::MapCall { id, .. }
+                | EngineEvent::FaberCall { id, .. }
                 | EngineEvent::ProgressCall { id, .. }
                 | EngineEvent::ToolboxCall { id, .. } => {
                     if let Some(l) = self.live.get(conv) {
@@ -3801,6 +3810,7 @@ impl Core {
             EngineEvent::ConversationCall { id, input } => return self.conversation_call(conv, id, input),
             EngineEvent::VerifyCall { id, input } => return self.verify_call(conv, id, input),
             EngineEvent::MapCall { id, input } => return self.map_call(conv, id, input),
+            EngineEvent::FaberCall { id, input } => return self.faber_call(conv, id, input),
             EngineEvent::ProgressCall { id, tool, input } => return self.progress_call(conv, id, tool, input),
             EngineEvent::ToolboxCall { id, tool, input } => return self.toolbox_call(conv, id, tool, input),
             EngineEvent::Permission { request_id, tool, mut input } => {
@@ -5890,6 +5900,7 @@ impl Core {
         let leads = conversations && self.convs.get(conv).is_some_and(|c| c.started_by.is_none() && c.goal_fix.is_none());
         let verify = self.offers_verify(area, tool_mode);
         let progress = area == Area::Project;
+        let faber = self.offers_faber();
         let launch_tuning = self.bench.launch_tuning(tuning.clone());
         let identity = crate::proc::ConversationIdentity::new(conv)?;
         self.rewind_session_started(conv, sid, cwd_used.clone());
@@ -5915,6 +5926,7 @@ impl Core {
                                     verify,
                                     map: verify,
                                     progress,
+                                    faber,
                                     // The team tool belongs to Faber helpers. Antigravity is not a helper target yet.
                                     ..Default::default()
                                 },
@@ -5942,6 +5954,7 @@ impl Core {
                         leads,
                         verify,
                         progress,
+                        faber,
                         area,
                         model,
                         effort,
@@ -5991,6 +6004,7 @@ impl Core {
                             leads,
                             verify,
                             progress,
+                            faber,
                             cwd,
                             model,
                             effort,
@@ -6163,11 +6177,14 @@ impl Core {
         id
     }
 
+    /// A send the person made on the screen (or Faber on the screen's behalf): it may close the temporary Chat left open.
     fn send(&mut self, req: SendRequest, wake: Option<Wake>) -> Result<String, String> {
-        self.send_task(req, wake, None)
+        self.send_task(req, wake, None, true)
     }
 
-    fn send_task(&mut self, req: SendRequest, wake: Option<Wake>, task: Option<&str>) -> Result<String, String> {
+    /// `screen` says the person's own action on the screen sends it. Only such a send closes another temporary Chat: an agent
+    /// starting a conversation never deletes one the person has open (R585).
+    pub(super) fn send_task(&mut self, req: SendRequest, wake: Option<Wake>, task: Option<&str>, screen: bool) -> Result<String, String> {
         if self.installing {
             return Err("error.update.activeOperations".into());
         }
@@ -6215,7 +6232,9 @@ impl Core {
             },
         };
         self.load(&id).ok_or("error.conversationGone")?;
-        self.close_other_temporary(&id);
+        if screen {
+            self.close_other_temporary(&id);
+        }
         let saved = if req.files.is_empty() {
             vec![]
         } else {
@@ -7192,6 +7211,7 @@ mod tool_in_tests {
             leads: false,
             verify: false,
             progress: false,
+            faber: false,
             tools: Default::default(),
         };
         let opts = ClaudeOptions { bin: "test".into(), cwd: PathBuf::new(), launch, spawn, sandbox: None };

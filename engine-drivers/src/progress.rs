@@ -878,6 +878,7 @@ mod tests {
             leads: false,
             verify: false,
             progress: false,
+            faber: false,
             tools: Default::default(),
         };
         let args = crate::claude::claude_args(&launch);
@@ -902,6 +903,7 @@ mod tests {
             conversations: false,
             leads: false,
             progress: false,
+            faber: false,
             verify: false,
         };
         let (_, params) = crate::codex::thread_params(Area::Project, &thread);

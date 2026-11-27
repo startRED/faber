@@ -1,5 +1,45 @@
 # Named application control
 
+## The `faber` tool first (R585)
+
+An agent operates Faber through its own command table before it reaches for the screen. The `faber` tool, offered in Chat
+and Projects wherever the front end gave the engine its table (`Engine::set_commands`; Claude Code and Codex in both areas,
+Antigravity in Projects, where its tool relay already runs), has two actions. `find` takes words (at most 200 characters
+and 16 words) and answers up to 8 commands, each with its description, kind, reach and input schema; `by` is left out of
+the schema because the host sets it. `run` takes a command and its arguments and goes through
+`Host::dispatch_as(Caller::Agent { conversation })`, the same check the command line and the hidden renderer pass: `own`
+acts in the agent's family, `ask` records a request the person answers and returns `error.reach.ask` with its id, and
+`person` and `screen` are refused.
+
+`find` and `run` share one rule (`agent_commands::eligible`), so `find` never lists what `run` would refuse: never a
+`person` or `screen` command, never `send` (`error.session.useSession`); in Plan and Isolated, which change nothing, only
+true reads (`error.reach.readOnly`), which leaves out the reads in name only that run a program, prepare files or open
+something on the person's screen (`setup_check`, `tools_list`, `tools_prepare_replacement`, `project_memory`, `show_file`,
+`show_project`, `cli_sessions`); and in a Chat, never a project's own commands (the `project_` ones, the session controls
+and environments; `error.reach.projectOnly`). From an agent, `background_commands` lists only its family's commands, as
+the hidden renderer's bootstrap does.
+
+The engine finds, runs and prepares the answer away from its lock and takes the lock only to hand the answer over. A run
+stops being waited for after 120 seconds; work a command already handed to a blocking thread (a file read, a git call)
+cannot be cancelled and runs to its end. An answer past 20,000 characters comes back as valid JSON,
+`{"truncated": true, "characters": N, "text": ...}`, cut before any data address it would split.
+
+The owner's line (answer 6 of 2026-11-25): the AI operates Faber in everything except signing in, spending money and
+changing its own permissions, trust and hooks. Those are `person` reach: `setup_sign_in` and the `cookie_*` commands;
+money: `approve_credits`, `answer_plan`, and every turn started outside the conversation's own (`branch`, `branch_here`,
+`follow_up`, `ask_aside`, `edit_queued`, `send_queued`), so no agent escapes the project cap or `startedBy` through a new
+root; `answer`, `approve_plan`, `answer_question`, `answer_ask`, `chat_folder`, `open_folders`, `add_project`,
+`repoint_project`, `set_mcp_server`, `project_proof_confirm`, `run_app_*` and `edit_project_memory` (a kept decision can
+be a "never touch" rule); a project's own switches `start_environment`, `project_copies` and `project_goals_auto`; and
+`save_settings` touching `permissions`, `beforePlan`, `permissionsRevision`, `grantsEpoch`, `blockedHosts`,
+`extensionsDeveloperMode`, `faberTrust` or `userHooks` (`PERSON_SETTINGS`). Installing, removing, enabling or replacing a
+tool stays `ask`. A temporary chat is closed only by a send from the screen, never by an agent's. The tool costs one
+definition of under 1,000 bytes per turn, no process and no memory kept between calls.
+
+The hidden renderer below stays for what the table does not cover and for checking what the screen shows.
+
+## The hidden renderer
+
 `browse` accepts `app: "faber-live"` or `app: "faber-test"` explicitly. This is a conversation-owned hidden renderer of the actual shipped UI, supported by Electron and Windows Tauri and connected to that instance's host, not a desktop controller or the person's main renderer. Test targets require a test instance with its own data directory; this tool does not create test data isolation or launch another installed app. Other developed web apps still use their local `url` in the browser pane. Unsupported native applications need a separate supported adapter and are not claimed here.
 
 Actions: `read` (default), `click`, `type`, `scroll`, `screenshot`, `close`. Read returns visible text and numeric refs for visible interactive elements. Click/type require a ref from that session's last read; disconnected, relabelled, obscured or offscreen elements are refused. Type validates an enabled editable field before any click and inserts text through Chromium. Text is capped at 2,000 characters. `up` reverses scroll. Optional `size: "720x900"` resizes only this hidden screen (300..2560 pixels per side; Faber supports desktop layouts from 720 pixels). Screenshots are fresh JPEG attachments in the existing browser reply. App content is untrusted data.

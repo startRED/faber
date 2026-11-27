@@ -196,7 +196,8 @@ impl Core {
                 choice: c.choice.clone().ok_or("error.noSubscription")?,
             };
             // The task and its message commit together in send's admission save, before dispatch starts.
-            if let Err(error) = self.send_task(request, None, Some(file)) {
+            // `follow_up` is the person's own (Person reach), so this send may close the temporary Chat left open.
+            if let Err(error) = self.send_task(request, None, Some(file), true) {
                 *self.convs.get_mut(id).unwrap().follow_ups.iter_mut().find(|t| t.file == file).unwrap() = task;
                 self.try_save(id)?;
                 return Err(error);

@@ -12,6 +12,7 @@ pub mod agy;
 pub mod claude;
 pub mod codex;
 pub mod creative;
+pub mod faber_tool;
 pub mod helper;
 pub mod persona;
 pub mod progress;

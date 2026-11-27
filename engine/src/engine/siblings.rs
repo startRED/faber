@@ -796,7 +796,8 @@ impl Core {
 
     /// Sends the agent's brief as the new conversation's first message.
     pub(super) fn launch_sibling(&mut self, id: &str, req: SendRequest, wake: Option<Wake>) -> Result<(), String> {
-        match self.send(req, wake) {
+        // Never the person's own action on the screen: a temporary Chat they have open stays.
+        match self.send_task(req, wake, None, false) {
             Ok(_) => {
                 // The agent's brief is never the person's own turn, whatever model it runs: billing stops it like a helper. A
                 // message the person writes to the conversation later is theirs.

@@ -13,6 +13,7 @@ use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 fn thread() -> CodexThread {
     CodexThread {
+        faber: false,
         subagents: None,
         temporary: false,
         cwd: ".".into(),
@@ -107,6 +108,7 @@ async fn native_branch_codex_validates_the_exact_tail_before_any_turn_and_never_
 #[test]
 fn native_branch_claude_uses_a_new_session_and_an_inclusive_validated_entry_only_when_supported() {
     let launch = ClaudeLaunch {
+        faber: false,
         subagents: None,
         temporary: false,
         helper: Default::default(),

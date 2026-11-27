@@ -8,6 +8,7 @@ pub mod browser;
 pub mod budget;
 pub mod cadence;
 pub mod change;
+pub mod commands;
 pub mod conversation_state;
 pub mod events;
 pub mod facts;

@@ -70,6 +70,8 @@ mod engine;
 mod evict;
 #[path = "export.rs"]
 mod export;
+#[path = "faber_tool.rs"]
+mod faber_tool;
 #[path = "failed_writes.rs"]
 mod failed_writes;
 #[path = "failure.rs"]

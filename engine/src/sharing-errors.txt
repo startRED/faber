@@ -140,6 +140,8 @@ error.quotaWait
 error.reach.
 error.reach.ask
 error.reach.person
+error.reach.projectOnly
+error.reach.readOnly
 error.reach.screen
 error.recents.gone
 error.recents.saveFailed

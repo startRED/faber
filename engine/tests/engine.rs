@@ -4950,6 +4950,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
             bin: "claude".into(),
             cwd: dir.path().into(),
             launch: ClaudeLaunch {
+                faber: false,
                 subagents: None,
                 temporary: false,
                 helper: Default::default(),

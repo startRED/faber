@@ -576,6 +576,7 @@ async fn a_codex_project_thread_carries_the_plugin_roles_and_a_chat_thread_none(
         });
         let session = server.open(
             CodexThread {
+                faber: false,
                 subagents: None,
                 temporary: false,
                 title: None,

@@ -41,9 +41,9 @@ fn sharing_state_for(sharing: &faber_engine::sharing::Sharing) -> Option<Sharing
 }
 
 fn scope_app_state(state: &mut AppState, by: Option<&str>, family: impl Fn(&str) -> Option<String>) {
+    crate::keep_family(&mut state.background, by, &family);
     let owner = by.and_then(&family);
     let allowed = |id: &str| owner.as_ref().is_some_and(|root| family(id).as_ref() == Some(root));
-    state.background.items.retain(|item| allowed(&item.conversation_id));
     state.running.items.retain(|item| allowed(&item.conversation_id));
 }
 
@@ -438,12 +438,14 @@ table! {
         let engine = h.engine.clone();
         off("error.conversationGone", move || engine.pick_up(&project_id, session)).await?
     }
-    StartsTurn Own("/req/conversationId") fn branch(h, req: BranchRequest) -> String {
+    /// Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money.
+    StartsTurn Person fn branch(h, req: BranchRequest) -> String {
         let engine = h.engine.clone();
         off("error.copy.failed", move || engine.branch(req)).await?
     }
-    /// "Branch from here" on an answer: a new conversation with every message up to it, where nothing is sent yet.
-    StartsTurn Own("/conversationId") fn branch_here(h, conversation_id: String, message_id: String) -> String {
+    /// "Branch from here" on an answer: a new conversation with every message up to it, where nothing is sent yet. Person
+    /// reach (R585): a new conversation outside the family is the person's to make.
+    StartsTurn Person fn branch_here(h, conversation_id: String, message_id: String) -> String {
         let engine = h.engine.clone();
         off("error.copy.failed", move || engine.branch_here(&conversation_id, &message_id)).await?
     }
@@ -557,17 +559,20 @@ table! {
     Read Screen fn seen(h, id: String) -> () {
         h.engine.seen(&id)
     }
-    StartsTurn Own("/id") fn follow_up(h, id: String, file: String, dismiss: bool) -> () {
+    /// Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money.
+    StartsTurn Person fn follow_up(h, id: String, file: String, dismiss: bool) -> () {
         h.engine.follow_up(&id, &file, dismiss)
     }
     Write Own("/id") fn remove_queued(h, id: String, turn_id: String) -> () {
         h.engine.remove_queued(&id, &turn_id);
         Ok(())
     }
-    Write Own("/id") fn edit_queued(h, id: String, turn_id: String, text: String) -> () {
+    /// Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money.
+    Write Person fn edit_queued(h, id: String, turn_id: String, text: String) -> () {
         h.engine.edit_queued(&id, &turn_id, &text)
     }
-    StartsTurn Own("/id") fn send_queued(h, id: String, turn_id: String) -> () {
+    /// Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money.
+    StartsTurn Person fn send_queued(h, id: String, turn_id: String) -> () {
         h.engine.send_queued(&id, &turn_id)
     }
     /// What a subagent wrote between its steps (R161 step 3), for its side chat while it is open. The screen's copy of a message
@@ -702,8 +707,9 @@ table! {
         let engine = h.engine.clone();
         off("error.rewind.storage", move || engine.rewind_redo(request)).await?
     }
-    /// A quick question on the side of a conversation (R250); `model` is the tab's own pick, or the conversation's.
-    StartsTurn Own("/id") fn ask_aside(h, id: String, question: String, model: Option<String>) -> String {
+    /// A quick question on the side of a conversation (R250); `model` is the tab's own pick, or the conversation's. Person
+    /// reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money.
+    StartsTurn Person fn ask_aside(h, id: String, question: String, model: Option<String>) -> String {
         h.engine.ask_aside(&id, &question, model)
     }
     Write Ask fn stop_aside(h, aside_id: String) -> () {
@@ -853,7 +859,8 @@ table! {
     Write Ask fn forget_environment(h, id: String) -> () {
         h.engine.forget_environment(&id)
     }
-    Write Ask fn start_environment(h, id: String) -> Vec<Project> {
+    /// Person reach (R585): it opens projects and their conversations for the person.
+    Write Person fn start_environment(h, id: String) -> Vec<Project> {
         h.engine.start_environment(&id)
     }
     Write Person fn chat_folder(h, id: Option<String>, scratch: bool, path: Option<String>) -> Option<Conversation> {
@@ -998,8 +1005,9 @@ table! {
         h.shell.set_texts(texts)
     }
 
-    /// Settings > Projects: whether each new conversation of this project works in a separate copy (R201).
-    Write Ask fn project_copies(h, project_id: String, on: bool) -> () {
+    /// Settings > Projects: whether each new conversation of this project works in a separate copy (R201). Person reach
+    /// (R585): a project's setting is the person's.
+    Write Person fn project_copies(h, project_id: String, on: bool) -> () {
         project_commands::id(&project_id)?;
         let project = h.engine.project(&project_id)?;
         let mut updated = project.clone();
@@ -1011,8 +1019,8 @@ table! {
         project_commands::id(&project_id)?;
         h.engine.project_goals(&project_id)
     }
-    /// The project's switch for starting fixes by itself. Off until the person turns it on.
-    Write Ask fn project_goals_auto(h, project_id: String, on: bool) -> faber_engine::project::goals::View {
+    /// The project's switch for starting fixes by itself. Off until the person turns it on: Person reach (R585).
+    Write Person fn project_goals_auto(h, project_id: String, on: bool) -> faber_engine::project::goals::View {
         project_commands::id(&project_id)?;
         h.engine.set_project_goals(&project_id, on)
     }
@@ -1049,7 +1057,9 @@ table! {
         let engine = h.engine.clone();
         off("error.memory.read", move || engine.project_memory(&project_id)).await?
     }
-    Write Ask fn edit_project_memory(h, project_id: String, edit: faber_engine::project::memory::Edit) -> () {
+    /// Edits or removes a memory entry, or keeps a decision as the person's (R16). The person's alone: a kept decision can be
+    /// a "never touch" rule (R575), which is the agent's own permission (R585).
+    Write Person fn edit_project_memory(h, project_id: String, edit: faber_engine::project::memory::Edit) -> () {
         project_commands::id(&project_id)?;
         let engine = h.engine.clone();
         off("error.memory.write", move || engine.edit_project_memory(&project_id, &edit)).await?

@@ -16,6 +16,18 @@ fn temporary_chat_cli_session_does_not_persist() {
     assert!(claude_args(&temporary).iter().any(|a| a == "--no-session-persistence"));
 }
 
+#[test]
+fn a_chat_gets_faber_s_own_server_for_its_commands_only_when_the_engine_holds_the_table() {
+    // R585: the `faber` tool is the only one of Faber's tools a Chat holds; without it a guarded Chat names no server at all.
+    for mode in [Permissions::Ask, Permissions::Plan, Permissions::FullAccess] {
+        let without = claude_args(&ClaudeLaunch { permissions: mode, ..launch(Area::Chat) });
+        assert!(!without.iter().any(|a| a == faber_engine::helper::CLAUDE_MCP_CONFIG), "{mode:?}: {without:?}");
+        let with = claude_args(&ClaudeLaunch { permissions: mode, faber: true, ..launch(Area::Chat) });
+        let at = with.iter().position(|a| a == "--mcp-config").unwrap_or_else(|| panic!("{mode:?}: {with:?}"));
+        assert_eq!(with[at + 1], faber_engine::helper::CLAUDE_MCP_CONFIG, "{mode:?}");
+    }
+}
+
 fn visible(event: &EngineEvent) -> bool {
     !matches!(event, EngineEvent::Writers { .. } | EngineEvent::Cursor { .. } | EngineEvent::WriterExit { .. })
 }
@@ -54,6 +66,7 @@ fn slash_init_keeps_skills_and_safe_builtins_in_the_advertised_order() {
 
 fn launch(area: Area) -> ClaudeLaunch {
     ClaudeLaunch {
+        faber: false,
         subagents: None,
         temporary: false,
         helper: Default::default(),

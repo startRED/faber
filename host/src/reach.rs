@@ -5,7 +5,8 @@
 //! An AI that Faber started acts freely on its own family (the conversation it works in, the one that started it and every
 //! conversation started from them), reads and organizes anything, and needs the person's yes for the rest. Signing in,
 //! answering a card, granting a folder, raising permissions, money, security settings and deleting for good stay with the
-//! person on the screen, whoever asks.
+//! person on the screen, whoever asks. The owner's line (R585): the AI operates Faber in everything except signing in,
+//! spending money and changing its own permissions, trust and hooks, which are all `Person`.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -58,7 +59,8 @@ impl Reach {
 }
 
 /// The settings only the person changes on the screen, even through `save_settings`: the permission mode and what decides
-/// it, hooks that run commands, full trust, updates from the preview channel and starting with the system.
+/// it, the sites the agent's browser must not open, hooks that run commands, full trust, updates from the preview channel
+/// and starting with the system.
 pub const PERSON_SETTINGS: &[&str] = &[
     "permissions",
     "userHooks",
@@ -66,6 +68,7 @@ pub const PERSON_SETTINGS: &[&str] = &[
     "grantsEpoch",
     "permissionsRevision",
     "beforePlan",
+    "blockedHosts",
     "previews",
     "autostart",
     "extensionsDeveloperMode",
@@ -76,6 +79,8 @@ pub const SCREEN_ONLY: &str = "error.reach.screen";
 pub const PERSON_ONLY: &str = "error.reach.person";
 pub const ASK_PERSON: &str = "error.reach.ask";
 pub const BAD_ARGS: &str = "error.host.badArgs";
+/// An agent in Plan or Isolated, which change nothing, asked for a command that is not a read (R585).
+pub const READ_ONLY: &str = "error.reach.readOnly";
 
 /// Whether `caller` may send `command` with `args`. `family` gives the root of a conversation's family (None for one that
 /// does not exist), so an AI's own family is told apart from the others.
@@ -204,6 +209,9 @@ mod tests {
             assert_eq!(check(&caller, "save_settings", Reach::Ask, &raise, families()), Err(PERSON_ONLY));
             let extensions = json!({"patch": {"extensionsDeveloperMode": true}});
             assert_eq!(check(&caller, "save_settings", Reach::Ask, &extensions, families()), Err(PERSON_ONLY));
+            // Unblocking a site widens what the agent's own browser may open: its own permission (R585).
+            let unblock = json!({"patch": {"blockedHosts": []}});
+            assert_eq!(check(&caller, "save_settings", Reach::Ask, &unblock, families()), Err(PERSON_ONLY));
             assert_eq!(check(&caller, "site_extensions_mode", Reach::Screen, &json!({"enabled": true}), families()), Err(SCREEN_ONLY));
         }
         assert_eq!(check(&Caller::Screen, "answer", Reach::Person, &json!({}), families()), Ok(()));

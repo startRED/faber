@@ -803,3 +803,180 @@ fn sharing_commands_are_screen_only_with_an_endpoint() {
         assert_eq!(matches!(super::Host::reach(name), Some(super::Reach::Screen)), faber_engine::sharing::endpoint().is_some());
     }
 }
+
+/// R585: the agent's `faber` tool, as the engine holds it (`Host::agent_commands`).
+mod faber_tool {
+    use super::*;
+    use faber_engine::commands::Scope;
+
+    const CHAT: Scope = Scope { read_only: false, project: false };
+    const PROJECT: Scope = Scope { read_only: false, project: true };
+    const SCOPES: [Scope; 4] = [CHAT, PROJECT, Scope { read_only: true, project: false }, Scope { read_only: true, project: true }];
+
+    fn names(found: &[Value]) -> Vec<&str> {
+        found.iter().map(|command| command["name"].as_str().unwrap()).collect()
+    }
+
+    #[test]
+    fn find_answers_a_command_by_its_words_and_never_one_the_agent_could_not_run() {
+        let found = agent_commands::find("rename a conversation", CHAT);
+        assert_eq!(names(&found).first(), Some(&"rename"), "{found:?}");
+        assert!(found.len() <= faber_engine::commands::MAX_FOUND);
+        assert!(found[0]["inputSchema"]["properties"]["title"].is_object() && found[0]["about"].is_string());
+        assert_eq!(found[0]["kind"], "write");
+        let archive = agent_commands::find("archive", CHAT);
+        assert!(archive[0]["inputSchema"]["properties"].get("by").is_none(), "the host sets by itself");
+        assert!(agent_commands::find("", PROJECT).is_empty() && agent_commands::find("zzqx", PROJECT).is_empty());
+        // Words that name what only the person or the screen does find nothing of theirs.
+        for words in ["sign in", "approve credits", "answer permission", "open state", "cookie import", "edit project memory", "branch"] {
+            for command in agent_commands::find(words, PROJECT) {
+                let reach = Host::reach(command["name"].as_str().unwrap()).unwrap();
+                assert!(!matches!(reach, Reach::Person | Reach::Screen), "{words}: {command}");
+            }
+        }
+        assert!(agent_commands::offered(PROJECT).all(|command| !matches!(command.reach, "person" | "screen")));
+        assert!(!names(&agent_commands::find("project goals", CHAT)).iter().any(|name| name.starts_with("project_")));
+        assert!(names(&agent_commands::find("project goals", PROJECT)).contains(&"project_goals"));
+        assert!(!names(&agent_commands::find("setup check", SCOPES[3])).contains(&"setup_check"), "a read in name only");
+    }
+
+    /// `find` and `run` apply one rule: whatever `find` would never list, `run` refuses with the rule's own key, in every
+    /// scope, before the host is asked.
+    #[tokio::test]
+    async fn find_never_lists_what_run_would_refuse() {
+        let (host, _dir) = host().await;
+        let host = Arc::new(host);
+        let commands = Host::agent_commands(&host);
+        let eligible = |name: &Value, scope| Host::commands().iter().any(|c| c.name == *name && agent_commands::eligible(c, scope).is_ok());
+        for scope in SCOPES {
+            for command in Host::commands() {
+                let listed = agent_commands::find(&command.name.replace('_', " "), scope);
+                assert!(listed.iter().all(|found| eligible(&found["name"], scope)), "{scope:?} {}: {listed:?}", command.name);
+                if let Err(key) = agent_commands::eligible(command, scope) {
+                    assert!(!names(&listed).contains(&command.name), "{scope:?} lists {}", command.name);
+                    let refused = commands.run("c1".into(), command.name.into(), json!({}), scope).await;
+                    assert_eq!(refused, Err(format!("\"{key}\"")), "{scope:?} {}", command.name);
+                }
+            }
+            let send = Host::commands().iter().find(|c| c.name == "send").unwrap();
+            assert_eq!(agent_commands::eligible(send, scope), Err("error.session.useSession"));
+        }
+        for name in agent_commands::READS_IN_NAME_ONLY.iter().chain(agent_commands::PROJECT_ONLY) {
+            assert!(Host::kind(name).is_some(), "{name} is not in the table");
+        }
+        host.engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn run_reaches_a_read_and_refuses_the_unknown_through_the_engines_handle() {
+        let (host, _dir) = host().await;
+        let host = Arc::new(host);
+        let commands = Host::agent_commands(&host);
+        assert_eq!(commands.run("c1".into(), "projects".into(), json!({}), SCOPES[2]).await, Ok(json!([])));
+        let settings = commands.run("c1".into(), "settings".into(), json!({}), CHAT).await.unwrap();
+        assert!(settings.is_object());
+        for unknown in ["no_such_command", "hello", ""] {
+            assert_eq!(commands.run("c1".into(), unknown.into(), json!({}), PROJECT).await, Err("\"error.host.unknownCommand\"".into()));
+        }
+        host.engine.shutdown();
+    }
+
+    /// The owner's line (R585): signing in, money and the agent's own permissions, trust and hooks are the person's.
+    #[tokio::test]
+    async fn the_vault_stays_with_the_person_through_the_tool() {
+        let (host, _dir) = host().await;
+        let host = Arc::new(host);
+        let commands = Host::agent_commands(&host);
+        let person = Err("\"error.reach.person\"".to_string());
+        let run = |command: &str, args: Value| commands.run("c1".into(), command.into(), args, PROJECT);
+        // Signing in.
+        assert_eq!(run("setup_sign_in", json!({"vendor": "claude"})).await, person);
+        assert_eq!(run("cookie_import", json!({"id": "c1", "ticket": "t", "sites": []})).await, person);
+        // Money: paying past the plan, and every turn started outside the conversation's own.
+        assert_eq!(run("approve_credits", json!({"id": "c1", "turnId": "t1", "vendor": "claude"})).await, person);
+        let branch = json!({"req": {"conversationId": "c1", "messageId": "m1", "text": "again", "choice": {"vendor": "auto"}}});
+        assert_eq!(run("branch", branch).await, person);
+        assert_eq!(run("branch_here", json!({"conversationId": "c1", "messageId": "m1"})).await, person);
+        assert_eq!(run("follow_up", json!({"id": "c1", "file": "a.md", "dismiss": false})).await, person);
+        assert_eq!(run("ask_aside", json!({"id": "c1", "question": "why?"})).await, person);
+        assert_eq!(run("edit_queued", json!({"id": "c1", "turnId": "t1", "text": "more"})).await, person);
+        assert_eq!(run("send_queued", json!({"id": "c1", "turnId": "t1"})).await, person);
+        // A project's own switches: opening an environment, separate copies, fixes that start by themselves.
+        assert_eq!(run("start_environment", json!({"id": "e1"})).await, person);
+        assert_eq!(run("project_copies", json!({"projectId": "p1", "on": true})).await, person);
+        assert_eq!(run("project_goals_auto", json!({"projectId": "p1", "on": true})).await, person);
+        // Its own permissions: a card's answer, the mode, a blocked site, a kept "never touch" rule.
+        let card = json!({"id": "c1", "turnId": "t1", "requestId": "r1", "allow": true, "always": true});
+        assert_eq!(run("answer", card).await, person);
+        assert_eq!(run("save_settings", json!({"patch": {"permissions": "dontAsk"}})).await, person);
+        assert_eq!(run("save_settings", json!({"patch": {"blockedHosts": []}})).await, person);
+        let edit = json!({"projectId": "p1", "edit": {"path": ".faber/decisions.md", "revision": "r", "start": 0, "end": 1, "keep": true}});
+        assert_eq!(run("edit_project_memory", edit).await, person);
+        // Trust.
+        assert_eq!(run("save_settings", json!({"patch": {"faberTrust": true}})).await, person);
+        // Hooks.
+        assert_eq!(run("save_settings", json!({"patch": {"userHooks": true}})).await, person);
+        assert!(lock(&host.asks).pending().is_empty(), "no request is recorded for what the person alone decides");
+        // Tool commands stay the person's to approve one by one.
+        let asked: Value = serde_json::from_str(&run("tools_remove", json!({"id": "x"})).await.unwrap_err()).unwrap();
+        assert_eq!(asked["key"], "error.reach.ask");
+        host.engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn plan_runs_only_reads_and_an_ask_comes_back_with_its_request() {
+        let (host, _dir) = host().await;
+        seed_conversation(&host, "c1", None, None);
+        let host = Arc::new(host);
+        let commands = Host::agent_commands(&host);
+        let rename = json!({"id": "c1", "title": "Renamed"});
+        let refused = commands.run("c1".into(), "rename".into(), rename.clone(), SCOPES[2]).await;
+        assert_eq!(refused, Err("\"error.reach.readOnly\"".into()));
+        assert_ne!(host.engine.state().conversations.iter().find(|c| c.id == "c1").unwrap().title, "Renamed");
+        let refused = commands.run("c1".into(), "setup_check".into(), json!({}), SCOPES[2]).await;
+        assert_eq!(refused, Err("\"error.reach.readOnly\"".into()), "a read in name only runs a program");
+        assert!(commands.run("c1".into(), "rename".into(), rename, CHAT).await.is_ok(), "outside Plan the same write runs");
+        let asked = commands.run("c1".into(), "forget_recent".into(), json!({"path": "C:/x"}), CHAT).await.unwrap_err();
+        let asked: Value = serde_json::from_str(&asked).unwrap();
+        assert_eq!(asked["key"], "error.reach.ask");
+        assert!(asked["data"]["request"].is_string(), "the person's request is named: {asked}");
+        host.engine.shutdown();
+    }
+
+    /// An agent reads its own family's background commands only, as its app renderer does; the screen reads them all.
+    #[tokio::test]
+    async fn background_commands_from_an_agent_are_its_familys_only() {
+        let command = |id: &str| faber_engine::background::Command {
+            id: id.into(),
+            conversation_id: id.into(),
+            vendor: faber_engine::model::Vendor::Codex,
+            command: "private command".into(),
+            started: 1,
+            output: format!("{id} output"),
+            state: faber_engine::background::State::Running,
+            stoppable: true,
+        };
+        let family = |id: &str| match id {
+            "lead" | "child" => Some("lead".to_string()),
+            "other" => Some("other".to_string()),
+            _ => None,
+        };
+        let all = faber_engine::background::List { revision: 1, items: ["lead", "child", "other"].map(command).to_vec() };
+        for (by, expected) in
+            [(Some("child"), vec!["lead", "child"]), (Some("other"), vec!["other"]), (Some("gone"), vec![]), (None, vec![])]
+        {
+            let mut list = all.clone();
+            keep_family(&mut list, by, family);
+            assert_eq!(list.items.iter().map(|i| i.conversation_id.as_str()).collect::<Vec<_>>(), expected, "{by:?}");
+        }
+        // Through the tool: the engine has none of this agent's family, and the screen reads the list unfiltered.
+        let (host, _dir) = host().await;
+        seed_conversation(&host, "c1", None, None);
+        let host = Arc::new(host);
+        let mine = Host::agent_commands(&host).run("c1".into(), "background_commands".into(), json!({}), CHAT).await.unwrap();
+        assert_eq!(mine["items"], json!([]));
+        let screen = host.dispatch_as(&Caller::Screen, "background_commands", json!({})).await.unwrap();
+        assert!(screen["items"].is_array());
+        host.engine.shutdown();
+    }
+}

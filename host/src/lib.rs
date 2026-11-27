@@ -10,6 +10,7 @@
 
 #[macro_use]
 mod macros;
+mod agent_commands;
 mod ask;
 pub mod autostart;
 pub mod awake;
@@ -541,6 +542,16 @@ impl Host {
             };
             return serde_json::to_value(requests).map_err(|_| Failure::key("error.host.badReply"));
         }
+        if command == "background_commands"
+            && let Caller::Agent { conversation } = caller
+        {
+            // An agent sees its own family's background commands, as its app renderer does (`app_control_state`).
+            let mut list = self.engine.background_commands();
+            let starters: std::collections::HashMap<String, Option<String>> =
+                self.engine.state().conversations.into_iter().map(|c| (c.id, c.started_by)).collect();
+            keep_family(&mut list, conversation.as_deref(), |id| reach::root(id, |at| starters.get(at).cloned()));
+            return serde_json::to_value(list).map_err(|_| Failure::key("error.host.badReply"));
+        }
         let args = with_by(caller, args);
         self.dispatch(command, args).await
     }
@@ -591,6 +602,13 @@ impl Host {
         self.shell.shut_down();
         self.engine.shutdown();
     }
+}
+
+/// Keeps the background commands of `by`'s family only, none when `by` is None: what an agent and its app renderer see
+/// (another family's commands and output stay theirs). `family` gives a conversation's first conversation.
+pub(crate) fn keep_family(list: &mut faber_engine::background::List, by: Option<&str>, family: impl Fn(&str) -> Option<String>) {
+    let owner = by.and_then(&family);
+    list.items.retain(|item| owner.is_some() && family(&item.conversation_id) == owner);
 }
 
 /// The arguments with `by` set to the conversation of an AI that Faber started, and removed for every other caller, so a caller
@@ -710,6 +728,8 @@ pub fn start(options: StartOptions, shell: Arc<dyn Shell>) -> std::io::Result<Ar
     if let Some(browser) = browser {
         host.engine.set_browser(browser);
     }
+    // R585: the table for a conversation's `faber` tool, held weakly by the engine, set before any turn can resume.
+    host.engine.set_commands(Host::agent_commands(&host));
     host.engine.watch_accounts();
     // The first-run cards check their own account. Returning users get one background check for the installed Antigravity CLI.
     if clis.contains_key(&Vendor::Gemini) && host.engine.settings().setup.is_some() {

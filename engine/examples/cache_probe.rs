@@ -129,6 +129,7 @@ impl Probe {
         let (tx, rx) = unbounded_channel();
         let sink: EventSink = Arc::new(move |e| drop(tx.send(e)));
         let launch = ClaudeLaunch {
+            faber: false,
             subagents: None,
             temporary: false,
             helper: Default::default(),
@@ -164,6 +165,7 @@ impl Probe {
         let (tx, rx) = unbounded_channel();
         let sink: EventSink = Arc::new(move |e| drop(tx.send(e)));
         let launch = ClaudeLaunch {
+            faber: false,
             subagents: None,
             temporary: false,
             helper: Default::default(),
@@ -211,6 +213,7 @@ impl Probe {
         let (tx, rx) = unbounded_channel();
         let sink: EventSink = Arc::new(move |e| drop(tx.send(e)));
         let thread = CodexThread {
+            faber: false,
             subagents: None,
             temporary: false,
             title: None,

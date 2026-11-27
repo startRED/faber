@@ -501,3 +501,20 @@ async fn settings_failure_halts_keep_going(queued: bool) {
 async fn send_admission_step_end_does_not_steer_an_unsaved_queue_edit() {
     edited_queue_waits_for_durable_save("step").await;
 }
+
+#[tokio::test]
+async fn only_a_send_from_the_screen_closes_the_persons_temporary_chat() {
+    let dir = crate::workspace::TestRoot::new();
+    let (app, _) = engine(&dir);
+    let (other, third) = app.with(|c| (c.blank(Area::Chat, None), c.blank(Area::Chat, None)));
+    let temporary = app.start_temporary_chat().unwrap();
+    app.with(|c| {
+        available(c);
+        // An agent's send (a sibling, the `faber` tool) never closes the chat the person has open; whether it starts is not the point.
+        let _ = c.send_task(request(Some(&other), "from an agent"), None, None, false);
+        assert!(c.convs.get(&temporary).is_some_and(|t| t.temporary), "an agent's send closed the temporary chat");
+        let _ = c.send(request(Some(&third), "from the person"), None);
+        assert!(!c.convs.contains_key(&temporary), "the person's own send keeps one temporary chat at most");
+    });
+    app.shutdown();
+}

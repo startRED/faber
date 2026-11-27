@@ -1125,8 +1125,8 @@
       "type": "object"
     },
     "kind": "startsTurn",
-    "reach": "own",
-    "conversation": "/req/conversationId"
+    "reach": "person",
+    "about": "Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money."
   },
   {
     "name": "branch_here",
@@ -1156,9 +1156,8 @@
       "type": "object"
     },
     "kind": "startsTurn",
-    "reach": "own",
-    "conversation": "/conversationId",
-    "about": "\"Branch from here\" on an answer: a new conversation with every message up to it, where nothing is sent yet."
+    "reach": "person",
+    "about": "\"Branch from here\" on an answer: a new conversation with every message up to it, where nothing is sent yet. Person reach (R585): a new conversation outside the family is the person's to make."
   },
   {
     "name": "versions",
@@ -1810,8 +1809,8 @@
       "type": "object"
     },
     "kind": "startsTurn",
-    "reach": "own",
-    "conversation": "/id"
+    "reach": "person",
+    "about": "Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money."
   },
   {
     "name": "remove_queued",
@@ -1880,8 +1879,8 @@
       "type": "object"
     },
     "kind": "write",
-    "reach": "own",
-    "conversation": "/id"
+    "reach": "person",
+    "about": "Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money."
   },
   {
     "name": "send_queued",
@@ -1911,8 +1910,8 @@
       "type": "object"
     },
     "kind": "startsTurn",
-    "reach": "own",
-    "conversation": "/id"
+    "reach": "person",
+    "about": "Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money."
   },
   {
     "name": "child_words",
@@ -2505,9 +2504,8 @@
       "type": "object"
     },
     "kind": "startsTurn",
-    "reach": "own",
-    "conversation": "/id",
-    "about": "A quick question on the side of a conversation (R250); `model` is the tab's own pick, or the conversation's."
+    "reach": "person",
+    "about": "A quick question on the side of a conversation (R250); `model` is the tab's own pick, or the conversation's. Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money."
   },
   {
     "name": "stop_aside",
@@ -2972,7 +2970,8 @@
       "type": "object"
     },
     "kind": "write",
-    "reach": "ask"
+    "reach": "person",
+    "about": "Person reach (R585): it opens projects and their conversations for the person."
   },
   {
     "name": "chat_folder",
@@ -3333,8 +3332,8 @@
       "type": "object"
     },
     "kind": "write",
-    "reach": "ask",
-    "about": "Settings > Projects: whether each new conversation of this project works in a separate copy (R201)."
+    "reach": "person",
+    "about": "Settings > Projects: whether each new conversation of this project works in a separate copy (R201). Person reach (R585): a project's setting is the person's."
   },
   {
     "name": "project_goals",
@@ -3387,8 +3386,8 @@
       "type": "object"
     },
     "kind": "write",
-    "reach": "ask",
-    "about": "The project's switch for starting fixes by itself. Off until the person turns it on."
+    "reach": "person",
+    "about": "The project's switch for starting fixes by itself. Off until the person turns it on: Person reach (R585)."
   },
   {
     "name": "project_goal_add",
@@ -3594,7 +3593,8 @@
       "type": "object"
     },
     "kind": "write",
-    "reach": "ask"
+    "reach": "person",
+    "about": "Edits or removes a memory entry, or keeps a decision as the person's (R16). The person's alone: a kept decision can be a \"never touch\" rule (R575), which is the agent's own permission (R585)."
   },
   {
     "name": "project_proof_confirm",

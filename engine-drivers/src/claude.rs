@@ -52,6 +52,8 @@ pub struct ClaudeLaunch {
     pub verify: bool,
     /// The plan, the status and the closing box (`crate::progress`): a project's own agent.
     pub progress: bool,
+    /// Faber's own commands (`crate::faber_tool`): a conversation in Chat or Projects, where the engine holds the table.
+    pub faber: bool,
     /// The skills installed from Faber's catalog (`crate::tools`), for a project's agent outside Isolated.
     pub tools: crate::tools::Delivery,
     /// The models of the CLI's own subagents (`helper::Subagents`): a project's own agent that offers the helper tool.
@@ -69,6 +71,7 @@ fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
         // The map only reads files: it goes where the checks go.
         map: launch.verify,
         progress: launch.progress,
+        faber: launch.faber,
     }
 }
 
@@ -1272,6 +1275,8 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                                         || (tool == crate::sibling::CLAUDE_NAME && opts.launch.conversations)
                                         || ((tool == crate::verify::CLAUDE_NAME || tool == crate::map::CLAUDE_NAME) && opts.launch.verify)
                                         || ((crate::progress::claude_tool(tool).is_some() || crate::toolbox::claude_tool(tool).is_some()) && opts.launch.progress)
+                                        // Faber's commands keep their own reach in the host (R499), whatever the mode.
+                                        || (tool == crate::faber_tool::CLAUDE_NAME && opts.launch.faber)
                                     {
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                                             "response": { "behavior": "allow", "updatedInput": input } } });
@@ -1603,6 +1608,7 @@ mod allow_tests {
             leads: false,
             verify: false,
             progress: false,
+            faber: false,
             tools: Default::default(),
         }
     }
