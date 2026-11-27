@@ -1,6 +1,10 @@
 # Eyes proof of concept
 
-The Windows-only `faber-winproc` example lists top-level windows, prints a UI Automation tree, saves a PNG, and
+The reading parts now live in `winproc/src/eyes.rs` (window list, tree, the Electron accessibility request) and the
+example calls them; the product uses them through the text-only `look` tool ([design](../design/eyes.md)). Pictures are
+a later step: the example no longer takes them, and the picture column of the results below is the proof's, kept for it.
+
+The Windows-only `faber-winproc` example lists top-level windows, prints a UI Automation tree, and
 invokes or sets a control by its exact name or automation ID. It measures elapsed time and compares the foreground
 window and pointer position before and after each command. A tree defaults to depth 8 and stops at 400 nodes.
 
@@ -17,12 +21,10 @@ Calculator is skipped unless `FABER_EYES_PACKAGED=1` is set: a packaged app star
 on the person's own desktop, whatever the hidden desktop says, so it would open on their screen. Run it only in an
 isolated Windows session.
 
-The hidden desktop thread runs UI Automation and capture. The calling thread measures foreground and pointer
-position on its original desktop. Windows.Graphics.Capture is tried first, with PrintWindow and
-`PW_RENDERFULLCONTENT` as the fallback for errors, a missing frame, or a blank result. A PNG with no RGB
-variation is reported as `blank`. No capture step activates or restores its target.
+The hidden desktop thread runs UI Automation. The calling thread measures foreground and pointer position on its
+original desktop. No step activates or restores its target.
 
-The suite writes `eyes-results/results.md` and the PNGs. The tree is printed to the console. The custom GDI
+The suite writes `eyes-results/results.md`. The tree is printed to the console. The custom GDI
 fixture intentionally exposes no editable control. A successful Invoke call records provider acceptance.
 A Set call reads the value back for up to half a second; when UI Automation's write does not land and the element has
 a window of its own, it sends `WM_SETTEXT` and checks it with `WM_GETTEXT`, and says which method worked.
@@ -33,7 +35,6 @@ Use only windows you opened for the experiment.
 ```powershell
 cargo run -p faber-winproc --example eyes -- list
 cargo run -p faber-winproc --example eyes -- tree 0x123456 --depth 4
-cargo run -p faber-winproc --example eyes -- picture 0x123456 window.png
 cargo run -p faber-winproc --example eyes -- invoke 0x123456 "Eyes button"
 cargo run -p faber-winproc --example eyes -- set 0x123456 "Eyes input" "Faber Eyes proof"
 ```

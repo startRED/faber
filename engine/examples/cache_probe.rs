@@ -130,6 +130,7 @@ impl Probe {
         let sink: EventSink = Arc::new(move |e| drop(tx.send(e)));
         let launch = ClaudeLaunch {
             faber: false,
+            eyes: false,
             subagents: None,
             temporary: false,
             helper: Default::default(),
@@ -166,6 +167,7 @@ impl Probe {
         let sink: EventSink = Arc::new(move |e| drop(tx.send(e)));
         let launch = ClaudeLaunch {
             faber: false,
+            eyes: false,
             subagents: None,
             temporary: false,
             helper: Default::default(),
@@ -214,6 +216,7 @@ impl Probe {
         let sink: EventSink = Arc::new(move |e| drop(tx.send(e)));
         let thread = CodexThread {
             faber: false,
+            eyes: false,
             subagents: None,
             temporary: false,
             title: None,

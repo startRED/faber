@@ -669,6 +669,7 @@ fn parse_notification(msg: &Value, state: &mut CodexTurnState, pending_exit: boo
                 ("dynamicToolCall", Some(crate::verify::NAME)) => crate::verify::TOOL,
                 ("dynamicToolCall", Some(crate::map::NAME)) => crate::map::TOOL,
                 ("dynamicToolCall", Some(crate::faber_tool::NAME)) => crate::faber_tool::TOOL,
+                ("dynamicToolCall", Some(crate::eyes::NAME)) => crate::eyes::TOOL,
                 ("dynamicToolCall", Some(name)) if let Some(tool) = crate::progress::tool_of(name) => tool,
                 ("dynamicToolCall", Some(name)) if let Some(tool) = crate::toolbox::tool_of(name) => tool,
                 _ => kind,
@@ -945,6 +946,8 @@ pub struct CodexThread {
     pub progress: bool,
     /// Faber's own commands, as for `ClaudeLaunch::faber`.
     pub faber: bool,
+    /// The person's other windows, as for `ClaudeLaunch::eyes`.
+    pub eyes: bool,
     /// The models of Codex's own subagents, as for `ClaudeLaunch::subagents`.
     pub subagents: Option<crate::helper::Subagents>,
 }
@@ -1555,6 +1558,9 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         if t.faber {
             params.entry("dynamicTools").or_insert_with(|| json!([])).as_array_mut().unwrap().push(crate::faber_tool::codex_tool());
         }
+        if t.eyes {
+            params.entry("dynamicTools").or_insert_with(|| json!([])).as_array_mut().unwrap().push(crate::eyes::codex_tool());
+        }
     }
     if t.permissions == Permissions::Isolated && t.instructions.is_none() {
         params.insert("config".into(), crate::permissions::sandbox_config(&t.cwd, true).into());
@@ -1742,6 +1748,7 @@ pub fn redact_sink(sink: EventSink, token: String) -> EventSink {
             | EngineEvent::VerifyCall { input, .. }
             | EngineEvent::MapCall { input, .. }
             | EngineEvent::FaberCall { input, .. }
+            | EngineEvent::EyesCall { input, .. }
             | EngineEvent::ToolboxCall { input, .. }
             | EngineEvent::ProgressCall { input, .. }
             | EngineEvent::TeamCall { input, .. }
@@ -3134,6 +3141,20 @@ async fn serve(
                                 }
                                 None => {
                                     let _ = write_checked!(&json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's commands are not available here."}]}}));
+                                }
+                            }
+                            continue;
+                        }
+                        if method == "item/tool/call" && params["tool"] == crate::eyes::NAME {
+                            // The person's other windows: the engine re-reads the key, filters, asks and answers.
+                            match thread.filter(|t| t.params.eyes && !t.blocked && !t.closing) {
+                                Some(t) => {
+                                    let call = s(&params["callId"]);
+                                    t.helpers.insert(call.clone(), id.clone());
+                                    (t.sink)(EngineEvent::EyesCall { id: call, input: params["arguments"].clone() });
+                                }
+                                None => {
+                                    let _ = write_checked!(&json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Reading other windows is not available here."}]}}));
                                 }
                             }
                             continue;
@@ -4952,6 +4973,7 @@ mod rewind_tests {
                 verify: false,
                 progress: false,
                 faber: false,
+                eyes: false,
             },
             id: Some("owner".into()),
             turn: None,

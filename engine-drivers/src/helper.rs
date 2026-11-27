@@ -145,11 +145,13 @@ pub struct Tools {
     pub progress: bool,
     /// Faber's own commands (`crate::faber_tool`), in Chat and Projects wherever the engine holds the table.
     pub faber: bool,
+    /// The person's other windows, read-only (`crate::eyes`): on Windows, while the key is on.
+    pub eyes: bool,
 }
 
 impl Tools {
     pub fn any(self) -> bool {
-        self.helper || self.team || self.browse || self.conversation || self.verify || self.map || self.progress || self.faber
+        self.helper || self.team || self.browse || self.conversation || self.verify || self.map || self.progress || self.faber || self.eyes
     }
 }
 
@@ -201,6 +203,9 @@ pub(crate) fn mcp_with(message: &Value, tools: Tools, tuning: &crate::model::Tun
             if tools.faber {
                 list.push(crate::faber_tool::mcp_tool());
             }
+            if tools.eyes {
+                list.push(crate::eyes::mcp_tool());
+            }
             list.retain(|tool| enabled(&tool["name"]));
             answer(json!({ "tools": list }))
         }
@@ -237,6 +242,7 @@ pub(crate) fn called(name: &Value, tools: Tools) -> Option<&'static str> {
         crate::toolbox::CREATIVE if tools.progress => Some(crate::toolbox::CREATIVE),
         crate::toolbox::OFFER_BIGGER if tools.progress => Some(crate::toolbox::OFFER_BIGGER),
         crate::faber_tool::NAME if tools.faber => Some(crate::faber_tool::NAME),
+        crate::eyes::NAME if tools.eyes => Some(crate::eyes::NAME),
         _ => None,
     }
 }
@@ -251,6 +257,7 @@ pub(crate) fn tool_event(tool: &str, id: String, input: Value) -> crate::events:
         crate::verify::NAME => EngineEvent::VerifyCall { id, input },
         crate::map::NAME => EngineEvent::MapCall { id, input },
         crate::faber_tool::NAME => EngineEvent::FaberCall { id, input },
+        crate::eyes::NAME => EngineEvent::EyesCall { id, input },
         name if let Some(tool) = crate::progress::tool_of(name) => EngineEvent::ProgressCall { id, tool, input },
         name if let Some(tool) = crate::toolbox::tool_of(name) => EngineEvent::ToolboxCall { id, tool, input },
         _ => EngineEvent::HelperCall { id, input },
@@ -266,6 +273,7 @@ pub(crate) fn tool_label(name: &str) -> Option<&'static str> {
         crate::verify::NAME => Some(crate::verify::TOOL),
         crate::map::NAME => Some(crate::map::TOOL),
         crate::faber_tool::NAME => Some(crate::faber_tool::TOOL),
+        crate::eyes::NAME => Some(crate::eyes::TOOL),
         tool => crate::progress::tool_of(tool).or_else(|| crate::toolbox::tool_of(tool)),
     }
 }
@@ -713,6 +721,7 @@ mod tests {
                     map: false,
                     progress: false,
                     faber: false,
+                    eyes: false,
                 },
             )
         };
@@ -777,7 +786,8 @@ mod tests {
                 verify: false,
                 map: false,
                 progress: false,
-                faber: false
+                faber: false,
+                eyes: false
             }),
             ["helper", "browse"]
         );
@@ -790,7 +800,8 @@ mod tests {
                 verify: false,
                 map: false,
                 progress: false,
-                faber: false
+                faber: false,
+                eyes: false
             }),
             ["browse"]
         );
@@ -803,7 +814,8 @@ mod tests {
                 verify: true,
                 map: true,
                 progress: false,
-                faber: false
+                faber: false,
+                eyes: false
             }),
             ["verify", "map"]
         );
@@ -823,7 +835,8 @@ mod tests {
                     verify: false,
                     map: false,
                     progress: false,
-                    faber: false
+                    faber: false,
+                    eyes: false
                 }
             ),
             Mcp::Call { tool: crate::browser::NAME, id: "toolu_2".into(), rpc: json!(4), input: json!({"url":"https://a.org"}) }
@@ -839,6 +852,7 @@ mod tests {
                 map: false,
                 progress: false,
                 faber: false,
+                eyes: false,
             },
         ) else {
             panic!("a tool not offered is never called")
@@ -863,6 +877,39 @@ mod tests {
         assert!(matches!(mcp(&call, Tools { progress: true, ..Tools::default() }), Mcp::Answer(_)), "not offered, never called");
         assert!(matches!(tool_event("faber", "c".into(), json!({})), crate::events::EngineEvent::FaberCall { .. }));
         assert_eq!(tool_label(crate::faber_tool::CLAUDE_NAME), Some(crate::faber_tool::TOOL));
+    }
+
+    #[test]
+    fn the_eyes_are_listed_and_called_only_where_the_session_offers_them() {
+        let names = |tools| match mcp(&json!({"method":"tools/list","jsonrpc":"2.0","id":1}), tools) {
+            Mcp::Answer(a) => {
+                a["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect::<Vec<_>>()
+            }
+            Mcp::Call { .. } => panic!(),
+        };
+        assert_eq!(names(Tools { eyes: true, ..Tools::default() }), ["look"]);
+        assert!(Tools { eyes: true, ..Tools::default() }.any());
+        let everything_else = Tools { eyes: false, ..all() };
+        assert!(!names(everything_else).contains(&"look".to_string()), "with the key off, no session lists the eyes");
+        let call = json!({"method":"tools/call","params":{"name":"look","arguments":{"action":"windows"}},"jsonrpc":"2.0","id":3});
+        assert!(matches!(mcp(&call, Tools { eyes: true, ..Tools::default() }), Mcp::Call { tool: crate::eyes::NAME, .. }));
+        assert!(matches!(mcp(&call, everything_else), Mcp::Answer(_)), "not offered, never called");
+        assert!(matches!(tool_event("look", "c".into(), json!({})), crate::events::EngineEvent::EyesCall { .. }));
+        assert_eq!(tool_label(crate::eyes::CLAUDE_NAME), Some(crate::eyes::TOOL));
+    }
+
+    fn all() -> Tools {
+        Tools {
+            team: true,
+            helper: true,
+            browse: true,
+            conversation: true,
+            verify: true,
+            map: true,
+            progress: true,
+            faber: true,
+            eyes: true,
+        }
     }
 
     #[test]
@@ -1223,7 +1270,17 @@ mod schema_tests {
     fn team_tool_schemas_have_no_top_level_composition() {
         let Mcp::Answer(list) = mcp(
             &json!({"id":1,"method":"tools/list"}),
-            Tools { team: true, helper: true, browse: true, conversation: true, verify: true, map: true, progress: true, faber: true },
+            Tools {
+                team: true,
+                helper: true,
+                browse: true,
+                conversation: true,
+                verify: true,
+                map: true,
+                progress: true,
+                faber: true,
+                eyes: true,
+            },
         ) else {
             panic!()
         };

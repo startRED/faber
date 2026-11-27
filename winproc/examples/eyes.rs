@@ -20,28 +20,22 @@ mod eyes {
     use std::convert::identity;
     use std::ffi::{OsStr, OsString};
     use std::fs::{self, File};
-    use std::io::{BufWriter, Write};
+    use std::io::Write;
     use std::os::windows::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
     use std::sync::mpsc;
     use std::thread;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-    use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession};
-    use windows::Graphics::DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat};
     use windows::Wdk::System::SystemServices::RtlGetVersion;
     use windows::Win32::Foundation::*;
-    use windows::Win32::Graphics::{Direct3D::D3D_DRIVER_TYPE_HARDWARE, Direct3D11::*, Dxgi::IDXGIDevice, Gdi::*};
-    use windows::Win32::Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow};
+    use windows::Win32::Graphics::Gdi::*;
     use windows::Win32::System::Com::*;
     use windows::Win32::System::JobObjects::*;
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows::Win32::System::Ole::{SafeArrayDestroy, SafeArrayGetElement, SafeArrayGetLBound, SafeArrayGetUBound};
     use windows::Win32::System::StationsAndDesktops::*;
     use windows::Win32::System::SystemInformation::{GetSystemDirectoryW, OSVERSIONINFOW};
     use windows::Win32::System::Threading::*;
-    use windows::Win32::System::WinRT::Direct3D11::{CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess};
-    use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
     use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
     use windows::Win32::UI::{Accessibility::*, WindowsAndMessaging::*};
     use windows::core::{BOOL, BSTR, HRESULT, Interface, PCWSTR, PWSTR, w};
@@ -145,27 +139,10 @@ mod eyes {
         String::from_utf16_lossy(&buffer[..len as usize])
     }
 
-    fn size(hwnd: HWND) -> Result<(i32, i32)> {
-        let mut rect = RECT::default();
-        unsafe { GetWindowRect(hwnd, &mut rect)? };
-        Ok((rect.right - rect.left, rect.bottom - rect.top))
-    }
-
     fn list() -> Result<()> {
-        for hwnd in windows()? {
-            let mut class = [0; 256];
-            let mut pid = 0;
-            let len = unsafe {
-                GetWindowThreadProcessId(hwnd, Some(&mut pid));
-                GetClassNameW(hwnd, &mut class)
-            };
-            let dimensions = size(hwnd).map_or_else(|error| error.to_string(), |(w, h)| format!("{w}x{h}"));
-            println!(
-                "{:#x} pid={pid} class={:?} title={:?} {dimensions}",
-                hwnd.0 as usize,
-                String::from_utf16_lossy(&class[..len as usize]),
-                title(hwnd)
-            );
+        for w in faber_winproc::eyes::windows()? {
+            let minimized = if w.minimized { " minimized" } else { "" };
+            println!("{:#x} pid={} class={:?} title={:?} {}x{}{minimized}", w.handle, w.pid, w.class, w.title, w.width, w.height);
         }
         Ok(())
     }
@@ -180,35 +157,6 @@ mod eyes {
         }
     }
 
-    struct PatternArray(*mut SAFEARRAY);
-    impl Drop for PatternArray {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                unsafe {
-                    let _ = SafeArrayDestroy(self.0);
-                }
-            }
-        }
-    }
-
-    fn patterns(uia: &IUIAutomation, element: &IUIAutomationElement) -> Result<String> {
-        let mut ids = PatternArray(std::ptr::null_mut());
-        let mut names = PatternArray(std::ptr::null_mut());
-        unsafe {
-            uia.PollForPotentialSupportedPatterns(element, &mut ids.0, &mut names.0)?;
-            if names.0.is_null() {
-                return Ok("-".into());
-            }
-            let mut result = Vec::new();
-            for i in SafeArrayGetLBound(names.0, 1)?..=SafeArrayGetUBound(names.0, 1)? {
-                let mut name = BSTR::new();
-                SafeArrayGetElement(names.0, &i, std::ptr::from_mut(&mut name).cast())?;
-                result.push(name.to_string());
-            }
-            Ok(result.join(","))
-        }
-    }
-
     // UIA returns a null COM interface when a search or walk reaches the end.
     fn optional<T>(result: windows::core::Result<T>) -> Result<Option<T>> {
         match result {
@@ -219,37 +167,44 @@ mod eyes {
         }
     }
 
+    // The reading moved into `faber_winproc::eyes`; the walk keeps the proof's caps (the engine's are `faber_engine_core::eyes::walk`).
     fn tree(hwnd: HWND, depth: usize) -> Result<usize> {
-        let uia = automation()?;
-        unsafe {
-            let walker = uia.RawViewWalker()?;
-            let root = uia.ElementFromHandle(hwnd)?;
-            let mut stack = vec![(root, 0)];
-            let mut count = 0;
-            while let Some((element, level)) = stack.pop() {
-                let kind = element.CurrentLocalizedControlType()?.to_string();
-                let name = element.CurrentName()?.to_string();
-                let id = element.CurrentAutomationId()?.to_string();
-                let enabled = element.CurrentIsEnabled()?.as_bool();
-                let supported = patterns(&uia, &element).unwrap_or_else(|error| format!("unavailable ({error})"));
-                println!("{:indent$}{kind} name={name:?} id={id:?} enabled={enabled} [{supported}]", "", indent = level * 2);
-                count += 1;
-                if count == NODE_LIMIT {
-                    break;
-                }
-                if level != 0
-                    && let Some(next) = optional(walker.GetNextSiblingElement(&element))?
-                {
-                    stack.push((next, level));
-                }
-                if level < depth
-                    && let Some(child) = optional(walker.GetFirstChildElement(&element))?
-                {
-                    stack.push((child, level + 1));
-                }
+        let handle = hwnd.0 as usize as u64;
+        let deadline = Instant::now() + Duration::from_secs(8);
+        faber_winproc::eyes::request_accessibility(handle, deadline);
+        let uia = faber_winproc::eyes::Automation::open(handle)?;
+        let root = uia.root();
+        let mut stack = vec![(root, 0)];
+        let mut count = 0;
+        while let Some((element, level)) = stack.pop() {
+            let d = uia.describe(&element, deadline);
+            let value = d.value.map(|v| format!(" value={v:?}")).unwrap_or_default();
+            println!(
+                "{:indent$}{} name={:?} id={:?} enabled={}{value} @{:?}",
+                "",
+                d.kind,
+                d.name,
+                d.id,
+                d.enabled,
+                d.rect,
+                indent = level * 2
+            );
+            count += 1;
+            if count == NODE_LIMIT {
+                break;
             }
-            Ok(count)
+            if level != 0
+                && let Some(next) = uia.next_sibling(&element)?
+            {
+                stack.push((next, level));
+            }
+            if level < depth
+                && let Some(child) = uia.first_child(&element)?
+            {
+                stack.push((child, level + 1));
+            }
         }
+        Ok(count)
     }
 
     enum Action<'a> {
@@ -323,186 +278,6 @@ mod eyes {
             }
             Err("neither ValuePattern nor WM_SETTEXT changed the text".into())
         }
-    }
-
-    struct Pixels {
-        width: usize,
-        height: usize,
-        rgb: Vec<u8>,
-    }
-
-    impl Pixels {
-        fn from_bgra(width: usize, height: usize, pitch: usize, bgra: &[u8]) -> Self {
-            debug_assert!(pitch >= width * 4 && bgra.len() >= pitch * height);
-            let mut rgb = Vec::with_capacity(width * height * 3);
-            for row in bgra.chunks_exact(pitch).take(height) {
-                for pixel in row[..width * 4].as_chunks::<4>().0 {
-                    rgb.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
-                }
-            }
-            Self { width, height, rgb }
-        }
-
-        fn blank(&self) -> bool {
-            // Any channel with different min and max values has nonzero variance.
-            let (pixels, _) = self.rgb.as_chunks::<3>();
-            pixels.iter().all(|pixel| *pixel == pixels[0])
-        }
-    }
-
-    fn dimensions(width: i32, height: i32) -> Result<(usize, usize)> {
-        if !(1..=8192).contains(&width) || !(1..=8192).contains(&height) {
-            return Err(format!("unsupported capture size {width}x{height}").into());
-        }
-        Ok((width as usize, height as usize))
-    }
-
-    fn graphics_capture(hwnd: HWND) -> Result<Pixels> {
-        if !GraphicsCaptureSession::IsSupported()? {
-            return Err("Windows.Graphics.Capture is unavailable".into());
-        }
-        let factory = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
-        let item: GraphicsCaptureItem = unsafe { factory.CreateForWindow(hwnd)? };
-        let size = item.Size()?;
-        dimensions(size.Width, size.Height)?;
-        unsafe {
-            let mut native = None;
-            let mut context = None;
-            D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_HARDWARE,
-                HMODULE::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                None,
-                D3D11_SDK_VERSION,
-                Some(&mut native),
-                None,
-                Some(&mut context),
-            )?;
-            let native = native.ok_or("D3D11 returned no device")?;
-            let context = context.ok_or("D3D11 returned no context")?;
-            let dxgi: IDXGIDevice = native.cast()?;
-            let device: IDirect3DDevice = CreateDirect3D11DeviceFromDXGIDevice(&dxgi)?.cast()?;
-            let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(&device, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, size)?;
-            let session = pool.CreateCaptureSession(&item)?;
-            let _ = session.SetIsCursorCaptureEnabled(false);
-            let _ = session.SetIsBorderRequired(false);
-            let result = (|| {
-                session.StartCapture()?;
-                let deadline = Instant::now() + Duration::from_secs(2);
-                let frame = loop {
-                    if let Some(frame) = optional(pool.TryGetNextFrame())? {
-                        break frame;
-                    }
-                    if Instant::now() >= deadline {
-                        return Err("no capture frame within 2 s".into());
-                    }
-                    thread::sleep(POLL);
-                };
-                let content = frame.ContentSize()?;
-                let (width, height) = dimensions(content.Width, content.Height)?;
-                let surface: IDirect3DDxgiInterfaceAccess = frame.Surface()?.cast()?;
-                let texture: ID3D11Texture2D = surface.GetInterface()?;
-                let mut desc = D3D11_TEXTURE2D_DESC::default();
-                texture.GetDesc(&mut desc);
-                if width > desc.Width as usize || height > desc.Height as usize {
-                    return Err("window resized during capture".into());
-                }
-                desc.Usage = D3D11_USAGE_STAGING;
-                desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
-                desc.BindFlags = 0;
-                desc.MiscFlags = 0;
-                let mut staging = None;
-                native.CreateTexture2D(&desc, None, Some(&mut staging))?;
-                let staging = staging.ok_or("D3D11 returned no staging texture")?;
-                context.CopyResource(&staging, &texture);
-                let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-                context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
-                let pitch = mapped.RowPitch as usize;
-                let pixels = Pixels::from_bgra(width, height, pitch, std::slice::from_raw_parts(mapped.pData.cast(), pitch * height));
-                context.Unmap(&staging, 0);
-                let _ = frame.Close();
-                Ok(pixels)
-            })();
-            let _ = session.Close();
-            let _ = pool.Close();
-            result
-        }
-    }
-
-    fn print_window(hwnd: HWND) -> Result<Pixels> {
-        let (w, h) = size(hwnd)?;
-        let (width, height) = dimensions(w, h)?;
-        let info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: w,
-                biHeight: -h,
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        unsafe {
-            let dc = CreateCompatibleDC(None);
-            if dc.is_invalid() {
-                return Err("CreateCompatibleDC failed".into());
-            }
-            let result = (|| {
-                let mut bits = std::ptr::null_mut();
-                let bitmap = CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0)?;
-                let old = SelectObject(dc, bitmap.into());
-                let result = if old.is_invalid() {
-                    Err("SelectObject failed".into())
-                } else {
-                    let len = width * height * 4;
-                    std::ptr::write_bytes(bits.cast::<u8>(), 0, len);
-                    let printed = PrintWindow(hwnd, dc, PRINT_WINDOW_FLAGS(PW_RENDERFULLCONTENT));
-                    let _ = GdiFlush();
-                    let pixels = printed
-                        .as_bool()
-                        .then(|| Pixels::from_bgra(width, height, width * 4, std::slice::from_raw_parts(bits.cast(), len)));
-                    SelectObject(dc, old);
-                    pixels.ok_or_else(|| "PrintWindow returned false".into())
-                };
-                let _ = DeleteObject(bitmap.into());
-                result
-            })();
-            let _ = DeleteDC(dc);
-            result
-        }
-    }
-
-    fn picture(hwnd: HWND, path: &Path) -> Result<String> {
-        let primary = graphics_capture(hwnd);
-        let (method, pixels, note) = match primary {
-            Ok(pixels) if !pixels.blank() => ("Windows.Graphics.Capture", pixels, String::new()),
-            primary => {
-                let reason = match &primary {
-                    Ok(_) => "blank".into(),
-                    Err(error) => error.to_string(),
-                };
-                match print_window(hwnd) {
-                    Ok(pixels) => ("PrintWindow", pixels, format!(" (Windows.Graphics.Capture: {reason})")),
-                    Err(error) => (
-                        "Windows.Graphics.Capture",
-                        primary.map_err(|_| format!("Windows.Graphics.Capture: {reason}; PrintWindow: {error}"))?,
-                        format!(" (PrintWindow: {error})"),
-                    ),
-                }
-            }
-        };
-        let file = File::create(path)?;
-        let mut png = png::Encoder::new(BufWriter::new(&file), pixels.width as u32, pixels.height as u32);
-        png.set_color(png::ColorType::Rgb);
-        png.set_depth(png::BitDepth::Eight);
-        let mut writer = png.write_header()?;
-        writer.write_image_data(&pixels.rgb)?;
-        writer.finish()?;
-        let status = if pixels.blank() { "blank" } else { "ok" };
-        Ok(format!("{status}: {method}{note}, {}x{}, {} bytes", pixels.width, pixels.height, file.metadata()?.len()))
     }
 
     struct Desktop(HDESK);
@@ -737,7 +512,7 @@ mod eyes {
         Ok(())
     }
 
-    fn measure(case: Case<'_>, desktop: &[u16], out: &Path, report: &mut File, observe: &dyn Fn() -> Snapshot) -> Result<()> {
+    fn measure(case: Case<'_>, desktop: &[u16], report: &mut File, observe: &dyn Fn() -> Snapshot) -> Result<()> {
         println!("\n{}", case.name);
         let before = observe();
         let started = Instant::now();
@@ -754,7 +529,7 @@ mod eyes {
                 let note = if case.file == "calculator" { " (packaged activation may refuse or leave the job)" } else { "" };
                 let failure = format!("failed: {error}{note}, {elapsed} ms, {input}");
                 println!("{failure}");
-                return record(report, &[case.name, &failure, "skipped", "skipped", "skipped"]);
+                return record(report, &[case.name, &failure, "skipped", "skipped"]);
             }
         };
         let target =
@@ -762,9 +537,8 @@ mod eyes {
         let window = format!("{:#x} {:?}, {elapsed} ms, {input}", hwnd.0 as usize, title(hwnd));
         println!("{window}");
         let (_, tree) = timed(observe, || tree(target()?, DEFAULT_DEPTH), tree_summary);
-        let (_, picture) = timed(observe, || picture(target()?, &out.join(format!("{}.png", case.file))), identity);
         let (_, action) = timed(observe, || act(target()?, case.action), identity);
-        record(report, &[case.name, &window, &tree, &picture, &action])
+        record(report, &[case.name, &window, &tree, &action])
     }
 
     fn measure_suite(out: &Path, electron: PathBuf, desktop: &[u16], observe: &dyn Fn() -> Snapshot) -> Result<()> {
@@ -851,10 +625,10 @@ app.on('window-all-closed', () => app.quit());
         let mut report = File::create(out.join("results.md"))?;
         writeln!(
             report,
-            "# Eyes proof of concept\n\n| Program | Window and wait | UI Automation tree | Picture | Background action |\n| --- | --- | --- | --- | --- |"
+            "# Eyes proof of concept\n\n| Program | Window and wait | UI Automation tree | Background action |\n| --- | --- | --- | --- |"
         )?;
         for case in cases {
-            measure(case, desktop, out, &mut report, observe)?;
+            measure(case, desktop, &mut report, observe)?;
         }
         Ok(())
     }
@@ -925,7 +699,6 @@ app.on('window-all-closed', () => app.quit());
             (Some("tree"), [target, flag, depth]) if *flag == "--depth" => {
                 timed(&snapshot, || tree(hwnd(target)?, text(depth)?.parse()?), tree_summary)
             }
-            (Some("picture"), [target, out]) => timed(&snapshot, || picture(hwnd(target)?, Path::new(out)), identity),
             (Some("invoke"), [target, key]) => timed(&snapshot, || act(hwnd(target)?, Action::Invoke(text(key)?)), identity),
             (Some("set"), [target, key, value]) => timed(&snapshot, || act(hwnd(target)?, Action::Set(text(key)?, text(value)?)), identity),
             _ => return Err(USAGE.into()),
@@ -936,5 +709,5 @@ app.on('window-all-closed', () => app.quit());
         Ok(())
     }
 
-    const USAGE: &str = "Usage: eyes list | tree <hwnd> [--depth N] | picture <hwnd> <out.png> | invoke <hwnd> <name-or-id> | set <hwnd> <name-or-id> <text> | suite <out-dir> --electron <exe>";
+    const USAGE: &str = "Usage: eyes list | tree <hwnd> [--depth N] | invoke <hwnd> <name-or-id> | set <hwnd> <name-or-id> <text> | suite <out-dir> --electron <exe>";
 }

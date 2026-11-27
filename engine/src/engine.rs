@@ -52,6 +52,7 @@ mod creative_judges;
 mod dry_run;
 mod ended;
 mod evict;
+mod eyes;
 mod faber_tool;
 pub mod media;
 mod slow_lock;
@@ -607,6 +608,17 @@ struct Core {
     /// The install card each conversation waits on: the call it answers and the process that made it (`engine/toolbox.rs`).
     installs: HashMap<String, toolbox::PendingChange>,
     settings_changes: HashMap<String, settings_change::PendingSetting>,
+    /// A window card waiting for the person, by conversation (`eyes`).
+    eyes_asks: HashMap<String, eyes::PendingLook>,
+    /// The windows the person allowed each conversation to read, each as it was bound (`eyes`), in memory only.
+    eyes_allowed: HashMap<String, Vec<(u64, crate::eyes::Bound)>>,
+    /// The session of each conversation the person let see the list of windows (`eyes`).
+    eyes_listing: HashMap<String, u64>,
+    /// Counts the times the key went off: a call that came under an older count is never answered (`eyes`).
+    eyes_epoch: u64,
+    /// The windows the eyes read (the desktop; a stand-in in tests), and the one read allowed at a time.
+    eyes: Arc<dyn crate::eyes::Backend>,
+    eyes_busy: Arc<tokio::sync::Semaphore>,
     extension_loads: HashMap<String, browser_extensions::PendingExtension>,
     extension_revision: u64,
     web_revision: u64,
@@ -963,6 +975,12 @@ impl Engine {
                     node_missing: false,
                     installs: HashMap::new(),
                     settings_changes: HashMap::new(),
+                    eyes_asks: HashMap::new(),
+                    eyes_allowed: HashMap::new(),
+                    eyes_listing: HashMap::new(),
+                    eyes_epoch: 0,
+                    eyes: eyes::desktop(),
+                    eyes_busy: eyes::one_at_a_time(),
                     extension_loads: HashMap::new(),
                     extension_revision: 0,
                     web_revision: 0,
@@ -2933,6 +2951,7 @@ impl Core {
     fn save_settings_with_receipt(&mut self, patch: Settings, receipt: Option<settings_change::SavedReceipt>) -> Result<Settings, String> {
         let before = self.store.settings();
         let before_tuning = before.tuning();
+        let eyes_were_on = before.see_other_windows();
         let mut settings = Settings {
             default_model: patch.default_model.or(before.default_model),
             blocked_hosts: patch
@@ -3071,6 +3090,9 @@ impl Core {
                 self.retire_codex_server(key);
             }
         }
+        if eyes_were_on && !settings.see_other_windows() {
+            self.eyes_off();
+        }
         (self.emit)(AppEvent::Settings { settings: settings.clone() });
         Ok(settings)
     }
@@ -3187,6 +3209,7 @@ impl Core {
         if by_person {
             self.installs.remove(id);
             self.bigger.remove(id);
+            self.eyes_asks.remove(id);
         }
         let compacting = self.convs.get(id).is_some_and(|c| c.compacting);
         let active = self.live.get(id).is_some_and(|l| l.turn.is_some() || compacting);
@@ -3801,6 +3824,7 @@ impl Core {
             EngineEvent::VerifyCall { id, input } => return self.verify_call(conv, id, input),
             EngineEvent::MapCall { id, input } => return self.map_call(conv, id, input),
             EngineEvent::FaberCall { id, input } => return self.faber_call(conv, id, input),
+            EngineEvent::EyesCall { id, input } => return self.eyes_call(conv, id, input),
             EngineEvent::ProgressCall { id, tool, input } => return self.progress_call(conv, id, tool, input),
             EngineEvent::ToolboxCall { id, tool, input } => return self.toolbox_call(conv, id, tool, input),
             EngineEvent::Permission { request_id, tool, mut input } => {
@@ -3809,8 +3833,9 @@ impl Core {
                     fields.remove("bigger");
                     fields.remove("planBoundary");
                 }
-                // The install card is Faber's own: a CLI's request under its name is never shown, so no CLI can dress a card as ours.
-                if crate::toolbox::is_self_change(&tool) {
+                // The install and window cards are Faber's own: a CLI's request under their names is never shown, so no CLI can
+                // dress a card as ours.
+                if crate::toolbox::is_self_change(&tool) || crate::eyes::is_card(&tool) {
                     if let Some(l) = self.live.get(conv) {
                         drop(l.session.answer(&request_id, false));
                     }
@@ -4300,6 +4325,7 @@ impl Core {
         self.transfers.remove(conv);
         self.installs.remove(conv);
         self.settings_changes.remove(conv);
+        self.eyes_asks.remove(conv);
         self.extension_loads.remove(conv);
         self.revoke_replacement(conv);
         self.bigger.remove(conv);
@@ -5885,6 +5911,7 @@ impl Core {
         let verify = self.offers_verify(area, tool_mode);
         let progress = area == Area::Project;
         let faber = self.offers_faber();
+        let eyes = self.offers_eyes(permissions);
         let launch_tuning = self.bench.launch_tuning(tuning.clone());
         let identity = crate::proc::ConversationIdentity::new(conv)?;
         self.rewind_session_started(conv, sid, cwd_used.clone());
@@ -5911,6 +5938,7 @@ impl Core {
                                     map: verify,
                                     progress,
                                     faber,
+                                    eyes,
                                     // The team tool belongs to Faber helpers. Antigravity is not a helper target yet.
                                     ..Default::default()
                                 },
@@ -5939,6 +5967,7 @@ impl Core {
                         verify,
                         progress,
                         faber,
+                        eyes,
                         area,
                         model,
                         effort,
@@ -5989,6 +6018,7 @@ impl Core {
                             verify,
                             progress,
                             faber,
+                            eyes,
                             cwd,
                             model,
                             effort,
@@ -6726,6 +6756,9 @@ impl Core {
         self.transfers.remove(id);
         self.installs.remove(id);
         self.bigger.remove(id);
+        self.eyes_asks.remove(id);
+        self.eyes_allowed.remove(id);
+        self.eyes_listing.remove(id);
         self.stop_helpers(id, true);
         self.close_asides(Some(id));
         self.asides.remove(id);
@@ -7196,6 +7229,7 @@ mod tool_in_tests {
             verify: false,
             progress: false,
             faber: false,
+            eyes: false,
             tools: Default::default(),
         };
         let opts = ClaudeOptions { bin: "test".into(), cwd: PathBuf::new(), launch, spawn, sandbox: None };

@@ -11,6 +11,7 @@ pub mod change;
 pub mod commands;
 pub mod conversation_state;
 pub mod events;
+pub mod eyes;
 pub mod facts;
 pub mod failure;
 pub mod follow;

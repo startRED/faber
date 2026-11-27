@@ -57,6 +57,7 @@ events.rs
 evict.rs
 export.rs
 extensions.rs
+eyes.rs
 faber_tool.rs
 facts.rs
 failure.rs

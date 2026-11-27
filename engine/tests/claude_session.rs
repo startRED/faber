@@ -67,6 +67,7 @@ fn slash_init_keeps_skills_and_safe_builtins_in_the_advertised_order() {
 fn launch(area: Area) -> ClaudeLaunch {
     ClaudeLaunch {
         faber: false,
+        eyes: false,
         subagents: None,
         temporary: false,
         helper: Default::default(),

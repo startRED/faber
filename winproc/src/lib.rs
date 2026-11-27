@@ -6,6 +6,7 @@
 //! The test runner reads the system's process list here too (`processes`): one call, where WMI took 100 ms or more.
 //! The index worker also uses the safe background-priority wrapper, on Windows and macOS.
 //! Project memory uses handle-relative, no-follow file access through `MemoryDirectory` on Windows.
+//! The eyes read other windows here (`eyes.rs`): window list and UI Automation tree, as text, never input.
 //! The command line's named pipe is made here too, open only to the signed-in user (`pipe.rs`), with the user's language for its words (`locale.rs`).
 
 mod gpu;
@@ -70,6 +71,9 @@ pub use files::{open_catalog_file, open_plain_file};
 pub use pipe::{PipeClient, pipe_peer_is_user, user_pipe};
 #[cfg(windows)]
 pub use user_file::write_user_only;
+/// Reading the person's other windows as text, never acting in them (task 304, C006).
+#[cfg(windows)]
+pub mod eyes;
 #[cfg(windows)]
 mod memory;
 #[cfg(windows)]

@@ -185,6 +185,7 @@ async fn replay(
                     sandbox: None,
                     launch: ClaudeLaunch {
                         faber: false,
+                        eyes: false,
                         subagents: None,
                         temporary: false,
                         area,
@@ -225,6 +226,7 @@ async fn replay(
             let session = app.open_with_tools(
                 CodexThread {
                     faber: false,
+                    eyes: false,
                     subagents: None,
                     temporary: false,
                     title: None,

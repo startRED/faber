@@ -38,6 +38,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [product/cache-router.md](product/cache-router.md) | The prompt cache and the routers, measured on the real CLIs |
 | [product/parity.md](product/parity.md) | What Claude Code, Codex, claude.ai and ChatGPT have that Faber still lacks, how each gap closes, and what is never closed |
 | [design/app-control.md](design/app-control.md) | Named app targets, stable refs, hidden screens and preserved agent permissions |
+| [design/eyes.md](design/eyes.md) | The AI reading other windows as text |
 | [design/README.md](design/README.md) | Before any screen change: the design in short, rules for every screen, the first frame, the screen cards |
 | [design/looks.md](design/looks.md) | Themes, presets, colour, type, motion, the one grammar, idle cost, effects |
 | [design/scenes.md](design/scenes.md) | Static drawings for empty screens and first run |
