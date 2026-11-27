@@ -1,6 +1,6 @@
 [package]
 name = "faber"
-description = "One app for everything AI can do."
+description = "The AI says done. Faber checks."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
