@@ -1342,3 +1342,40 @@ async fn blocked_stalled_and_full_disk_downloads_report_reasons_and_remove_stagi
         assert!(!rig.temporary().exists(), "{case}");
     }
 }
+
+/// GitHub's API answers 403 to a request that names no client, and Codex's release metadata comes from it: every
+/// download request names Faber (2026-11-27, a fresh PC could not install Codex).
+#[tokio::test]
+async fn every_download_request_names_faber() {
+    use std::io::{BufRead, Write};
+    let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = io::BufReader::new(&stream);
+        let mut agent = None;
+        let mut line = String::new();
+        while reader.read_line(&mut line).unwrap() > 0 && line != "\r\n" {
+            if let Some((name, value)) = line.split_once(':')
+                && name.eq_ignore_ascii_case("user-agent")
+            {
+                agent = Some(value.trim().to_string());
+            }
+            line.clear();
+        }
+        // GitHub's rule, stood in for here: no name, no answer.
+        let answer: &[u8] = if agent.is_some() {
+            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
+        } else {
+            b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        };
+        (&stream).write_all(answer).unwrap();
+        agent
+    });
+    let url = format!("{origin}/repos/openai/codex/releases/latest");
+    let body = faber_engine::install::default_fetch(&url, Some(&origin)).await.expect("a named request is answered");
+    assert_eq!(body, b"{}");
+    let agent = server.join().unwrap().expect("the request named its client");
+    assert!(agent.starts_with("Faber/"), "{agent}");
+    assert_eq!(agent, faber_engine::install::USER_AGENT);
+}

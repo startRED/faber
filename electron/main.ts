@@ -318,6 +318,12 @@ const windowCommands = new Map<string, (args: Record<string, unknown>) => unknow
   ['open_link', openLink],
 ]);
 
+/** What a call answers when there is no host: a failure the screen shows as such once the host has stopped for good. */
+function noHost(): never {
+  if (stoppedCode === null) throw new Error('error.host.notReady');
+  throw { key: 'error.host.stopped', detail: stoppedCode };
+}
+
 function relay(): void {
   ipcMain.on('faber:flush-storage', (event) => {
     if (fromScreen(event)) event.sender.session.flushStorageData();
@@ -335,12 +341,12 @@ function relay(): void {
     try {
       if (agent) {
         if ((command === 'screen_ready' || command === 'set_clock')) return {ok:null};
-        if (!host) throw new Error('error.host.notReady');
+        if (!host) noHost();
         return {ok: await apps.dispatch(event, command, given, (name, input) => host!.call(name, input))};
       }
       const own = windowCommands.get(command);
       if (own) return { ok: (await own(given)) ?? null };
-      if (!host) throw new Error('error.host.notReady');
+      if (!host) noHost();
       await testmode.hostHeld();
       const ok = await host.call(command, given);
       startup.hostAnswered();
@@ -356,6 +362,15 @@ function relay(): void {
       if (win.isMaximized()) win.unmaximize();
       else win.maximize();
     } else if (action === 'close') win.close();
+    // Only the start-failure screen sends these, and only once the host stopped for good: there is no engine to stop.
+    else if ((action === 'restart' || action === 'quit') && stoppedCode !== null) {
+      if (action === 'restart') {
+        // The new copy must find the lock free, and Start again always shows a window, even after a start with the system.
+        app.releaseSingleInstanceLock();
+        app.relaunch({ args: process.argv.slice(1).filter((arg) => arg !== '--autostart') });
+      }
+      quitNow();
+    }
   });
   ipcMain.handle('faber:window-maximized', (event) => (win && fromScreen(event) ? win.isMaximized() : false));
 }
@@ -426,14 +441,35 @@ void app.whenReady().then(async () => {
   else show();
 });
 
-/** Host failures in the last minute, reset after 30 seconds of uptime; repeated failures close the app. */
+/** Host failures in the last minute, reset after 30 seconds of uptime; repeated failures stop the restarts. */
 const restarts: number[] = [];
 const HOST_RESTARTS = 3;
+/** How the host last ended once it failed too often (`0xC0000135`: a library it needs is missing), else null. */
+let stoppedCode: string | null = null;
+
+/**
+ * The host keeps failing: no more restarts, and the screen shows why Faber could not start, with a restart, a report and
+ * a quit (2026-11-27: on a fresh Windows the host could not load and Faber closed without a word). Every later call
+ * answers `error.host.stopped`, so a screen that loads after this event still shows the same failure.
+ */
+function stopRestarts(code: number | null): void {
+  stoppedCode = code === null ? 'signal' : code > 0x7fffffff || code < 0 ? `0x${(code >>> 0).toString(16).toUpperCase()}` : String(code);
+  host = null;
+  console.error(`faber: the host ended (code ${stoppedCode}) ${HOST_RESTARTS} times in a minute; showing the start failure`);
+  // A start with the system has no window yet: one opens, and its screen reads the failure from its first call.
+  if (!win || win.isDestroyed()) {
+    if (!hidden) show();
+    return;
+  }
+  win.webContents.send('faber:event', { type: 'hostStopped', code: stoppedCode });
+  if (!hidden && !win.isVisible()) win.show();
+}
 
 /**
  * Starts the host. One that ends on its own is never left behind a live window (2026-11-04: the window stayed open with no
  * engine, so every click failed): an end it chose (code 0, an update took over and asked the app to quit) ends the app;
- * a failure starts a new host, and the screen reads everything again from it.
+ * a failure starts a new host, and the screen reads everything again from it; one that keeps failing leaves only the
+ * start-failure screen, whose buttons need no host (`stopRestarts`).
  */
 function startHost(window: Parameters<typeof apply>[1]): Sidecar {
   const started = Date.now();
@@ -446,10 +482,9 @@ function startHost(window: Parameters<typeof apply>[1]): Sidecar {
       }
       if (exitedAt - started >= 30_000) restarts.length = 0;
       while (restarts.length > 0 && exitedAt - restarts[0] > 60_000) restarts.shift();
-      // A host that keeps failing is not looped: the app closes rather than stay open with a window that answers nothing.
+      // A host that keeps failing is not looped, and the window never stays silent: it says Faber could not start.
       if (restarts.length >= HOST_RESTARTS) {
-        console.error(`faber: the host ended (code ${code}) ${HOST_RESTARTS} times in a minute; closing`);
-        quitNow();
+        stopRestarts(code);
         return;
       }
       restarts.push(exitedAt);

@@ -17,6 +17,8 @@ interface ElectronShell {
     minimize(): void;
     toggleMaximize(): void;
     close(): void;
+    restart(): void;
+    quit(): void;
     isMaximized(): Promise<boolean>;
     onResized(listener: () => void): Unlisten;
   };
@@ -60,6 +62,13 @@ export interface ShellWindow {
   close(): Promise<void>;
   isMaximized(): Promise<boolean>;
   onResized(listener: () => void): Promise<Unlisten>;
+}
+
+/** The start-failure screen's two ways out: start Faber again, or end it. The Electron shell hears them only once its host
+ * stopped for good; the Tauri shell has no such screen, so they close its window. */
+export function afterStartFailure(action: 'restart' | 'quit'): void {
+  if (electron) electron.window[action]();
+  else void getCurrentWindow().close();
 }
 
 export function currentWindow(): ShellWindow {

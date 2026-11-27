@@ -17,9 +17,10 @@ function shell() {
     apps: { tell() {} },
     Date: { now: () => now },
     console: { error() {} },
+    hidden: false,
     quitNow: () => quits++,
     win: {
-      isVisible: () => true, isMinimized: () => false, isFocused: () => true,
+      isVisible: () => true, isMinimized: () => false, isFocused: () => true, isDestroyed: () => false,
       webContents: { reload: () => reloads++, send: (...args) => sent.push(args) },
     },
     Sidecar: { start(listen) {
@@ -36,7 +37,8 @@ function shell() {
     ${source.slice(source.indexOf('const restarts'))}
     host = startHost({});
     ({ stop: () => { stopping = true; } });`, context);
-  return { hosts, sent, control, advance: (ms) => { now += ms; }, quits: () => quits, reloads: () => reloads };
+  const stopped = () => sent.filter(([channel, event]) => channel === 'faber:event' && event.type === 'hostStopped').map(([, event]) => event.code);
+  return { hosts, sent, control, advance: (ms) => { now += ms; }, quits: () => quits, reloads: () => reloads, stopped };
 }
 
 test('main restarts a failed host and recovers the live renderer only after a state reply', async () => {
@@ -65,7 +67,7 @@ test('lost host events use the same live-renderer recovery path', () => {
   assert.equal(s.reloads(), 0);
 });
 
-test('main closes on an unrequested clean exit or after three rapid restarts', async () => {
+test('main closes on an unrequested clean exit and shows the start failure after three rapid restarts', async () => {
   const clean = shell();
   clean.hosts[0].listen.ended(0);
   assert.equal(clean.quits(), 1);
@@ -79,7 +81,15 @@ test('main closes on an unrequested clean exit or after three rapid restarts', a
   }
   s.hosts.at(-1).listen.ended(1);
   assert.equal(s.hosts.length, 4, 'short-lived state replies never reset the restart limit');
-  assert.equal(s.quits(), 1);
+  assert.equal(s.quits(), 0, 'a host that keeps failing never closes Faber without a word');
+  assert.deepEqual(s.stopped(), ['1']);
+});
+
+test('a host that cannot load names its Windows failure code', () => {
+  const s = shell();
+  for (let i = 0; i < 4; i++) s.hosts.at(-1).listen.ended(3221225781);
+  assert.deepEqual(s.stopped(), ['0xC0000135']);
+  assert.equal(s.hosts.length, 4);
 });
 
 test('thirty seconds of host uptime resets the failure window, shorter uptime does not', () => {
@@ -89,7 +99,7 @@ test('thirty seconds of host uptime resets the failure window, shorter uptime do
     s.advance(uptime);
     s.hosts.at(-1).listen.ended(1);
     assert.equal(s.hosts.length, uptime < 30_000 ? 4 : 5);
-    assert.equal(s.quits(), uptime < 30_000 ? 1 : 0);
+    assert.equal(s.stopped().length, uptime < 30_000 ? 1 : 0);
   }
 });
 
@@ -99,7 +109,7 @@ test('time spent reading a final reply does not count as host uptime', () => {
   s.advance(30_100);
   s.hosts.at(-1).listen.ended(1, 29_999);
   assert.equal(s.hosts.length, 4);
-  assert.equal(s.quits(), 1);
+  assert.equal(s.stopped().length, 1);
 });
 
 test('restart counts expire after a minute even without thirty seconds of uptime', () => {
@@ -109,7 +119,7 @@ test('restart counts expire after a minute even without thirty seconds of uptime
     s.hosts.at(-1).listen.ended(1);
   }
   assert.equal(s.hosts.length, 5);
-  assert.equal(s.quits(), 0);
+  assert.equal(s.stopped().length, 0);
 });
 
 test('failed or superseded readiness and Quit never publish recovery', async () => {

@@ -35,6 +35,9 @@ contextBridge.exposeInMainWorld('faberShell', {
     minimize: () => ipcRenderer.send('faber:window', 'minimize'),
     toggleMaximize: () => ipcRenderer.send('faber:window', 'toggleMaximize'),
     close: () => ipcRenderer.send('faber:window', 'close'),
+    // Heard only after the host stopped for good (the start-failure screen); otherwise the shell ignores them.
+    restart: () => ipcRenderer.send('faber:window', 'restart'),
+    quit: () => ipcRenderer.send('faber:window', 'quit'),
     isMaximized: () => ipcRenderer.invoke('faber:window-maximized') as Promise<boolean>,
     onResized: (listener: () => void) => {
       const handler = () => listener();

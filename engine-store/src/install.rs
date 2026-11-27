@@ -124,15 +124,31 @@ fn download_reason(e: &io::Error) -> &'static str {
     }
 }
 
+/// How Faber names itself to every download host. GitHub's API refuses a request with no name (403), which left Codex
+/// impossible to install on a fresh PC (2026-11-27).
+pub const USER_AGENT: &str = concat!("Faber/", env!("CARGO_PKG_VERSION"), " (https://github.com/startRED/faber)");
+
+/// The error with every cause under it: reqwest's own text is only "error sending request for url (...)", which said
+/// nothing when the Antigravity manifest failed once on a fresh PC (2026-11-27).
 fn network_error(e: reqwest::Error) -> io::Error {
     let kind = if e.is_timeout() {
         io::ErrorKind::TimedOut
-    } else if e.is_connect() || e.is_body() {
+    } else if e.is_connect() || e.is_body() || (e.is_request() && !e.is_builder()) {
         io::ErrorKind::NotConnected
     } else {
         io::ErrorKind::Other
     };
-    io::Error::new(kind, e)
+    let mut text = e.to_string();
+    let mut cause = std::error::Error::source(&e);
+    while let Some(below) = cause {
+        let line = below.to_string();
+        if !text.contains(&line) {
+            text.push_str(": ");
+            text.push_str(&line);
+        }
+        cause = below.source();
+    }
+    io::Error::new(kind, text)
 }
 
 fn body_error(e: reqwest::Error) -> io::Error {
@@ -905,7 +921,7 @@ async fn get(url: &str, loopback: Option<&str>, idle: Duration) -> io::Result<re
             attempt.follow()
         }
     });
-    let mut builder = reqwest::Client::builder().redirect(custom_policy).connect_timeout(idle).read_timeout(idle);
+    let mut builder = reqwest::Client::builder().user_agent(USER_AGENT).redirect(custom_policy).connect_timeout(idle).read_timeout(idle);
     if loopback.is_some() {
         builder = builder.no_proxy();
     }
@@ -918,8 +934,18 @@ async fn get(url: &str, loopback: Option<&str>, idle: Duration) -> io::Result<re
 }
 
 /// Network fetch of a metadata document: at most `METADATA_LIMIT` bytes, held in memory.
+/// A request that never reached the host is tried once more a second later: a fresh PC's first connection can fail once
+/// and work at once after (the Antigravity manifest, 2026-11-27). An answer from the host, even an error, is final, and a
+/// full idle timeout is not waited twice.
 pub async fn default_fetch(url: &str, loopback: Option<&str>) -> io::Result<Vec<u8>> {
-    metadata_body(get(url, loopback, IDLE_TIMEOUT).await?, METADATA_LIMIT, url).await
+    let res = match get(url, loopback, IDLE_TIMEOUT).await {
+        Err(e) if e.kind() == io::ErrorKind::NotConnected => {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            get(url, loopback, IDLE_TIMEOUT).await?
+        }
+        other => other?,
+    };
+    metadata_body(res, METADATA_LIMIT, url).await
 }
 
 /// Shared bounded response reader; callers own destination policy and deadlines.

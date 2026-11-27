@@ -157,6 +157,7 @@ pub(super) async fn download_tree(server: &Server, root: &Path, loopback: Option
     // The shared CLI downloader allows GitHub redirects. A package tree never leaves the registry, even by redirect.
     crate::tls::install();
     let mut builder = reqwest::Client::builder()
+        .user_agent(crate::install::USER_AGENT)
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(crate::install::IDLE_TIMEOUT)
         .read_timeout(crate::install::IDLE_TIMEOUT);

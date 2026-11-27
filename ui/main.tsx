@@ -1,13 +1,15 @@
-import { render } from 'solid-js/web';
+import { createEffect, createSignal, Show } from 'solid-js';
+import { Portal, render } from 'solid-js/web';
 import './fonts.css';
 import './styles.css';
-import { type AppEvent, api } from './api.ts';
+import { type AppEvent, api, failureOf } from './api.ts';
 import { App } from './App.tsx';
 import { ContextMenuHost } from './ContextMenu.tsx';
 import { installContextMenu } from './contextmenu.ts';
 import { applyLook } from './appearance.ts';
 import { createFrameFeed } from './frame.ts';
 import { createInbox } from './inbox.ts';
+import { StartFailed } from './StartFailed.tsx';
 import { createHold, onQuiet, watchGames } from './quiet.ts';
 import { store } from './running.ts';
 
@@ -35,28 +37,54 @@ if (import.meta.env.MODE === 'test') {
 // a newer event. Every other event waits in the inbox until the app is drawn and takes them in order, so the end of a
 // turn that lands before then still reaches the conversation.
 const inbox = createInbox<AppEvent>();
+// Set once the shell stopped restarting a host that keeps failing: the start-failure screen covers everything. Only the
+// Electron shell sends `hostStopped` (`electron/main.ts`), with the code as `0xC0000135` or `1`; the app never sees it.
+const [stopped, setStopped] = createSignal<string>();
+type HostStopped = { type: 'hostStopped'; code: string };
+const isHostStopped = (e: unknown): e is HostStopped => (e as { type?: unknown } | null)?.type === 'hostStopped';
 // Events reach the screen once per frame, together (ui/frame.ts), and while a game is in front (ui/quiet.ts) they wait folded
 // into one and land together when the person comes back.
 const frame = createFrameFeed<AppEvent>((e) => {
-  if (e.type === 'running') store.offer({ revision: e.revision, items: e.items });
+  const raw: unknown = e;
+  if (isHostStopped(raw)) setStopped(raw.code);
+  else if (e.type === 'running') store.offer({ revision: e.revision, items: e.items });
   else inbox.push(e);
 });
 const hold = createHold(frame.push);
 onQuiet(hold.hold);
 await api.on(hold.push);
-await api.setClock(-new Date().getTimezoneOffset() * 60);
 // The engine reads the quota more often while the window is open and at once when it gains focus (nothing sent to a model).
 const attention = (focused: boolean) => void api.quotaAttention(document.visibilityState === 'visible', focused && document.hasFocus()).catch(() => {});
 window.addEventListener('focus', () => attention(true));
 window.addEventListener('blur', () => attention(false));
 document.addEventListener('visibilitychange', () => attention(document.visibilityState === 'visible'));
-const state = await api.state();
-// Read before the first draw: a window that opens during the install at open paints its opening screen at once.
-const update = await api.updateStatus().catch(() => undefined);
-store.offer(state.running);
-
-// The look is on the page before anything is drawn, so the first frame already has the theme's colours.
-applyLook(state.look);
+// A host restarting while the screen starts fails these calls; they are asked again until they answer or the shell says
+// it stopped for good (`error.host.stopped`, R459), and only then does the start-failure screen replace the first frame. No
+// timer gives up: a first start can be slow (an antivirus reading the new sidecar), and only the shell knows it failed.
+async function boot() {
+  await api.setClock(-new Date().getTimezoneOffset() * 60);
+  const state = await api.state();
+  // Read before the first draw: a window that opens during the install at open paints its opening screen at once.
+  const update = await api.updateStatus().catch(() => undefined);
+  return { state, update };
+}
+let booted: Awaited<ReturnType<typeof boot>> | undefined;
+for (let tries = 1; !booted && stopped() === undefined; tries++) {
+  try {
+    booted = await boot();
+  } catch (failure) {
+    const { key, detail } = failureOf(failure);
+    if (key === 'error.host.stopped') setStopped(String(detail ?? ''));
+    else await new Promise((done) => setTimeout(done, tries < 40 ? 250 : 1000));
+  }
+}
+const state = booted?.state;
+const update = booted?.update;
+if (state) {
+  store.offer(state.running);
+  // The look is on the page before anything is drawn, so the first frame already has the theme's colours.
+  applyLook(state.look);
+}
 
 // The shell is asked whether a game is in front only while the window is shown without the focus.
 watchGames(api.gameInFront);
@@ -67,12 +95,18 @@ installContextMenu();
 render(
   () => (
     <>
-      {!checksOnBoot && <App initial={state} update={update} inbox={inbox} />}
+      <Show when={state}>{(initial) => !checksOnBoot && <App initial={initial()} update={update} inbox={inbox} />}</Show>
+      {/* Over the app when the host stops later, so its drafts stay where they are; the app beneath is inert meanwhile. */}
+      <Show when={stopped()}>{(code) => <Portal><StartFailed code={code()} /></Portal>}</Show>
       <ContextMenuHost />
     </>
   ),
   document.getElementById('root')!,
 );
+createEffect(() => {
+  const root = document.getElementById('root');
+  if (root) root.inert = stopped() !== undefined;
+});
 // The static first frame (ui/index.html) has done its job: the real screen is in the page now.
 document.getElementById('first')?.remove();
 
