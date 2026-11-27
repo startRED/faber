@@ -54,6 +54,9 @@ pub struct ClaudeLaunch {
     pub progress: bool,
     /// Faber's own commands (`crate::faber_tool`): a conversation in Chat or Projects, where the engine holds the table.
     pub faber: bool,
+    /// The person's other windows, read-only (`crate::eyes`): on Windows, while the key is on. The engine asks the person
+    /// per window in an ask mode, so the CLI's own card is not used.
+    pub eyes: bool,
     /// The skills installed from Faber's catalog (`crate::tools`), for a project's agent outside Isolated.
     pub tools: crate::tools::Delivery,
     /// The models of the CLI's own subagents (`helper::Subagents`): a project's own agent that offers the helper tool.
@@ -72,6 +75,7 @@ fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
         map: launch.verify,
         progress: launch.progress,
         faber: launch.faber,
+        eyes: launch.eyes,
     }
 }
 
@@ -1277,6 +1281,8 @@ fn start_configured(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>,
                                         || ((crate::progress::claude_tool(tool).is_some() || crate::toolbox::claude_tool(tool).is_some()) && opts.launch.progress)
                                         // Faber's commands keep their own reach in the host (R499), whatever the mode.
                                         || (tool == crate::faber_tool::CLAUDE_NAME && opts.launch.faber)
+                                        // The eyes ask per window themselves (engine/src/engine/eyes.rs), in the mode of the moment.
+                                        || (tool == crate::eyes::CLAUDE_NAME && opts.launch.eyes)
                                     {
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                                             "response": { "behavior": "allow", "updatedInput": input } } });
@@ -1609,6 +1615,7 @@ mod allow_tests {
             verify: false,
             progress: false,
             faber: false,
+            eyes: false,
             tools: Default::default(),
         }
     }

@@ -66,6 +66,7 @@ fn mcp_servers_launch_choice_filters_only_catalog_servers_without_strict_claude_
         choose(&mut delivery, &if enabled { BTreeSet::new() } else { names(&["faber-chrome-devtools", "personal-reader"]) });
         let launch = ClaudeLaunch {
             faber: false,
+            eyes: false,
             subagents: None,
             temporary: false,
             area: Area::Project,

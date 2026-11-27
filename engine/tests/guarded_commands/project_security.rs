@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 fn launch(area: Area, permissions: Permissions) -> ClaudeLaunch {
     ClaudeLaunch {
         faber: false,
+        eyes: false,
         subagents: None,
         temporary: false,
         helper: Default::default(),

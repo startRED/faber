@@ -14,6 +14,15 @@ import { PermissionDetails } from './PermissionDetails.tsx';
  * screen's own, from the Catalog's names and purposes, so the agent cannot write any of them. Any other tool is not one. */
 const SELF = 'faber'; // not written as one quoted word: the map's check reads that as a browser storage key
 function selfInstall(tool: string, input: unknown): { title: string; what: string; effect: string; line: string; code: string } | undefined {
+  if (tool === `${SELF}.eyes.windows`) {
+    return { title: t('ask.self.eyesList'), what: '', effect: t('ask.self.eyesListEffect'), line: '', code: '' };
+  }
+  if (tool === `${SELF}.eyes.window`) {
+    // The program comes from the window's own executable and the title from the window: both shown as plain text.
+    const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+    const text = (v: unknown) => (typeof v === 'string' ? v : '');
+    return { title: t('ask.self.eyes', { program: text(i.program) }), what: text(i.title), effect: t('ask.self.eyesEffect'), line: i.picture === true ? t('ask.self.eyesPicture') : '', code: '' };
+  }
   if (tool === `${SELF}.settings.web_search`) {
     const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
     const choice = (value: unknown) => value === 'off' || value === 'cached' || value === 'live' ? t(`set.webSearch.${value}`) : '';
@@ -471,7 +480,7 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
           <button class="btn primary" disabled={sending()} onClick={() => void answer(true)}>
             {own() ? t('ask.self.once') : t('ask.allow')}
           </button>
-          <Show when={props.permission.tool !== 'BrowserExtensionLoad'}><button class="btn" disabled={sending()} onClick={() => void answer(true, true)}>
+          <Show when={props.permission.tool !== 'BrowserExtensionLoad' && !props.permission.tool.startsWith(`${SELF}.eyes.`)}><button class="btn" disabled={sending()} onClick={() => void answer(true, true)}>
             {own() ? t(props.permission.tool === `${SELF}.settings.web_search` ? 'ask.self.alwaysWebSearch' : props.permission.tool === `${SELF}.tools.update` ? 'ask.self.alwaysUpdate' : props.permission.tool === `${SELF}.tools.repair` ? 'ask.self.alwaysRepair' : props.permission.tool === `${SELF}.tools.remove` ? 'ask.self.alwaysRemove' : props.permission.tool === `${SELF}.tools.switch` ? 'ask.self.alwaysSwitch' : 'ask.self.always') : t('ask.always')}
           </button></Show>
           <button class="btn" disabled={sending()} onClick={() => void answer(false)}>

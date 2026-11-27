@@ -32,6 +32,7 @@ async fn plain_words_recordings_keep_technical_work_out_of_the_reply_for_both_cl
                 if vendor == "claude" {
                     let launch = ClaudeLaunch {
                         faber: false,
+                        eyes: false,
                         subagents: None,
                         temporary: false,
                         area: Area::Project,
@@ -65,6 +66,7 @@ async fn plain_words_recordings_keep_technical_work_out_of_the_reply_for_both_cl
                 } else {
                     let thread = CodexThread {
                         faber: false,
+                        eyes: false,
                         subagents: None,
                         temporary: false,
                         title: None,

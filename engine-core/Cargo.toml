@@ -14,6 +14,8 @@ faber-builds = { path = "../builds" }
 # The free memory a Cargo build of the verifier is admitted against.
 sysinfo = { version = "0.39.6", default-features = false, features = ["disk", "system"] }
 base64 = "0.23"
+# The eyes' pictures (`src/eyes.rs`), already in the workspace for the host and the test kit.
+png = "0.18"
 # Local export timestamps, including the offset at each message's date; already in the workspace's dependency graph.
 chrono = "0.4"
 # Parse and serialize each exported message independently, preserving Markdown while closing its scopes.

@@ -1,5 +1,8 @@
 # Eyes proof of concept
 
+The reading parts now live in `winproc/src/eyes.rs` (window list, tree, picture, the Electron accessibility request) and
+the example calls them; the product uses them through the `look` tool ([design](../design/eyes.md)).
+
 The Windows-only `faber-winproc` example lists top-level windows, prints a UI Automation tree, saves a PNG, and
 invokes or sets a control by its exact name or automation ID. It measures elapsed time and compares the foreground
 window and pointer position before and after each command. A tree defaults to depth 8 and stops at 400 nodes.

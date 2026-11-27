@@ -1196,6 +1196,7 @@ dependencies = [
  "flate2",
  "html5ever 0.40.1",
  "junction",
+ "png",
  "pulldown-cmark",
  "pulldown-cmark-to-cmark",
  "reqwest",

@@ -146,6 +146,7 @@ impl Router {
                 server.open(
                     CodexThread {
                         faber: false,
+                        eyes: false,
                         subagents: None,
                         temporary: false,
                         title: None,
@@ -174,6 +175,7 @@ impl Router {
                 let cli = self.claude.as_ref()?;
                 let launch = ClaudeLaunch {
                     faber: false,
+                    eyes: false,
                     subagents: None,
                     temporary: false,
                     helper: Default::default(),

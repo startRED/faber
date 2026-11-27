@@ -4,6 +4,7 @@ Area: Named app control
 Files: winproc/src/eyes.rs, winproc/src/lib.rs, engine-core/src/eyes.rs, engine/src/engine/eyes.rs, engine/src/engine.rs, engine-drivers/src/helper.rs, engine/src/sharing-sources.txt, docs/design/eyes.md, docs/product-map.md
 Depends: the-key-for-eyes-and-hands
 Size: about 900 changed lines
+State: built (look tool, winproc reading, ask per window, measured before and after); waiting for the two reviews (R146).
 
 Why: plan item E1, owner's answers 1 and 2 (25/11/2026). The proof of concept (`winproc/examples/eyes.rs`,
 `docs/dev/eyes-proof.md`) measured four things:

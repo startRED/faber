@@ -485,6 +485,7 @@ mod hostile {
 fn launch(area: Area, permissions: Permissions) -> ClaudeLaunch {
     ClaudeLaunch {
         faber: false,
+        eyes: false,
         subagents: None,
         temporary: false,
         helper: Default::default(),
@@ -537,6 +538,7 @@ fn review3_codex_credential_denies_survive_in_both_areas_and_on_resume() {
                 area,
                 &CodexThread {
                     faber: false,
+                    eyes: false,
                     subagents: None,
                     temporary: false,
                     title: None,
@@ -604,6 +606,7 @@ fn review3_codex_shells_use_the_shared_git_gate_instead_of_native_execution() {
             area,
             &CodexThread {
                 faber: false,
+                eyes: false,
                 subagents: None,
                 temporary: false,
                 title: None,
@@ -731,6 +734,7 @@ fn c1_h4_codex_network_is_off_on_start_and_resume_even_if_user_settings_enable_i
     for resume in [None, Some("thread".into())] {
         let t = CodexThread {
             faber: false,
+            eyes: false,
             subagents: None,
             temporary: false,
             title: None,
@@ -804,6 +808,7 @@ fn review2_h2_codex_selects_a_restricted_read_profile_on_start_and_resume() {
     for resume in [None, Some("thread".into())] {
         let t = CodexThread {
             faber: false,
+            eyes: false,
             subagents: None,
             temporary: false,
             title: None,
@@ -874,6 +879,7 @@ fn r107_isolated_chat_reuses_project_protections_and_existing_users_default_to_f
 fn m6_sandbox_failures_are_intended_and_writable_roots_must_not_expand_into_user_caches() {
     let t = CodexThread {
         faber: false,
+        eyes: false,
         subagents: None,
         temporary: false,
         title: None,
@@ -920,6 +926,7 @@ fn r107_internal_questions_restrict_reads_and_never_grant_workspace_writes() {
                 area,
                 &CodexThread {
                     faber: false,
+                    eyes: false,
                     subagents: None,
                     temporary: false,
                     title: None,
@@ -1557,6 +1564,7 @@ fn data_folder_writes_are_refused_by_both_clis_in_every_sandboxed_mode() {
             for cwd in [&outside, &nested] {
                 let t = CodexThread {
                     faber: false,
+                    eyes: false,
                     subagents: None,
                     temporary: false,
                     title: None,
@@ -1804,7 +1812,7 @@ async fn refuse_write_requests(project: &std::path::Path, targets: &[std::path::
                     tools: Default::default(),
                 });
                 server.open(
-                    CodexThread { faber: false,
+                    CodexThread { faber: false, eyes: false,
                         subagents: None,
                         temporary: false,
                         title: None,

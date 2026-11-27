@@ -37,6 +37,10 @@ impl Engine {
         if let Some(settled) = self.with(|c| c.answer_self_change(conv, turn_id, request_id, allow, always)) {
             return settled;
         }
+        // A window card of the eyes is Faber's own too: an Allow lets this conversation read that window.
+        if let Some(settled) = self.with(|c| c.answer_eyes(conv, turn_id, request_id, allow)) {
+            return settled;
+        }
         let plan = self.with(|c| {
             c.convs
                 .get(conv)

@@ -225,6 +225,12 @@ pub enum EngineEvent {
         id: String,
         input: Value,
     },
+    /// The agent called the `look` tool (`crate::eyes`): it lists, reads or pictures one of the person's other windows. The
+    /// engine answers with `Session::helper_reply`, once the window was read (and, in an ask mode, the person allowed it).
+    EyesCall {
+        id: String,
+        input: Value,
+    },
     /// The agent called `plan`, `status` or `wrap_up` (`crate::progress`; `tool` is the name both drivers give it). The engine
     /// writes it down and answers at once with `Session::helper_reply`.
     ProgressCall {
