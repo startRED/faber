@@ -772,7 +772,6 @@ export interface VendorUsage {
   ownSpendUsd: number; spendDays?: [number, number, number][]; unmetered: number; counting: boolean; windows: WindowUsage[];
 }
 export interface AppState {
-  sharing?: SharingState;
   gitReason?: 'reason.git_missing';
   uncleanExit?: { at: number; started?: number; panic: boolean; panicOnly?: boolean };
   conversations: Summary[];
@@ -790,8 +789,6 @@ export interface AppState {
   usage?: VendorUsage[];
   version: string;
 }
-
-export interface SharingState { choice: boolean | null }
 /** Kept only in memory; the engine caps each conversation at 32 commands and each output at 20 lines / 8 KB. */
 export interface BackgroundCommand {
   id: string;
@@ -1163,10 +1160,6 @@ export type CookieSite = { name: string; cookies: number; kind: 'money' | 'email
 
 export const api = {
   state: () => invoke<AppState>('state'),
-  sharingState: () => invoke<SharingState>('sharing_state'),
-  sharingSet: (yes: boolean, language: string) => invoke<SharingState>('sharing_set', { yes, language }),
-  sharingLanguage: (language: string) => invoke<void>('sharing_language', { language }),
-  sharingPreview: () => invoke<string | null>('sharing_preview'),
   results: (id: string) => invoke<Results | null>('results', { id }),
   projectResults: (projectId: string) => invoke<ProjectResultsView>('project_results', { projectId }),
   asks: () => invoke<AgentAsk[]>('asks'),

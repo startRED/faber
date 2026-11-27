@@ -775,9 +775,6 @@ impl Core {
             pick.reason = "reason.autoImmediate".into();
         }
         let shown_pick = pick.resolved(self.codex_recommended.as_deref(), &self.codex_models);
-        if let Some(c) = self.convs.get(id).filter(|c| c.messages.len() == 2) {
-            self.sharing.conversation(&self.opts.runtime, c.area, pick.vendor);
-        }
         // Immediate and single-profile explanations must not erase the route's difficulty for later messages.
         if let Some(reason) = route_reason {
             pick.reason = reason;

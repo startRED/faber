@@ -8,17 +8,14 @@ import { localeNeeded, proof, proofEnvironment, proofsFor, temporaryWorktree, wi
 test('proofs follow the changed files', () => {
   assert.deepEqual(proofsFor(['docs/a.json', 'README.md']), [['npm', 'run', 'docs']]);
   const all = proofsFor(['ui/a.ts', 'scripts/a.mjs', 'engine/a.rs']);
-  assert.equal(all.length, 8);
+  assert.equal(all.length, 7);
   assert.deepEqual(all.at(-1), ['node', 'scripts/cargo.mjs', 'clippy', '--workspace', '--all-targets', '--', '-D', 'warnings']);
   assert.equal(proofsFor(['Cargo.lock']).length, 6);
   assert.equal(proofsFor(['ui/a.ts']).length, 5);
 });
-test('list proofs follow the files their CI tests read', () => {
-  const sharing = ['node', 'scripts/sharing-lists.mjs', '--check'];
+test('the command list proof follows the files its CI test reads', () => {
   const commands = ['node', 'scripts/cargo.mjs', 'test', '-p', 'faber-host', '--lib', 'the_command_line_lists_every_command'];
   const has = (files, args) => proofsFor(files).some((proof) => proof.join(' ') === args.join(' '));
-  for (const file of ['host/src/pane/new.rs', 'ui/locales/en.ts', 'engine/src/sharing-sources.txt']) assert.ok(has([file], sharing), file);
-  assert.ok(!has(['ui/a.ts'], sharing));
   for (const file of ['host/src/table.rs', 'host/src/reach.rs', 'host/src/agent_commands.rs', 'engine-core/src/commands.rs', 'cli/commands.json'])
     assert.ok(has([file], commands), file);
   assert.ok(!has(['host/src/lib.rs', 'ui/a.ts'], commands));

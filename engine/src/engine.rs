@@ -541,7 +541,6 @@ fn settle(m: &mut Message) {
 
 struct Core {
     media: media::Media,
-    sharing: Arc<crate::sharing::Sharing>,
     catalog_store: Option<crate::tools::Store>,
     kit_checks: HashMap<String, mcp_servers::LaunchCheck>,
     kit_check_gate: Arc<tokio::sync::Semaphore>,
@@ -806,7 +805,6 @@ impl Engine {
         catalog_store.set_on_ready(Arc::new(move || catalog_emit(AppEvent::Catalog)));
         crate::startup::mark("catalog");
         let mut store = Store::new(&opts.data_dir);
-        let sharing = crate::sharing::Sharing::open(&opts.data_dir, store.settings().language.as_deref());
         crate::startup::mark("store");
         let catalog_prepare = catalog_store.clone();
         let permissions = store.settings().permissions();
@@ -838,13 +836,11 @@ impl Engine {
         let rewind = rewind::State::new(&opts.data_dir);
         crate::startup::mark("rewind");
         let unclean_exit = crate::crash::take_unclean(&opts.data_dir);
-        sharing.started(&runtime, now());
         let slow_log = opts.data_dir.clone();
         let core = Arc::new_cyclic(|me| {
             slow_lock::Timed::new(
                 Core {
                     media: Default::default(),
-                    sharing,
                     catalog_store: Some(catalog_store),
                     kit_checks: HashMap::new(),
                     worker_memory: Default::default(),
@@ -1247,10 +1243,6 @@ impl Engine {
     }
     pub fn state(&self) -> AppState {
         self.with(|c| c.state())
-    }
-
-    pub fn sharing(&self) -> Arc<crate::sharing::Sharing> {
-        self.with(|c| Arc::clone(&c.sharing))
     }
 
     pub fn projects(&self) -> Vec<Project> {
@@ -3948,25 +3940,9 @@ impl Core {
                 // it (recovery), or the CLI only said it was interrupted.
                 let why = self.live.get_mut(conv).and_then(|l| l.ended.take());
                 let by_person = self.convs.get(conv).is_some_and(|c| c.stopped);
-                let interrupted = by_person || why == Some("reason.interrupted") || reason == "interrupted";
                 let why = why.filter(|key| {
                     !ok && !by_person && !recovery::plan_limit(&reason) && !matches!(*key, "reason.interrupted" | "reason.complete")
                 });
-                self.sharing.turn(
-                    &self.opts.runtime,
-                    turn_id.as_deref().unwrap_or(""),
-                    vendor,
-                    if ok {
-                        Status::Done
-                    } else if interrupted {
-                        Status::Stopped
-                    } else {
-                        Status::Error
-                    },
-                );
-                if let Some(key) = why {
-                    self.sharing.failure(&self.opts.runtime, key);
-                }
                 // Claude reports a conversation total; Codex has already priced this turn's individual requests.
                 let session = self.convs.get(conv).and_then(|c| c.sessions.get(&vendor)).cloned().unwrap_or_default();
                 let area = self.convs.get(conv).map_or(Area::Chat, |c| c.area);
@@ -4185,15 +4161,6 @@ impl Core {
                 }
                 let limited = fatal && !rejected && recovery::plan_limit(&message);
                 let stopped = (rejected || agy::interrupted(vendor, &message)) && self.convs.get(conv).is_some_and(|c| c.stopped);
-                if fatal {
-                    self.sharing.turn(
-                        &self.opts.runtime,
-                        turn_id.as_deref().unwrap_or(""),
-                        vendor,
-                        if stopped { Status::Stopped } else { Status::Error },
-                    );
-                    self.sharing.failure(&self.opts.runtime, &message);
-                }
                 if let Some(m) = self.turn(conv) {
                     m.error = (!stopped).then_some(message);
                     if fatal {
@@ -5251,10 +5218,6 @@ impl Core {
 
     /// Ends a reply that never got a CLI: it shows the error and leaves the running list.
     pub(super) fn fail_reply(&mut self, id: &str, reply_id: &str, error: String) {
-        self.sharing.failure(&self.opts.runtime, &error);
-        if let Some(vendor) = self.convs.get(id).and_then(|c| c.messages.iter().find(|m| m.id == reply_id)).and_then(|m| m.vendor) {
-            self.sharing.turn(&self.opts.runtime, reply_id, vendor, Status::Error);
-        }
         self.finish_worker_admission(&Self::turn_admission_key(id, reply_id));
         if let Some(t) = self.transfers.get_mut(id).filter(|t| t.reply == reply_id) {
             t.approved = None;
@@ -6324,9 +6287,6 @@ impl Core {
             return Err(error);
         }
         self.command_waits.remove(&id);
-        if previous.0 == 0 && !routing {
-            self.sharing.conversation(&self.opts.runtime, area, pick.vendor);
-        }
         self.sent_draft(&id);
         if previous.0 == 0 && previous.1.is_empty() {
             self.track_title(&id);

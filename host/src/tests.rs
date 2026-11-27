@@ -73,10 +73,6 @@ fn the_table_holds_every_command_the_screen_calls_once() {
         if !cfg!(feature = "test-hooks") && test_only.contains(&name.as_str()) {
             continue;
         }
-        // The sharing commands exist only in a build that has an endpoint (R583).
-        if !cfg!(faber_telemetry) && name.starts_with("sharing_") {
-            continue;
-        }
         let listed = Host::commands().iter().filter(|c| c.name == name).count();
         assert_eq!(listed, 1, "`{name}` is called by ui/api.ts and listed {listed} times");
     }
@@ -784,23 +780,6 @@ async fn project_rooms_lists_a_project_folder_and_nothing_for_a_chat() {
     seed_conversation(&host, "c1", None, None);
     for id in ["c1", "gone", "../p1"] {
         assert_eq!(host.dispatch("project_rooms", json!({ "id": id })).await.unwrap(), json!([]), "{id}");
-    }
-}
-
-#[cfg(not(faber_telemetry))]
-#[test]
-fn sharing_commands_are_absent_without_an_endpoint() {
-    for name in ["sharing_state", "sharing_set", "sharing_preview", "sharing_language"] {
-        assert!(super::Host::commands().iter().all(|entry| entry.name != name));
-        assert!(super::Host::reach(name).is_none());
-    }
-}
-
-#[cfg(faber_telemetry)]
-#[test]
-fn sharing_commands_are_screen_only_with_an_endpoint() {
-    for name in ["sharing_state", "sharing_set", "sharing_preview", "sharing_language"] {
-        assert_eq!(matches!(super::Host::reach(name), Some(super::Reach::Screen)), faber_engine::sharing::endpoint().is_some());
     }
 }
 

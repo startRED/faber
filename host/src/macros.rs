@@ -105,7 +105,6 @@ macro_rules! table {
             /// Runs one command. Arguments are an object of named values, as the screen sends them; anything else, or
             /// arguments that do not fit, is `error.host.badArgs`, and a name not in the table `error.host.unknownCommand`.
             pub async fn dispatch(&self, command: &str, args: Value) -> Result<Value, Failure> {
-                if !Self::command_enabled(command) { return Err(Failure::key("error.host.unknownCommand")); }
                 #[cfg(feature = "test-hooks")]
                 if crate::first_user_guard(command) { return Err(Failure::key("error.host.firstUserBlocked")); }
                 let args = match args {
@@ -119,11 +118,7 @@ macro_rules! table {
                         #[serde(rename_all = "camelCase")]
                         struct Args { $( $arg: $ty, )* }
                         let Args { $( $arg, )* } = serde_json::from_value(args).map_err(|_| Failure::key("error.host.badArgs"))?;
-                        let answer = commands::$name(self $(, $arg)*).await.map_err(|error| {
-                            let failure = Failure::from(error);
-                            self.sharing.failure(&self.runtime, &failure.key);
-                            failure
-                        })?;
+                        let answer = commands::$name(self $(, $arg)*).await.map_err(Failure::from)?;
                         serde_json::to_value(answer).map_err(|_| Failure::key("error.host.badReply"))
                     } )*
                     _ => Err(Failure::key("error.host.unknownCommand")),

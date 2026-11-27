@@ -40,11 +40,6 @@ fn started_dirs() -> &'static Mutex<HashSet<PathBuf>> {
 }
 
 pub const CRASHES: &str = "crashes.jsonl";
-
-/// The operating system's major version, without its full version string or any machine details.
-pub fn os_major() -> Option<u16> {
-    sysinfo::System::os_version()?.chars().take_while(char::is_ascii_digit).collect::<String>().parse().ok()
-}
 /// About 500 lines of about 200 bytes; the oldest half goes at the cap (`toolbox::append_capped_line`).
 const CRASHES_MAX: u64 = 100_000;
 /// Exists while a run of Faber is going. A clean exit removes it; finding it at start means the last run did not end by itself.

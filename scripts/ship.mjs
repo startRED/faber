@@ -20,9 +20,7 @@ export function proofsFor(files, locale = false) {
   const proofs = [['npm', 'run', 'lint'], ['npm', 'run', 'typecheck'], ['npm', 'run', 'docs'],
     ['npm', 'run', 'build'], ['cargo', 'fmt', '--all', '--check']];
   if (files.some((f) => f.startsWith('scripts/'))) proofs.push(['npm', 'run', 'test:scripts']);
-  // The two list checks CI failed on most (the sharing lists, the command line's list): seconds here, a revert there.
-  if (files.some((f) => f.endsWith('.rs') || f === 'ui/locales/en.ts' || f.startsWith('engine/src/sharing-')))
-    proofs.push(['node', 'scripts/sharing-lists.mjs', '--check']);
+  // The list check CI failed on most (the command line's list): seconds here, a revert there.
   if (files.some((f) => COMMAND_LIST.test(f)))
     proofs.push(['node', 'scripts/cargo.mjs', 'test', '-p', 'faber-host', '--lib', 'the_command_line_lists_every_command']);
   if (files.some((f) => /(^|\/)(Cargo\.toml|Cargo\.lock)$|\.rs$/.test(f)))

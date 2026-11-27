@@ -60,8 +60,8 @@ instead of rereading your chat. And when the AI says "done", it checks that word
   switch them on.
 - **[A team that does not reread itself.](#5-a-team-that-does-not-reread-itself)** Helpers start from a brief of
   their own and answer with a short report. No helper is handed anybody else's transcript.
-- **[Light on your computer.](#6-light-on-your-computer-and-yours)** About 110 MB with no AI tool running, usage
-  reporting off by default, and no third-party tool, skill or model bundled.
+- **[Light on your computer.](#6-light-on-your-computer-and-yours)** About 110 MB with no AI tool running, no
+  telemetry, and no third-party tool, skill or model bundled.
 
 One plan is enough to start: Claude Pro or Max, ChatGPT Plus or Pro, or Google AI Pro or Ultra.
 **[Install Faber](#install).**
@@ -272,7 +272,7 @@ conversation. [How teams work](docs/design/helper-team.md).
 - **No third-party tool, skill or model is bundled.** The Catalog lists 118 skills, 4 tool servers and a plugin,
   each pinned to a version, checked and shown with its license, and downloads them from their original source when
   you install them.
-- **Usage reporting (telemetry) is off by default**, and current builds have nowhere to send it.
+- **No telemetry.** Faber does not report your usage anywhere.
 - **Scriptable.** The `faber` command (in the Windows installer today) and `faber mcp` let a terminal, a script or
   another AI app list, read, search, send to and wait on conversations, over a local channel only your user can open.
 - **Yours to shape.** Six looks, your own accent, fonts and density, and five languages: English, Brazilian
@@ -425,7 +425,7 @@ for you.
 **Does Faber see my login?** No. You sign in through each tool's own sign-in, and Faber reads none of the tools'
 credential files.
 
-**Does Faber send my data anywhere?** Usage reporting is off by default. Conversations and projects are files on your
+**Does Faber send my data anywhere?** No. Faber has no telemetry. Conversations and projects are files on your
 computer. The AI tools talk to their own services exactly as they do without Faber.
 
 **Is a team cheaper than one model?** We have not measured it. Extra agents cost extra tokens in every tool. What

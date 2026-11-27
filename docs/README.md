@@ -31,7 +31,6 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [product/cli.md](product/cli.md) | The `faber` command line: the local channel, the five reaches, conversation states, verbs, JSON and exit codes, `watch` and `wait` |
 | [product/cli-conversations.md](product/cli-conversations.md) | Conversation states, numbered messages and their tool steps |
 | [product/architecture.md](product/architecture.md) | Processes, memory and CPU budgets, updates, the curated catalog |
-| [product/sharing.md](product/sharing.md) | Anonymous sharing direction, report fields and receiver contract; implementation status |
 | [product/recovery.md](product/recovery.md) | Desktop-shell migration, draft import, rollback files and engine restart limits |
 | [product/distribution.md](product/distribution.md) | License, provider terms, distribution |
 | [product/quota-pacing.md](product/quota-pacing.md) | Auto's quota pacing, quota readings and their measurements |

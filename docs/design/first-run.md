@@ -2,11 +2,6 @@
 
 How the first-run steps and the tutorial look and behave. The Settings screen is in [settings.md](settings.md).
 
-- When the build has a sharing endpoint and no answer is saved, a modal first asks whether to share anonymous usage and
-  crash information. Both buttons have the same appearance and neither is selected. A failed save shows the usual error
-  and opens the next step; the question returns on the next start. This also applies to existing installations. Without an
-  endpoint the question is absent (R583).
-
 - The first run has three steps in a window with no sidebar: connected accounts, appearance, first conversation. A stepper
   at the top shows the place. Each step is a modal dialog: its heading takes focus when it opens, and Esc and the
   shortcuts of the shell (Ctrl N, Ctrl comma, Ctrl period) do nothing until a button is used.

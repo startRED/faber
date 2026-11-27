@@ -25,9 +25,4 @@ fn main() {
     }
     let commit = git(&["rev-parse", "--short=12", "HEAD"]).filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit()));
     println!("cargo:rustc-env=FABER_REPORT_COMMIT={}", commit.as_deref().unwrap_or("unknown"));
-    println!("cargo:rerun-if-env-changed=FABER_TELEMETRY_URL");
-    println!("cargo:rustc-check-cfg=cfg(faber_telemetry)");
-    if std::env::var("FABER_TELEMETRY_URL").is_ok_and(|value| value.starts_with("https://") && value.len() > 8) {
-        println!("cargo:rustc-cfg=faber_telemetry");
-    }
 }

@@ -311,21 +311,6 @@ const presetButton = (host: HTMLElement, id: string) => host.querySelector<HTMLB
 // What the shell sends for a settings file nobody changed: each default lives in the engine (`Settings::shown`), never here.
 const SHOWN: Saved = { userHooks: false, permissions: 'dontAsk', notifications: true, notificationSound: true, keepAwake: true, resumeInterrupted: true, autostart: false };
 
-check('sharing: the Privacy screen exposes its switch only when the endpoint is present', () => {
-  for (const available of [false, true]) {
-    const view = mount(() => createComponent(Settings, {
-      look: look(), saved: SHOWN, vendors: [], quotas: {}, now: 0, start: 'privacy',
-      sharing: available ? { choice: false } : undefined,
-      onSharing: async () => true,
-      onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
-    }));
-    try {
-      equal(!!view.host.querySelector('#set-sharing-switch'), available);
-      ok(view.host.textContent?.includes(available ? en['sharing.off'] : en['set.privacy.telemetry']));
-    } finally { view.stop(); }
-  }
-});
-
 check('the key: Privacy has the other-windows switch, off until saved on, and the programs out of reach are added and removed in every language at 720 px', async () => {
   const motion = document.documentElement.dataset.motion;
   document.documentElement.dataset.motion = 'none';
