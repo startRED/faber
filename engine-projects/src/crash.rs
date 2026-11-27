@@ -374,14 +374,36 @@ mod tests {
         }
     }
 
+    /// `record_panic` until its line is on the disk: other tests in this binary hold the one log lock for longer than the
+    /// 0.2 s a panic hook waits (`toolbox`'s own check holds it on purpose), and then the line is given up, as it must be.
+    fn record_until_written(dir: &Path, line: &Value, ends_the_run: bool) {
+        let before = lines(dir).len();
+        for _ in 0..50 {
+            record_panic(dir, line, ends_the_run);
+            if lines(dir).len() > before {
+                return;
+            }
+        }
+        panic!("the lock was never free for 10 s");
+    }
+
     #[test]
     fn a_panic_that_ends_the_run_is_counted_once_and_one_that_does_not_keeps_the_marker() {
         let dir = tempfile::tempdir().unwrap();
         let line = panic_line(1, "v", "c", "t", "boom", "f.rs:1:1", "");
         start_run(dir.path(), "1.0.0", "aaa");
-        record_panic(dir.path(), &line, false);
+        // Another test holding the log lock, as on a busy runner (run 45929281175 lost the first line so).
+        let (held, release) = std::sync::mpsc::channel();
+        let other = std::thread::spawn(move || {
+            let _one = crate::toolbox::ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+            held.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        });
+        release.recv().unwrap();
+        record_until_written(dir.path(), &line, false);
+        other.join().unwrap();
         assert!(dir.path().join(MARKER).exists(), "a panic a thread survives is not the end of the run");
-        record_panic(dir.path(), &line, true);
+        record_until_written(dir.path(), &line, true);
         assert!(!dir.path().join(MARKER).exists());
         assert!(!start_run(dir.path(), "1.0.0", "aaa"), "the abort already left its panic line, so no second line for the same crash");
         assert_eq!(lines(dir.path()).iter().map(|l| l["kind"].as_str().unwrap().to_string()).collect::<Vec<_>>(), ["panic", "panic"]);
@@ -422,12 +444,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let before = std::panic::take_hook();
         install_hook(dir.path().to_path_buf(), "9.9.9", "deadbeef").unwrap();
-        let thread = std::thread::Builder::new().name("worker-x".into()).spawn(|| panic!("boom {}", 42)).unwrap();
-        assert!(thread.join().is_err());
+        // Tests run side by side: another test's panic in this window is not this one's, and another test holding the log
+        // lock past the hook's 0.2 s makes it give the line up, so the panic comes again until one line is written.
+        let mine = || lines(dir.path()).into_iter().filter(|l| l["thread"] == "worker-x").collect::<Vec<Value>>();
+        for _ in 0..50 {
+            let thread = std::thread::Builder::new().name("worker-x".into()).spawn(|| panic!("boom {}", 42)).unwrap();
+            assert!(thread.join().is_err());
+            if !mine().is_empty() {
+                break;
+            }
+        }
         let _ = std::panic::take_hook();
         std::panic::set_hook(before);
-        // Tests run side by side: another test's panic in this window is not this one's.
-        let found: Vec<Value> = lines(dir.path()).into_iter().filter(|l| l["thread"] == "worker-x").collect();
+        let found = mine();
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(
             (found[0]["version"].as_str(), found[0]["thread"].as_str(), found[0]["message"].as_str()),

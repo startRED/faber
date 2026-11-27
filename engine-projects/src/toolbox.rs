@@ -633,7 +633,7 @@ pub fn log_replacement(dir: &std::path::Path, change: &SelfChange, repair: bool)
     append_capped_line(&dir.join(SELF_CHANGES), &line.to_string(), SELF_CHANGES_MAX)
 }
 
-static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Adds one line to a local log and says whether it is on the disk. At `max` bytes the oldest half goes and the newest lines
 /// stay. One write at a time, for every log that uses it (`crash.rs` too).
