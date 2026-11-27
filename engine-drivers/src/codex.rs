@@ -3810,6 +3810,7 @@ async fn serve(
         }
     }
     let mut announced = HashSet::new();
+    let mut recheck = tokio::time::Instant::now() + Duration::from_secs(1);
     loop {
         #[cfg(unix)]
         refresh_writers!(None);
@@ -3843,7 +3844,24 @@ async fn serve(
             break;
         }
         tokio::select! {
-            () = tokio::time::sleep(Duration::from_secs(1)), if cfg!(unix) && shutdown_confirmed => {}
+            // The stop waits five seconds for the tree to empty; a slow machine can take longer, so it is asked again
+            // every second instead of leaving every reply on this service waiting until someone presses stop.
+            // A fixed deadline: messages arriving under a second apart must not keep postponing the check.
+            () = tokio::time::sleep_until(recheck), if (cfg!(unix) && shutdown_confirmed) || (!shutdown_confirmed && job.is_some()) => {
+                recheck = tokio::time::Instant::now() + Duration::from_secs(1);
+                if !shutdown_confirmed && let Some(tree) = job.as_ref() {
+                    // A root that exited after the stop's own wait stays in its group as a zombie until it is reaped.
+                    #[cfg(unix)]
+                    if let Some(root) = child.as_mut() {
+                        let _ = root.try_wait();
+                    }
+                    // Only asked, never ended again: on Unix an emptied group's number can be reused by another program.
+                    if tree.confirm_stopped().unwrap_or(false) {
+                        shutdown_confirmed = true;
+                        job.take();
+                    }
+                }
+            }
             Some((key, id, result)) = command_rx.recv() => {
                 if let Some(t) = threads.get_mut(&key) {
                     t.command_finished(&id, result.confirmed, result.unresolved);
