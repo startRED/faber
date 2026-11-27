@@ -2549,6 +2549,91 @@ async fn stalled_service_stops_native_workers(trigger: HealthTrigger) {
     assert!(!server.is_alive());
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_stalled_service_whose_workers_outlive_the_stop_wait_is_confirmed_once_they_end() {
+    use faber_engine::proc::{Containment, ProcessIdentity};
+    use std::sync::Mutex;
+    // The workers end eight seconds after the stop: past the stop's own five-second wait, as on a slow machine.
+    let ended: Arc<Mutex<Option<tokio::time::Instant>>> = Arc::default();
+    let (pipes, mut input, mut output) = support::controlled();
+    let spawn: faber_engine::proc::Spawner = Arc::new({
+        let ended = ended.clone();
+        move |bin, argv, cwd| {
+            let mut process = pipes(bin, argv, cwd)?;
+            let (query, stop) = (ended.clone(), ended.clone());
+            let root = ProcessIdentity { pid: 42, created: 1 };
+            process.contained = Some(Containment::scripted_descendants(
+                root,
+                move || {
+                    let worker = ProcessIdentity { pid: 43, created: 1 };
+                    Ok(match *query.lock().unwrap() {
+                        None => vec![root, worker],
+                        Some(at) if tokio::time::Instant::now() < at => vec![worker],
+                        Some(_) => vec![],
+                    })
+                },
+                move || {
+                    stop.lock().unwrap().get_or_insert_with(|| tokio::time::Instant::now() + Duration::from_secs(8));
+                },
+            ));
+            Ok(process)
+        }
+    });
+    let server = CodexServer::start(CodexServerOptions {
+        permissions: Permissions::Ask,
+        cli: faber_engine::cli::Cli { command: "fake".into(), prefix: vec![] },
+        cwd: ".".into(),
+        area: Area::Project,
+        user_hooks: false,
+        windows: false,
+        spawn,
+        tools: Default::default(),
+    });
+    let init = support::expect_method(&mut input, "initialize").await;
+    support::emit(&mut output, json!({"id":init["id"],"result":{}})).await;
+    support::expect_method(&mut input, "initialized").await;
+    let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+    let mut sessions = vec![];
+    for id in ["a", "b"] {
+        let tx = tx.clone();
+        sessions.push(server.open(mode_thread(Permissions::Ask, Default::default()), Arc::new(move |e| drop(tx.send((id, e))))));
+        let open = support::expect_method(&mut input, "thread/start").await;
+        support::emit(&mut output, json!({"id":open["id"],"result":{"thread":{"id":id,"model":"test"}}})).await;
+    }
+    sessions[0].send(UserTurn::text("a"));
+    let turn = support::expect_method(&mut input, "turn/start").await;
+    support::emit(&mut output, json!({"id":turn["id"],"result":{"turn":{"id":"a"}}})).await;
+    support::emit(&mut output, json!({"method":"turn/started","params":{"threadId":"a","turn":{"id":"a"}}})).await;
+    tokio::time::timeout(Duration::from_secs(15), async { while !matches!(events.recv().await, Some(("a", EngineEvent::TurnStarted))) {} })
+        .await
+        .expect("the turn must start");
+    sessions[0].interrupt();
+    support::expect_method(&mut input, "turn/interrupt").await;
+    support::expect_method(&mut input, "thread/loaded/list").await;
+    let mut released = std::collections::BTreeSet::new();
+    let mut failed = std::collections::BTreeSet::new();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while failed.len() < 2 {
+            match events.recv().await.unwrap() {
+                (id, EngineEvent::WriterExit { confirmed: true }) => {
+                    let at = ended.lock().unwrap().expect("the stop ended the tree");
+                    assert!(tokio::time::Instant::now() >= at, "{id} was released while its workers still ran");
+                    assert!(released.insert(id));
+                }
+                (id, EngineEvent::Error { message, fatal: true }) => {
+                    assert_eq!(message, faber_engine::codex::SHARED_SERVICE_STOPPED);
+                    assert!(released.contains(id), "recovery can only follow writer confirmation");
+                    assert!(failed.insert(id), "{id} was told twice");
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("workers that end after the stop's own wait must still be confirmed");
+    assert!(!server.is_alive());
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HealthPeer {
     Absent,

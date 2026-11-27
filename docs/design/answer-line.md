@@ -97,7 +97,8 @@ header and its plan are in [conversation.md](conversation.md); the work log abov
   conversation on the service has a pending approval or question, then start a fresh quiet window.
   A service that responds stays open. If it stays silent and the affected writers can be confirmed stopped, the reply
   says Faber stopped the unresponsive service and kept its history. If writers are still unconfirmed, the reply says
-  so and stays open instead of claiming that it stopped.
+  so and stays open instead of claiming that it stopped. Faber asks again every second, without ending anything
+  again, and releases those replies once the service's processes are gone, so a slow machine does not leave them waiting.
   If a queued message had already been handed over and its receipt is missing, it stays in the queue for the person
   to check. Keep going stops on that reply so the queued message cannot be sent twice.
 
