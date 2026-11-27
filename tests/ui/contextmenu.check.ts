@@ -183,6 +183,54 @@ check('right-click: a chat offers Rename, Export, Archive and Delete, Delete ask
   }
 });
 
+check('right-click: a Rename box stays open with what was typed when its row is rebuilt (the conversation changed, say a reply ended)', async () => {
+  const root = stage();
+  const renamed: Array<[string, string]> = [];
+  const original = api.rename;
+  api.rename = async (id, title) => void renamed.push([id, title]);
+  const now = Date.now();
+  const first: Summary = { id: 'live', title: 'Why is the sky blue', area: 'chat', updatedAt: now };
+  const [list, setList] = createSignal<Summary[]>([first]);
+  const dispose = render(() => [
+    createComponent(Sidebar, {
+      get conversations() { return list(); }, projects, vendors: [], version: '0', place: { area: 'chat' }, running: [], quotas: {}, now,
+      onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: () => {}, onAddProject: () => {}, onOpen: () => {},
+      onRemove: () => {}, onSettings: () => {},
+    }),
+    createComponent(ContextMenuHost, {}),
+  ], root);
+  try {
+    rightClick(root.querySelector('.crow')!);
+    await settle();
+    entry(t('menu.rename')).click();
+    await settle();
+    const box = root.querySelector<HTMLInputElement>('.crow input.rename')!;
+    ok(box, 'the row turns into a text box');
+    box.value = 'Why the sky';
+    box.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    // A changed conversation is a new object, so the list draws its row again (App's keepRows keeps only unchanged ones).
+    setList([{ ...first, updatedAt: now + 1 }]);
+    await settle();
+    // A focused window reports a blur as the old box leaves the page; the hidden test window does not, so it is sent here.
+    box.dispatchEvent(new FocusEvent('blur'));
+    await settle();
+    deepEqual(renamed, [], 'a rebuilt row renames nothing by itself');
+    const again = root.querySelector<HTMLInputElement>('.crow input.rename');
+    ok(again, 'the box is still open');
+    equal(again!.value, 'Why the sky', 'with what was typed');
+    equal(document.activeElement, again, 'and it has focus');
+    again!.value = 'Why the sky is blue';
+    key(again!, { key: 'Enter' });
+    await settle();
+    deepEqual(renamed, [['live', 'Why the sky is blue']]);
+    equal(root.querySelector('input.rename'), null);
+  } finally {
+    api.rename = original;
+    dispose();
+    root.remove();
+  }
+});
+
 check('right-click: a letter chooses an item of a chat menu (A archives, D asks twice before deleting) and is shown at its end', async () => {
   const root = stage();
   const calls: string[] = [];

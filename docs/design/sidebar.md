@@ -17,6 +17,10 @@ The row keeps its rename draft and focus; Enter keeps focus on its button after 
 Its Pinned and date sections are keyed by their names, so a chat's rename draft, selection and focus also survive a list
 refresh or the minute clock tick (`tests/ui/chat-groups.check.ts`, `chat groups: chat rename`).
 Escape and Enter in the group's rename box return focus to its row, as they do for a conversation.
+When the conversation itself changes while its box is open (a reply ends, so the list draws a new row), the box opens
+again on the new row with what was typed and focus, the caret at its end. The browser's blur as the old box leaves the
+page saves nothing; only a box still on the page finishes on blur (`tests/ui/contextmenu.check.ts`, `a Rename box stays
+open`).
 When a refreshed group list no longer contains the open group, its selection is cleared in the screen and browser
 storage, so New conversation and Ctrl+N start an outside chat. Moving a chat with the keyboard restores focus to its
 row once the destination group has it; focusing another control meanwhile cancels that restoration, even after blur

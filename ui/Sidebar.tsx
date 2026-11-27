@@ -19,14 +19,21 @@ import { type Place, stateWords, waitNeedsAttention, waitWords } from './running
 import { planWords } from './Plan.tsx';
 import { ageOf, floorOnly, freshness, groupChats, lineReading, matches, nest, otherReadings, pinned, type Quotas, showsChats, tailOf } from './sidebar.ts';
 
-/** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed. */
-function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
+/** What was typed in each open rename box, by what it renames: a row rebuilt while its box is open (its conversation changed,
+ * say a reply ended) opens the box again with these words instead of losing them. */
+const renameDrafts = new Map<string, string>();
+
+/** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed.
+ * `id` names what is renamed, for the draft kept across a rebuilt row; a box with none keeps no draft. */
+function RenameBox(props: { id?: string; title: string; onDone: (title?: string) => void }) {
   let done = false;
   let box: HTMLInputElement | undefined;
+  const draft = props.id === undefined ? undefined : renameDrafts.get(props.id);
   // Enter and Esc give focus back to the row; leaving the box by a click leaves focus where the click put it.
   const finish = (title?: string, refocus = false) => {
     if (done) return;
     done = true;
+    if (props.id !== undefined) renameDrafts.delete(props.id);
     const row = box?.closest('.crow, .prow');
     props.onDone(title);
     if (refocus) queueMicrotask(() => row?.querySelector<HTMLElement>('.item')?.focus());
@@ -34,10 +41,17 @@ function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
   return (
     <input
       class="field sm rename"
-      value={props.title}
+      value={draft ?? props.title}
       maxLength={120}
       aria-label={t('menu.renameLabel')}
-      ref={(el) => ((box = el), queueMicrotask(() => (el.focus(), el.select())))}
+      ref={(el) => ((box = el), queueMicrotask(() => {
+        if (!el.isConnected) return;
+        el.focus();
+        // A box opened again keeps going where the typing was; a new one starts with the whole name chosen.
+        if (draft === undefined) el.select();
+        else el.setSelectionRange(el.value.length, el.value.length);
+      }))}
+      onInput={(e) => props.id !== undefined && renameDrafts.set(props.id, e.currentTarget.value)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' && !e.isComposing) finish(e.currentTarget.value, true);
         else if (e.key === 'Escape') finish(undefined, true);
@@ -45,7 +59,12 @@ function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
         e.preventDefault();
         e.stopPropagation();
       }}
-      onBlur={(e) => finish(e.currentTarget.value)}
+      // The browser also reports a blur when the box leaves the page with its row: that is a rebuilt row, not the person
+      // leaving, so only a box still on the page finishes.
+      onBlur={(e) => {
+        const el = e.currentTarget;
+        queueMicrotask(() => el.isConnected && finish(el.value));
+      }}
     />
   );
 }
@@ -343,7 +362,7 @@ export function Sidebar(props: Props) {
       data-conversation-id={row.c.id}
       onContextMenu={(e) =>
         openMenu(e, [
-          { id: 'rename', key: 'r', label: t('menu.rename'), run: () => setRenaming(row.c.id) },
+          { id: 'rename', key: 'r', label: t('menu.rename'), run: () => (renameDrafts.delete(row.c.id), setRenaming(row.c.id)) },
           ...(!row.c.archived ? [{
             key: 'p', id: row.c.pinnedAt === undefined ? 'pin' : 'unpin',
             label: t(row.c.pinnedAt === undefined ? 'menu.pin' : 'menu.unpin'),
@@ -396,6 +415,7 @@ export function Sidebar(props: Props) {
         when={renaming() !== row.c.id}
         fallback={
           <RenameBox
+            id={row.c.id}
             title={row.c.title}
             onDone={(title) => {
               setRenaming(undefined);
@@ -622,10 +642,10 @@ export function Sidebar(props: Props) {
               const sections = createMemo(() => groupChats(rows(), props.now, !searching()));
               return <div class="proj" data-chat-group-id={g.id}>
                 <div class="prow" onContextMenu={(e) => openMenu(e, [
-                  { id: 'rename', key: 'r', label: t('menu.rename'), run: () => setRenaming(g.id) },
+                  { id: 'rename', key: 'r', label: t('menu.rename'), run: () => (renameDrafts.delete(`group:${g.id}`), setRenaming(g.id)) },
                   { id: 'delete', key: 'd', label: t('menu.delete'), danger: true, confirm: t('group.confirmDelete'), run: () => changeGroup(mutate(opt.withoutGroup(g.id), () => api.removeChatGroup(g.id))) },
                 ])}>
-                  <Show when={renaming() !== g.id} fallback={<RenameBox title={g.name} onDone={(name) => { setRenaming(undefined); if (name?.trim() && name.trim() !== g.name) changeGroup(mutate(opt.groupNamed(g.id, name), () => api.saveChatGroup(g.id, name))); }} />}>
+                  <Show when={renaming() !== g.id} fallback={<RenameBox id={`group:${g.id}`} title={g.name} onDone={(name) => { setRenaming(undefined); if (name?.trim() && name.trim() !== g.name) changeGroup(mutate(opt.groupNamed(g.id, name), () => api.saveChatGroup(g.id, name))); }} />}>
                     <button class="item" aria-current={here() ? 'location' : undefined} aria-expanded={expanded()} onClick={() => { toggle(g.id, !(props.place.groupId === g.id && expanded())); props.onGroup?.(g.id); }}><Icon name="folder" small /><span class="t">{g.name}</span></button>
                   </Show>
                   <button class="plus" aria-label={t('group.newIn', { name: g.name })} title={t('group.newIn', { name: g.name })} onClick={() => { toggle(g.id, true); props.onNewGroupChat?.(g.id); }}><Icon name="plus" small /></button>
