@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/media/banner.png" alt="Faber: the AI says done, Faber checks. Chat and Projects on the AI subscriptions you already pay for." width="100%" />
+<img src="docs/media/faber-demo.gif" alt="Faber in 30 seconds, from real screenshots: Claude Code, Codex and Antigravity in one app; Auto picks the model and says why; the AI says done and Faber checks; another AI reviews the code; you see every line that changed. Free and open source, on your own AI plans." width="100%" />
 
 <h3>
 
