@@ -301,10 +301,6 @@ impl Inner {
 }
 
 impl Shell for SidecarShell {
-    fn storage_roots(&self, roots: Vec<PathBuf>) {
-        (self.0.send)(Order::StorageRoots { roots });
-    }
-
     fn heard(&self, event: &AppEvent) {
         // The engine calls this with its lock held, and the settings are read under that lock, so the tray works on its own
         // thread; it keeps the newest list, whatever the order. Keeping the PC awake needs no engine state, so it is decided here.

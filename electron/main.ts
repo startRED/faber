@@ -35,8 +35,7 @@ const REVEAL_FAILSAFE_MS = 3000;
 const HOST_STOP_MS = 60_000;
 
 // Only the instance that owns the data may back it up or count a launch.
-const configDir = app.getPath('appData');
-const dataDir = process.env.FABER_DATA_DIR ?? path.join(configDir, 'Faber');
+const dataDir = process.env.FABER_DATA_DIR || path.join(app.getPath('appData'), 'Faber');
 app.setPath('userData', path.join(dataDir, 'webview'));
 if (!app.requestSingleInstanceLock()) app.exit(0);
 startup.begin(dataDir);
@@ -87,9 +86,8 @@ const extensionBlockedFolders = [
   ...['.codex', '.claude', '.claude.json', '.gemini', '.config/gcloud'].map((name) => path.resolve(homedir(), name)),
   ...[process.env.CODEX_HOME, process.env.CLAUDE_CONFIG_DIR, process.env.GEMINI_CLI_HOME]
     .filter((name): name is string => !!name?.trim()).map((name) => path.resolve(name.trim())),
-  path.resolve(dataDir),
+  extensionRegistry, extensionProfileRoot, app.getPath('userData'),
 ];
-const builtInBlocks = extensionBlockedFolders.length;
 /** Faber's browser pane: the views the host orders (`electron/pane.ts`). */
 const apps = new AppControl(testmode.testing && isolatedTestData(process.env.FABER_DATA_DIR, path.join(app.getPath('appData'), 'Faber')), ORIGIN);
 const pane = new Pane({
@@ -479,11 +477,7 @@ function startHost(window: Parameters<typeof apply>[1]): Sidecar {
       } else win?.webContents.send('faber:event', event);
     },
     order: (order) => {
-      const kind = (order as { kind?: unknown } | null)?.kind;
-      if (kind === 'storageRoots') {
-        const { roots } = order as { roots: string[] };
-        extensionBlockedFolders.splice(builtInBlocks, extensionBlockedFolders.length - builtInBlocks, ...roots);
-      } else if (kind === 'pane') pane.order(order);
+      if ((order as { kind?: unknown } | null)?.kind === 'pane') pane.order(order);
       else apply(order, window);
     },
   });

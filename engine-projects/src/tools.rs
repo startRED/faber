@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 pub mod kits;
-mod location;
 mod npm;
 pub use crate::store::retry_busy;
 pub use npm::Package;
@@ -225,7 +224,6 @@ pub struct Launch {
 #[derive(Debug, Clone)]
 pub struct Store {
     root: PathBuf,
-    new_root: Option<PathBuf>,
     /// The catalog the store trusts: its digests decide what may stay at every launch.
     items: Vec<Item>,
     resources: Vec<Item>,
@@ -283,7 +281,7 @@ impl Store {
             item
         }));
         let ready = kits::ReadyCache::for_root(&root, &trust_items, None);
-        let store = Store { root, new_root: None, items, resources, plugins, node: None, ready };
+        let store = Store { root, items, resources, plugins, node: None, ready };
         store.refresh_ready_inventory();
         store
     }
@@ -310,25 +308,16 @@ impl Store {
         self.root.join("disabled")
     }
     fn dir(&self, item: &Item) -> PathBuf {
-        self.dir_at(&self.source_root(&item.id), item)
-    }
-    fn dir_at(&self, root: &Path, item: &Item) -> PathBuf {
         if item.runtime.is_some() {
-            root.join("runtimes").join(&item.id)
+            self.root.join("runtimes").join(&item.id)
         } else if self.plugin_definition(&item.id).is_some() {
-            root.join("plugins").join(&item.id)
+            self.root.join("plugins").join(&item.id)
         } else {
             match item.server {
-                Some(_) => root.join("servers").join(&item.id),
-                None => root.join("plugin/skills").join(&item.id),
+                Some(_) => self.servers().join(&item.id),
+                None => self.skills().join(&item.id),
             }
         }
-    }
-    fn disabled_copy(&self, id: &str) -> PathBuf {
-        self.source_root(id).join("disabled").join(id)
-    }
-    fn removed_copy(&self, id: &str) -> PathBuf {
-        self.source_root(id).join("removed").join(id)
     }
     fn ledger(&self) -> PathBuf {
         self.root.join("installed.json")
@@ -347,7 +336,7 @@ impl Store {
                         .as_ref()
                         .map_or_else(|| i.server.as_ref().map_or("SKILL.md", |s| s.entry.as_str()), |_| "instructions/SKILL.md")
                 };
-                [self.dir(i), self.disabled_copy(id)]
+                [self.dir(i), self.disabled().join(id)]
                     .iter()
                     .any(|dir| if self.plugin_definition(&i.id).is_some() { dir.join(marker).is_dir() } else { dir.join(marker).is_file() })
             })
@@ -376,14 +365,14 @@ impl Store {
 
     /// Whether the person removed this tool and Catalog still offers Undo for it (`removed/<id>`).
     pub fn has_removed_copy(&self, id: &str) -> bool {
-        valid_id(id) && self.removed_copy(id).exists()
+        valid_id(id) && self.removed().join(id).exists()
     }
 
     /// Whether an installed copy is in the launch roots. Callers use installed() for ledger membership.
     pub fn enabled(&self, id: &str) -> bool {
         valid_id(id)
             && !self.selection().disabled.contains(id)
-            && !self.disabled_copy(id).exists()
+            && !self.disabled().join(id).exists()
             && self.items.iter().find(|i| i.id == id).is_some_and(|i| {
                 let marker = if self.plugin_definition(&i.id).is_some() {
                     "source"
@@ -416,8 +405,7 @@ impl Store {
         let item = self.items.iter().find(|item| item.id == id).ok_or(crate::toolbox::UNKNOWN)?;
         let installed = self.installed();
         let commit = installed.get(id).ok_or("The tool is not installed. Install it first.")?;
-        self.check_file_root(&self.source_root(id)).map_err(|_| crate::toolbox::REINSTALL)?;
-        let (active, disabled) = (self.dir(item), self.disabled_copy(id));
+        let (active, disabled) = (self.dir(item), self.disabled().join(id));
         let copy = if disabled.exists() { &disabled } else { &active };
         if commit != &item.commit
             || (active.exists() && disabled.exists())
@@ -439,20 +427,17 @@ impl Store {
         let item = self.items.iter().find(|i| i.id == id).ok_or("Unknown tool")?;
         let mut selection = self.read_selection().ok_or("Could not read catalog switches")?;
         if !agent {
-            self.recover_replacements_for(id)?;
             self.recover_restores()?;
         }
         if !self.installed().contains_key(id) {
             return Err("The tool is not installed".into());
         }
         let active = self.dir(item);
-        let root = self.source_root(id);
-        self.check_file_root(&root)?;
-        let disabled = self.disabled_copy(id);
+        let disabled = self.disabled().join(id);
         if enabled && disabled.exists() && !self.verify_item(&disabled, item) {
             let inconclusive = item.runtime.is_some() && runtime::verify_state(&disabled, item) == runtime::Integrity::CannotCheck;
             if !agent && !inconclusive {
-                self.discard_at(&root, &disabled).map_err(|e| e.to_string())?;
+                self.discard(&disabled).map_err(|e| e.to_string())?;
             }
             return Err("The disabled tool does not match the catalog".into());
         }
@@ -543,61 +528,54 @@ impl Store {
         let ledger = self.installed();
         let mut clean = true;
         let mut checked = std::collections::HashSet::new();
-        for root in self.file_roots() {
-            self.check_file_root(&root).ok()?;
-            if root != self.root && self.recover_replacements_at(&root).is_err() {
-                continue;
-            }
-            for (parent, server) in [
-                (root.join("plugin/skills"), Some(false)),
-                (root.join("servers"), Some(true)),
-                (root.join("plugins"), Some(false)),
-                (root.join("runtimes"), Some(false)),
-                (root.join("disabled"), None),
-            ] {
-                // A folder that cannot be listed could hide a changed tool: nothing is handed over.
-                let entries = entries(&parent)?;
-                for entry in entries {
-                    let name = entry.file_name().to_string_lossy().into_owned();
-                    // A link or junction in place of a tool's folder would be followed and hashed as if it were the folder.
-                    if !entry.file_type().is_ok_and(|t| t.is_dir()) {
-                        clean &= self.discard_at(&root, &entry.path()).is_ok();
-                        continue;
-                    }
-                    let item = self.items.iter().find(|i| {
-                        i.id == name
-                            && (server.is_none()
-                                || (i.server.is_some() == server.unwrap_or(false)
-                                    && (parent == root.join("plugins")) == self.plugin_definition(&i.id).is_some()))
-                            && (server.is_none() || (parent == root.join("runtimes")) == i.runtime.is_some())
-                            && self.source_root(&i.id) == root
-                    });
-                    // Only an explicit replacement may consume an older installed pin and its recovery copy.
-                    if item.is_some_and(|i| ledger.get(&name).is_some_and(|commit| *commit != i.commit)) {
-                        continue;
-                    }
-                    let verified = if server.is_none() {
-                        true
-                    } else if let Some(item) = item {
-                        if item.runtime.is_some() {
-                            match runtime::verify_state(&entry.path(), item) {
-                                runtime::Integrity::Intact => true,
-                                runtime::Integrity::Tampered => false,
-                                runtime::Integrity::CannotCheck => continue,
-                            }
-                        } else {
-                            self.verify_item(&entry.path(), item)
+        for (parent, server) in [
+            (self.skills(), Some(false)),
+            (self.servers(), Some(true)),
+            (self.root.join("plugins"), Some(false)),
+            (self.root.join("runtimes"), Some(false)),
+            (self.disabled(), None),
+        ] {
+            // A folder that cannot be listed could hide a changed tool: nothing is handed over.
+            let entries = entries(&parent)?;
+            for entry in entries {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                // A link or junction in place of a tool's folder would be followed and hashed as if it were the folder.
+                if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+                    clean &= self.discard(&entry.path()).is_ok();
+                    continue;
+                }
+                let item = self.items.iter().find(|i| {
+                    i.id == name
+                        && (server.is_none()
+                            || (i.server.is_some() == server.unwrap_or(false)
+                                && (parent == self.root.join("plugins")) == self.plugin_definition(&i.id).is_some()))
+                        && (server.is_none() || (parent == self.root.join("runtimes")) == i.runtime.is_some())
+                });
+                // Only an explicit replacement may consume an older installed pin and its recovery copy.
+                if item.is_some_and(|i| ledger.get(&name).is_some_and(|commit| *commit != i.commit)) {
+                    continue;
+                }
+                let verified = if server.is_none() {
+                    true
+                } else if let Some(item) = item {
+                    if item.runtime.is_some() {
+                        match runtime::verify_state(&entry.path(), item) {
+                            runtime::Integrity::Intact => true,
+                            runtime::Integrity::Tampered => false,
+                            runtime::Integrity::CannotCheck => continue,
                         }
                     } else {
-                        false
-                    };
-                    if ledger.contains_key(&name) && (server.is_none() || !self.disabled_copy(&name).exists()) && verified {
-                        if server.is_some() {
-                            checked.insert(name);
-                        }
-                    } else {
-                        clean &= self.discard_at(&root, &entry.path()).is_ok();
+                        self.verify_item(&entry.path(), item)
                     }
+                } else {
+                    false
+                };
+                if ledger.contains_key(&name) && (server.is_none() || !self.disabled().join(&name).exists()) && verified {
+                    if server.is_some() {
+                        checked.insert(name);
+                    }
+                } else {
+                    clean &= self.discard(&entry.path()).is_ok();
                 }
             }
         }
@@ -628,16 +606,12 @@ impl Store {
     /// Moves `dir` out of the skill root in one step, then deletes it as far as it can: a file held open stays behind in the
     /// trash, where no CLI looks, and the next prune retries it.
     fn discard(&self, dir: &Path) -> io::Result<()> {
-        self.discard_at(&self.root, dir)
-    }
-
-    fn discard_at(&self, root: &Path, dir: &Path) -> io::Result<()> {
         match std::fs::symlink_metadata(dir) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error),
             Ok(_) => {}
         }
-        let trash = kits::TemporaryCopy::new(root, ".trash-")?;
+        let trash = kits::TemporaryCopy::new(&self.root, ".trash-")?;
         match retry_busy(|| std::fs::rename(dir, &trash.path)) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
             other => other?,
@@ -678,7 +652,7 @@ impl Store {
         // Extraction may run uv for minutes; only publication holds the shared store lock.
         {
             let _store = lock();
-            self.recover_replacements_for(&item.id)?;
+            self.recover_replacements()?;
             if agent && let Some((_, why)) = self.held(item) {
                 return Err(why.into());
             }
@@ -687,11 +661,10 @@ impl Store {
             }
             self.initial_ledger()?;
         }
-        let root = self.download_root(item)?;
-        let temporary = self.stage_sources(&root, item, zip, packages)?;
+        let temporary = self.stage_sources(item, zip, packages)?;
         let staging = &temporary.path;
         let _store = lock();
-        self.recover_replacements_for(&item.id)?;
+        self.recover_replacements()?;
         if agent && let Some((_, why)) = self.held(item) {
             return Err(why.into());
         }
@@ -716,60 +689,32 @@ impl Store {
         {
             return Err("The tool store contains a linked or invalid directory".into());
         }
-        self.check_file_root(&root)?;
-        if ledger.contains_key(&item.id) && self.source_root(&item.id) != root {
-            return Err("The stored copy needs confirmation in Catalog".into());
-        }
-        let dest = if selection.disabled.contains(&item.id) { root.join("disabled").join(&item.id) } else { self.dir_at(&root, item) };
-        if std::fs::symlink_metadata(&dest).is_ok() {
-            return Err("The stored copy needs confirmation in Catalog".into());
-        }
-        std::fs::create_dir_all(dest.parent().ok_or("Invalid tool folder")?).map_err(|e| e.to_string())?;
+        let dest = if selection.disabled.contains(&item.id) { self.disabled().join(&item.id) } else { self.dir(item) };
+        std::fs::create_dir_all(dest.parent().unwrap_or(&self.root)).map_err(|e| e.to_string())?;
         if self.plugin_definition(&item.id).is_none() && item.server.is_none() && item.runtime.is_none() {
             self.write_manifest().map_err(|e| e.to_string())?;
         }
-        self.record_location(&item.id, &root).map_err(|e| e.to_string())?;
-        // A first install that does not finish forgets its location too, so a later one is not held to a drive that
-        // never got the files.
-        let first = !ledger.contains_key(&item.id);
-        let forget = |store: &Self| {
-            if first {
-                let _ = store.record_location(&item.id, &store.root);
-            }
-        };
-        retry_busy(|| std::fs::rename(staging, &dest)).map_err(|e| {
-            forget(self);
-            format!("Could not publish catalog files: {e}")
-        })?;
+        retry_busy(|| std::fs::rename(staging, &dest)).map_err(|e| format!("Could not publish catalog files: {e}"))?;
         ledger.insert(item.id.clone(), item.commit.clone());
         // A failed ledger write takes the files back out so no incomplete install can launch.
         self.write_ledger(&ledger).map_err(|e| {
-            // Files that could not be taken back keep their location, so a retry finds them where they are.
-            if self.discard_at(&root, &dest).is_ok() {
-                forget(self);
-            }
+            let _ = self.discard(&dest);
             format!("Could not publish the catalog ledger: {e}")
         })?;
         self.refresh_ready_after_install();
         Ok(())
     }
 
-    fn stage_sources(
-        &self,
-        root: &Path,
-        item: &Item,
-        zip: &Path,
-        packages: &BTreeMap<String, PathBuf>,
-    ) -> Result<kits::TemporaryCopy, String> {
-        self.check_file_root(root)?;
-        std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
+    fn stage_sources(&self, item: &Item, zip: &Path, packages: &BTreeMap<String, PathBuf>) -> Result<kits::TemporaryCopy, String> {
+        self.replacement_roots()?;
+        std::fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
         #[cfg(test)]
         TEST_STAGE.with(|hook| {
             if let Some(hook) = hook.borrow_mut().as_mut() {
                 hook();
             }
         });
-        let temporary = kits::TemporaryCopy::new(root, ".staging-").map_err(|e| e.to_string())?;
+        let temporary = kits::TemporaryCopy::new(&self.root, ".staging-").map_err(|e| e.to_string())?;
         let staging = &temporary.path;
         if let Some(plugin) = self.plugin_definition(&item.id) {
             self.validate_plugin_aliases(plugin)?;
@@ -804,7 +749,7 @@ impl Store {
             return Err(attention);
         }
         self.check_agent_switch_locked(id)?;
-        let removed = self.removed_copy(id);
+        let removed = self.removed().join(id);
         let receipt_exists = match std::fs::symlink_metadata(&removed) {
             Ok(_) => true,
             Err(e) if e.kind() == io::ErrorKind::NotFound => false,
@@ -844,20 +789,17 @@ impl Store {
         if agent {
             self.check_agent_remove_locked(id).map_err(String::from)?;
         } else {
-            self.recover_replacements_for(id)?;
             self.prune().ok_or("The tool store cannot be checked")?;
         }
-        let root = self.source_root(id);
-        self.check_file_root(&root)?;
-        if !self.installed().contains_key(id) {
-            return Ok(());
-        }
-        let mut ledger = self.initial_ledger()?;
+        let mut ledger = self.installed();
         let Some(commit) = ledger.remove(id) else { return Ok(()) };
         let enabled = self.enabled(id);
-        let source = if self.disabled_copy(id).exists() { self.disabled_copy(id) } else { self.dir(item) };
-        let removed = self.removed_copy(id);
-        self.discard_at(&root, &removed).map_err(|e| e.to_string())?;
+        let source = if self.disabled().join(id).exists() { self.disabled().join(id) } else { self.dir(item) };
+        let removed = self.removed().join(id);
+        if std::fs::symlink_metadata(self.removed()).is_ok_and(|m| !m.is_dir()) {
+            return Err("The removed tools folder is not a plain directory".into());
+        }
+        self.discard(&removed).map_err(|e| e.to_string())?;
         std::fs::create_dir_all(&removed).map_err(|e| e.to_string())?;
         Removed { commit, enabled, agent, restoring: false, restored: false }.write(&removed).map_err(|e| e.to_string())?;
         let files = removed.join("files");
@@ -867,14 +809,9 @@ impl Store {
             e.to_string()
         })?;
         // The screen keeps only the latest Undo. Older copies expire once this removal succeeds.
-        for root in self.file_roots() {
-            if root != self.root && self.check_file_root(&root).is_err() {
-                continue;
-            }
-            for entry in entries(&root.join("removed")).unwrap_or_default() {
-                if entry.path() != removed {
-                    let _ = self.discard_at(&root, &entry.path());
-                }
+        for entry in entries(&self.removed()).unwrap_or_default() {
+            if entry.file_name() != id {
+                let _ = self.discard(&entry.path());
             }
         }
         self.refresh_ready();
@@ -888,10 +825,7 @@ impl Store {
         }
         let _store = lock();
         let item = self.items.iter().find(|i| i.id == id).ok_or("Unknown tool")?;
-        self.recover_replacements_for(id)?;
-        let root = self.source_root(id);
-        self.check_file_root(&root)?;
-        let removed = self.removed_copy(id);
+        let removed = self.removed().join(id);
         self.prune().ok_or("The tool store cannot be checked")?;
         let installed = self.installed();
         if installed.contains_key(id) {
@@ -901,7 +835,7 @@ impl Store {
                 .then(|| small_file(&removed.join("state.json")).and_then(|b| serde_json::from_slice::<Removed>(&b).ok()))
                 .flatten();
             if receipt.is_some_and(|state| {
-                let dest = if state.enabled { self.dir(item) } else { self.disabled_copy(id) };
+                let dest = if state.enabled { self.dir(item) } else { self.disabled().join(id) };
                 state.restored
                     && !state.restoring
                     && state.commit == item.commit
@@ -917,7 +851,7 @@ impl Store {
             return Err("The tool is already installed".into());
         }
         let files = removed.join("files");
-        if [removed.clone(), files.clone()].iter().any(|p| !std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir())) {
+        if [self.removed(), removed.clone(), files.clone()].iter().any(|p| !std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir())) {
             return Err("The removed tool is not a plain directory".into());
         }
         let mut state: Removed = small_file(&removed.join("state.json"))
@@ -946,12 +880,11 @@ impl Store {
         {
             return Err("The tool store contains a linked or invalid directory".into());
         }
+        if !self.removed().exists() {
+            return Ok(());
+        }
         for item in &self.items {
-            let root = self.source_root(&item.id);
-            if self.check_file_root(&root).is_err() {
-                continue;
-            }
-            let removed = self.removed_copy(&item.id);
+            let removed = self.removed().join(&item.id);
             if !std::fs::symlink_metadata(&removed).is_ok_and(|m| m.is_dir()) {
                 continue;
             }
@@ -962,7 +895,7 @@ impl Store {
                 continue;
             }
             let files = removed.join("files");
-            let dest = if state.enabled { self.dir(item) } else { self.disabled_copy(&item.id) };
+            let dest = if state.enabled { self.dir(item) } else { self.disabled().join(&item.id) };
             let pending = std::fs::symlink_metadata(&files).is_ok();
             let copy = if pending { &files } else { &dest };
             if !std::fs::symlink_metadata(copy).is_ok_and(|m| m.is_dir()) || state.commit != item.commit || !self.verify_item(copy, item) {
@@ -978,7 +911,7 @@ impl Store {
                 std::fs::create_dir_all(dest.parent().ok_or("Invalid tool folder")?).map_err(|e| e.to_string())?;
                 retry_busy(|| std::fs::rename(&files, &dest)).map_err(|e| e.to_string())?;
             }
-            let mut ledger = self.initial_ledger()?;
+            let mut ledger = self.installed();
             ledger.insert(item.id.clone(), state.commit.clone());
             self.write_ledger(&ledger).map_err(|e| e.to_string())?;
             let mut selection = self.read_selection().ok_or("Could not read catalog switches")?;
@@ -1001,12 +934,10 @@ impl Store {
         if !valid_id(id) {
             return None;
         }
-        let root = self.source_root(id);
-        let removed = self.removed_copy(id);
-        if self.check_file_root(&root).is_err()
-            || [root.join("removed"), removed.clone()]
-                .iter()
-                .any(|path| !std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink()))
+        let removed = self.removed().join(id);
+        if [self.root.clone(), self.removed(), removed.clone()]
+            .iter()
+            .any(|path| !std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink()))
         {
             return None;
         }
@@ -1026,18 +957,15 @@ impl Store {
             _ => return Err("Could not read removed tools".into()),
         }
         self.recover_restores()?;
-        for root in self.file_roots() {
-            self.check_file_root(&root)?;
-            for entry in entries(&root.join("removed")).ok_or("Could not read removed tools")? {
-                if !entry.file_type().is_ok_and(|kind| kind.is_dir() && !kind.is_symlink()) {
-                    return Err("Could not read the removal receipt".into());
-                }
-                let state: Removed = small_file(&entry.path().join("state.json"))
-                    .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-                    .ok_or("Could not read the removal receipt")?;
-                if !state.agent {
-                    self.discard_at(&root, &entry.path()).map_err(|e| e.to_string())?;
-                }
+        for entry in entries(&self.removed()).ok_or("Could not read removed tools")? {
+            if !entry.file_type().is_ok_and(|kind| kind.is_dir() && !kind.is_symlink()) {
+                return Err("Could not read the removal receipt".into());
+            }
+            let state: Removed = small_file(&entry.path().join("state.json"))
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .ok_or("Could not read the removal receipt")?;
+            if !state.agent {
+                self.discard(&entry.path()).map_err(|e| e.to_string())?;
             }
         }
         self.refresh_ready();
@@ -1048,10 +976,7 @@ impl Store {
     pub fn clear_removed(&self) -> Result<(), String> {
         let _store = lock();
         self.recover_restores()?;
-        for root in self.file_roots() {
-            self.check_file_root(&root)?;
-            self.discard_at(&root, &root.join("removed")).map_err(|e| e.to_string())?;
-        }
+        self.discard(&self.removed()).map_err(|e| e.to_string())?;
         self.refresh_ready();
         Ok(())
     }
@@ -1549,9 +1474,7 @@ async fn download_sources(store: &Store, item: &Item, loopback: Option<&str>) ->
         None => None,
     };
     let loopback = loopback.as_deref();
-    let root = store.download_root(item)?;
-    store.check_file_root(&root)?;
-    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&store.root).map_err(|e| e.to_string())?;
     let mut downloaded = Downloaded { files: Vec::new(), packages: BTreeMap::new(), slot: None, temporary: None };
     let mut sources = vec![(None, item.clone())];
     if let Some(definition) = store.plugin_definition(&item.id) {
@@ -1562,10 +1485,10 @@ async fn download_sources(store: &Store, item: &Item, loopback: Option<&str>) ->
             if id.is_some() {
                 return Err("error.tools.tree".into());
             }
-            npm::download_tree(server, &root, loopback, &mut downloaded).await?;
+            npm::download_tree(server, &store.root, loopback, &mut downloaded).await?;
             continue;
         }
-        let part = root.join(format!(".download-{}", uuid::Uuid::new_v4()));
+        let part = store.root.join(format!(".download-{}", uuid::Uuid::new_v4()));
         let url = match loopback {
             Some(origin) => source.archive_path(origin),
             None => source.archive_url(),
@@ -1669,55 +1592,6 @@ pub async fn install_for_agent(store: &Store, item: &Item, source: Option<&str>)
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn storage_choice_routes_new_tool_downloads_and_keeps_existing_installs() {
-        let temp = tempfile::tempdir().unwrap();
-        let temp = temp.path().canonicalize().unwrap();
-        let data = temp.join("profile");
-        let external = temp.join("Faber-storage");
-        std::fs::create_dir(&external).unwrap();
-        std::fs::write(external.join(".faber-owner"), data.to_str().unwrap()).unwrap();
-        let zip = archive(&temp, SKILL);
-        let digest = expected();
-        let old = item(&digest);
-        let mut fresh = old.clone();
-        fresh.id = "other-skill".into();
-        let audio = runtime::fixture("audio", b"audio fixture", None);
-        let items = vec![old.clone(), fresh.clone(), audio.clone()];
-        let store = Store::with_catalog(&data, items.clone());
-        store.install_from(&old, &zip).unwrap();
-        let chosen = store.with_new_storage(Some(&external));
-        let downloads = external.join("tools");
-        assert_eq!(chosen.download_root(&old).unwrap(), data.join("tools"));
-        assert_eq!(chosen.download_root(&fresh).unwrap(), downloads);
-        assert_eq!(chosen.download_root(&audio).unwrap(), downloads);
-        chosen.install_from(&fresh, &zip).unwrap();
-        let reset = Store::with_catalog(&data, items);
-        assert_eq!(reset.dir(&fresh), downloads.join("plugin/skills").join(&fresh.id));
-        assert_eq!(reset.installed().len(), 2);
-        assert!(reset.dir(&old).starts_with(data.join("tools")));
-        assert!(reset.dir(&fresh).join("SKILL.md").is_file());
-        reset.set_enabled(&fresh.id, false).unwrap();
-        assert!(downloads.join("disabled").join(&fresh.id).is_dir());
-        reset.set_enabled(&fresh.id, true).unwrap();
-        reset.remove(&fresh.id).unwrap();
-        assert!(downloads.join("removed").join(&fresh.id).is_dir());
-        reset.restore(&fresh.id).unwrap();
-        assert_eq!(reset.installed().len(), 2);
-        let disconnected = temp.join("detached");
-        std::fs::rename(&external, &disconnected).unwrap();
-        assert_eq!(chosen.download_root(&audio), Err("error.storage.unreachable".into()));
-        assert_eq!(
-            reset.download_root(&fresh),
-            Err("error.storage.unreachable".into()),
-            "an older install reserves its location while its drive is away, and says why"
-        );
-        assert!(reset.location_unavailable(&fresh.id), "Replace in Catalog says the same");
-        reset.remove(&old.id).unwrap();
-        std::fs::rename(disconnected, &external).unwrap();
-        assert_eq!(reset.installed().keys().collect::<Vec<_>>(), [&fresh.id]);
-    }
 
     /// A GitHub-shaped archive: everything under `repo-commit/`.
     fn archive(dir: &Path, files: &[(&str, &[u8])]) -> PathBuf {

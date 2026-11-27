@@ -398,12 +398,7 @@ pub fn sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
 
 fn protect_data(profile: &mut Value, root: &Path) {
     let root = normal(&root.canonicalize().unwrap_or_else(|_| root.to_path_buf()).to_string_lossy());
-    let profiles = crate::store::Store::profile_data_roots();
-    for data in &profiles {
-        let choice = data.with_file_name(crate::storage::CHOICE_FILE);
-        profile["filesystem"][unified(&choice.to_string_lossy())] = "read".into();
-    }
-    for data in profiles.into_iter().chain(connected_external_roots()) {
+    for data in crate::store::Store::data_roots() {
         let data = unified(&data.to_string_lossy());
         profile["filesystem"][&data] = "read".into();
         // A more specific workspace grant must not reopen a project nested in the data folder.
@@ -417,10 +412,6 @@ fn protect_data(profile: &mut Value, root: &Path) {
             }
         }
     }
-}
-
-fn connected_external_roots() -> impl Iterator<Item = PathBuf> {
-    crate::store::Store::external_data_roots().into_iter().filter(|path| std::fs::symlink_metadata(path).is_ok())
 }
 
 /// Keep guarded modes' disk reads and native approvals, adding only the Store's write exclusion.
@@ -561,7 +552,7 @@ pub fn denies_data_write(mode: crate::model::Permissions, tool: &str, input: &Va
     if mode == crate::model::Permissions::FullAccess {
         return false;
     }
-    let roots = write_roots();
+    let roots: Vec<String> = crate::store::Store::data_roots().iter().map(|p| normal(&p.to_string_lossy())).collect();
     if roots.is_empty() {
         return false;
     }
@@ -574,21 +565,6 @@ pub fn denies_data_write(mode: crate::model::Permissions, tool: &str, input: &Va
         return true;
     }
     names(input, cwd.as_deref(), &roots)
-}
-
-/// The Stores, and the storage choice beside each profile (outside its roots): a path check also catches the choice's short
-/// name or a link to it. Empty while no Store is open.
-fn write_roots() -> Vec<String> {
-    let mut roots: Vec<String> = crate::store::Store::data_roots().iter().map(|p| normal(&p.to_string_lossy())).collect();
-    if roots.is_empty() {
-        return roots;
-    }
-    roots.extend(
-        crate::store::Store::profile_data_roots()
-            .iter()
-            .map(|data| normal(&data.with_file_name(crate::storage::CHOICE_FILE).to_string_lossy())),
-    );
-    roots
 }
 
 /// Does this request name a path inside one of `roots` (normalized), wherever it sits in the input (a path, a command line)?
@@ -867,19 +843,10 @@ fn guarded_argv(
         for metadata in [".claude", ".codex", ".mcp.json", ".git", ".faber/verify.local.json"] {
             profile["filesystem"][":workspace_roots"][metadata] = "read".into();
         }
-        let profiles = crate::store::Store::profile_data_roots().into_iter().map(|path| (path, true));
-        let external = connected_external_roots().map(|path| (path, false));
-        for (data, profile_store) in profiles.chain(external) {
+        for data in roots {
             // A missing, replaced or unresolvable Store never authorizes an unprotected command.
-            let data = if profile_store {
-                let resolved = data.canonicalize().ok()?;
-                unlinked_store(&resolved)?;
-                resolved
-            } else {
-                // MXC needs a present object to check for aliases to a denied path; the resolved path (case, junctions, a
-                // root swapped for a link) is what the workspace prefix below is compared with.
-                data.canonicalize().unwrap_or(data)
-            };
+            let data = data.canonicalize().ok()?;
+            unlinked_store(&data)?;
             let data_text = unified(data.to_str()?);
             profile["filesystem"][&data_text] = "deny".into();
             if inside(&normal(&root_text), &normal(&data_text)) {
@@ -1137,9 +1104,10 @@ pub fn child_env(root: &Path) -> Value {
 const CREDENTIAL_FOLDERS: [&str; 8] = [".ssh", ".aws", ".claude", ".codex", ".gemini", ".docker", ".azure", ".kube"];
 const CREDENTIAL_FILES: [&str; 5] = [".claude.json", ".credentials.json", ".git-credentials", ".npmrc", "hosts.yml"];
 
-/// Faber's records of the person's decisions, including the storage choice beside the profile.
-/// Their names are distinct enough to refuse agent writes and commands naming them in every mode.
-pub const FABER_RECORDS: [&str; 3] = ["decisions-kept.json", "faber-trust", crate::storage::CHOICE_FILE];
+/// Faber's own records of what the person approved, in its data folder: the kept decisions (R16) and the `faber-trust`
+/// folder of the work method. An agent that wrote one could forge the person's approval, so no agent may change them in any
+/// mode, and a command that names one is refused like a sign-in. Their names are distinct enough to match anywhere.
+pub const FABER_RECORDS: [&str; 2] = ["decisions-kept.json", "faber-trust"];
 pub const ENGINE_NOTES: [&str; 2] = ["taste.md", "lessons.md"];
 
 /// A variable the CLIs document for moving their sign-in somewhere else: the variable, whether it names a file, and the
@@ -1370,7 +1338,7 @@ pub fn credential_piece(piece: &str) -> bool {
 
 fn record_piece(piece: &str) -> bool {
     let piece = piece.split(':').next().unwrap_or_default().trim_end_matches(['.', ' ']);
-    FABER_RECORDS.iter().any(|name| name.eq_ignore_ascii_case(piece)) || ENGINE_NOTES.contains(&piece)
+    FABER_RECORDS.contains(&piece) || ENGINE_NOTES.contains(&piece)
 }
 
 /// Does a path or command name one of `FABER_RECORDS` or `ENGINE_NOTES`? What is written (a file's text, an edit's old
@@ -1862,46 +1830,6 @@ pub fn allows(root: &Path, tool: &str, input: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn storage_choice_record_refuses_full_access_writes_and_commands() {
-        use crate::model::Permissions::FullAccess;
-        let input = json!({"file_path": "C:/Users/example/AppData/Roaming/Faber-storage.json"});
-        assert!(super::denies_data_write(FullAccess, "Write", &input, None));
-        assert!(!super::denies_data_write(FullAccess, "Read", &input, None));
-        let command = json!({"command": "Set-Content ../FABER-STORAGE.JSON '{}'"});
-        assert!(super::denies_data_write(FullAccess, "PowerShell", &command, None));
-    }
-
-    #[test]
-    fn storage_choice_record_is_refused_by_path_as_well_as_by_name() {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap();
-        let _store = crate::store::Store::new(&root.join("Faber"));
-        // The path rule resolves short names and links, which the name rule cannot see.
-        let choice = super::normal(&root.join("Faber-storage.json").to_string_lossy());
-        assert!(super::write_roots().contains(&choice));
-    }
-
-    #[test]
-    fn guarded_storage_rules_skip_disconnected_roots_and_protect_the_choice_file() {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap();
-        let _store = crate::store::Store::new(&root.join("Faber"));
-        let present = root.join("present/Faber-storage");
-        let absent = root.join("absent/Faber-storage");
-        std::fs::create_dir_all(&present).unwrap();
-        let _present = crate::store::Store::protect_external_storage(present.clone());
-        let _absent = crate::store::Store::protect_external_storage(absent.clone());
-        let rules: Vec<_> = super::connected_external_roots().collect();
-        assert!(rules.contains(&present));
-        assert!(!rules.contains(&absent));
-        let config = super::data_sandbox_config(&root, true);
-        let fs = &config[&format!("permissions.{}", config["default_permissions"].as_str().unwrap())]["filesystem"];
-        let choice = super::unified(root.join("Faber-storage.json").to_str().unwrap());
-        assert_eq!(fs[choice], "read");
-        assert!(fs.get(super::unified(absent.to_str().unwrap())).is_none());
-    }
-
     #[test]
     fn guarded_commands_can_check_a_live_store_with_its_budget_lock_held() {
         let dir = tempfile::tempdir().unwrap();

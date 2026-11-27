@@ -96,7 +96,6 @@ async fn run() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let hidden = std::env::var("FABER_HIDDEN").is_ok_and(|v| v == "1");
-    let storage_choice = faber_host::StorageChoice::open(&data_dir, hidden);
 
     // One writer, so two lines never mix on stdout.
     let (out, lines) = mpsc::unbounded_channel::<(String, Option<std::sync::mpsc::Sender<()>>)>();
@@ -142,7 +141,6 @@ async fn run() -> ExitCode {
         (pane, home)
     });
     let options = StartOptions {
-        storage_choice,
         data_dir,
         hidden,
         runtime: tokio::runtime::Handle::current(),

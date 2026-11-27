@@ -1840,42 +1840,9 @@ check('storage: pressing every control of the view reads and asks nothing, and a
   }
 });
 
-check('storage: the new destination is shown and Reset restores the default folder', async () => {
-  const saved = { storageChoice: api.storageChoice, storageChoose: api.storageChoose, storageUsage: api.storageUsage };
-  const initial = { folder: 'D:/Faber-storage', custom: true, locked: false, notice: null, ask: false };
-  const resetTo = { ...initial, folder: 'C:/Profile/Faber', custom: false };
-  const calls: boolean[] = [];
-  api.storageChoice = async () => initial;
-  api.storageChoose = async (reset) => { calls.push(reset); return reset ? resetTo : null; };
-  api.storageUsage = async () => STORAGE;
-  const view = storageView();
-  try {
-    view.host.querySelector<HTMLButtonElement>('#set-storage')!.click();
-    await tick();
-    const row = view.host.querySelector('[data-opt="set-storage-location"]')!;
-    ok(row.textContent?.includes(en['set.storage.location']));
-    equal(row.querySelector('.st-hint')?.textContent, initial.folder);
-    const buttons = [...row.querySelectorAll<HTMLButtonElement>('.st-ctl button')];
-    const [change, reset] = buttons;
-    equal(change.textContent, en['set.storage.change']);
-    equal(reset.textContent, en['set.storage.reset']);
-    change.click();
-    await tick();
-    equal(row.querySelector('.st-hint')?.textContent, initial.folder, 'cancelling keeps the current folder');
-    reset.click();
-    await tick();
-    deepEqual(calls, [false, true]);
-    equal(row.querySelector('.st-hint')?.textContent, resetTo.folder);
-    equal(reset.getAttribute('aria-disabled'), 'true');
-  } finally {
-    Object.assign(api, saved);
-    view.stop();
-  }
-});
-
 check('storage: every language has the view written by hand, and the closed line fits its row', () => {
   const keys = Object.keys(en).filter((key) => key.startsWith('set.storage') || key === 'set.group.storage') as (keyof typeof en)[];
-  equal(keys.length, 28);
+  equal(keys.length, 24);
   for (const [code, words] of Object.entries({ ptBR, es, fr, de })) {
     for (const key of keys) ok(typeof words[key] === 'string' && words[key].length > 0, `${code}: ${key}`);
     for (const key of ['set.storage', 'set.storage.kind.copies', 'set.storage.kind.rewind', 'set.storage.sweep', 'set.storage.unknown'] as const) ok(words[key] !== en[key], `${code}: ${key} is not left in English`);

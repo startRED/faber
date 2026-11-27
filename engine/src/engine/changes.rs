@@ -25,10 +25,10 @@ impl Core {
             return None;
         };
         let (me, conv, sid, cwd) = (self.me.clone(), conv.to_string(), live.sid, live.cwd.clone());
-        let data = self.copy_storage(conv.as_str(), &copy).filter(|root| self.copy_storage_available(root));
+        let data = self.opts.data_dir.clone();
         Some(self.opts.runtime.spawn_blocking(move || {
             let git = (|| {
-                let folder = crate::project::copy::sandbox_folder(data.as_deref()?, &conv, &copy, &cwd)?;
+                let folder = crate::project::copy::sandbox_folder(&data, &conv, &copy, &cwd)?;
                 crate::permissions::checked_folder(&folder)?;
                 let mut git = run()?;
                 serde_json::to_value(crate::changes::recovery_snapshot(&mut *git, &copy)).ok()

@@ -2,11 +2,6 @@
 
 How the first-run steps and the tutorial look and behave. The Settings screen is in [settings.md](settings.md).
 
-- On a new installation with no saved data, when the default drive has less than 10 GB free, a modal offers Change and
-  Keep default before the accounts. The account setup must still be due and there must be no saved sharing choice.
-  Change opens the system folder picker for new project copies and catalog installs. The choice also lives in
-  Settings > General > Storage.
-
 - When the build has a sharing endpoint and no answer is saved, a modal first asks whether to share anonymous usage and
   crash information. Both buttons have the same appearance and neither is selected. A failed save shows the usual error
   and opens the next step; the question returns on the next start. This also applies to existing installations. Without an

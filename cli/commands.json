@@ -2633,28 +2633,6 @@
     "about": "Measures the data folder and the free space on its drive, in bytes."
   },
   {
-    "name": "storage_choose",
-    "args": [
-      [
-        "reset",
-        "bool"
-      ]
-    ],
-    "inputSchema": {
-      "properties": {
-        "reset": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "reset"
-      ],
-      "type": "object"
-    },
-    "kind": "write",
-    "reach": "person"
-  },
-  {
     "name": "save_settings",
     "args": [
       [

@@ -1,6 +1,5 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
-import { api, type Project, type StorageChoice, type StorageUsage } from './api.ts';
-import { Opt } from './controls.tsx';
+import { api, type Project, type StorageUsage } from './api.ts';
 import { bytes, failureText, t } from './i18n.ts';
 
 // How much disk Faber's data folder takes, inside General > Storage. It measures when its fold opens (this component is
@@ -10,40 +9,6 @@ import { bytes, failureText, t } from './i18n.ts';
 
 type Kind = keyof StorageUsage['byKind'];
 const KINDS: Kind[] = ['copies', 'reports', 'tools', 'rewind', 'helperTranscripts', 'conversations', 'rest'];
-
-export function StorageLocation() {
-  const [choice, setChoice] = createSignal<StorageChoice>();
-  const [busy, setBusy] = createSignal(false);
-  const [error, setError] = createSignal<unknown>();
-  onMount(() => void api.storageChoice().then(setChoice, setError));
-  const change = async (reset: boolean) => {
-    if (busy()) return;
-    setBusy(true);
-    setError(undefined);
-    try {
-      const saved = await api.storageChoose(reset);
-      if (saved) setChoice(saved);
-    } catch (failure) {
-      setError(failure);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div class="storage-location" aria-busy={busy()}>
-      <Opt id="set-storage-location" label={t('set.storage.location')} hint={choice()?.folder} more={t('set.storage.locationMore')}>
-        <button type="button" class="btn" aria-disabled={busy() || !choice() || choice()?.locked} onClick={() => {
-          if (choice() && !choice()?.locked) void change(false);
-        }}>{t('set.storage.change')}</button>
-        <button type="button" class="btn" aria-disabled={busy() || !choice()?.custom || choice()?.locked} onClick={() => {
-          if (choice()?.custom && !choice()?.locked) void change(true);
-        }}>{t('set.storage.reset')}</button>
-      </Opt>
-      <Show when={choice()?.notice}>{(key) => <p class="hint store-note" role="status">{t(key())}</p>}</Show>
-      <Show when={error()}>{(failure) => <p class="note err store-note" role="alert">{failureText(failure())}</p>}</Show>
-    </div>
-  );
-}
 
 /** Biggest first, unknown sizes after the known ones; `last` stays at the end whatever its size. */
 const order = <T,>(rows: [T, number | null][], last?: T) =>

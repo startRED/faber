@@ -214,7 +214,7 @@ impl Core {
 
     pub(super) fn catalog_store(&self) -> crate::tools::Store {
         if let Some(store) = &self.catalog_store {
-            return store.clone().with_new_storage(self.new_storage.as_deref());
+            return store.clone();
         }
         unreachable!("the engine retains its catalog store")
     }

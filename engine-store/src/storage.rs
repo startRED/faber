@@ -408,41 +408,6 @@ impl Folder {
     }
 }
 
-pub const CHOICE_FILE: &str = "Faber-storage.json";
-
-/// The profile records only absolute locations in the app's own directory namespace.
-pub fn external_root_name(root: &Path) -> bool {
-    use std::path::Component;
-
-    let shaped = root.is_absolute()
-        && root.file_name().is_some_and(|name| name == "Faber-storage")
-        && !root.components().any(|part| matches!(part, Component::ParentDir));
-    #[cfg(windows)]
-    {
-        use std::path::Prefix;
-        shaped
-            && matches!(root.components().next(), Some(Component::Prefix(prefix))
-                if matches!(prefix.kind(), Prefix::Disk(letter) | Prefix::VerbatimDisk(letter)
-                    if !faber_winproc::is_remote_drive(letter as char)))
-    }
-    #[cfg(not(windows))]
-    shaped
-}
-
-/// A dedicated external folder belongs to this profile only when its marker matches.
-pub fn owns_external_root(data: &Path, root: &Path) -> bool {
-    use std::io::Read;
-
-    let marker = root.join(".faber-owner");
-    let Some(expected) = data.to_str() else { return false };
-    if !fs::symlink_metadata(&marker).is_ok_and(|meta| meta.is_file() && meta.len() == expected.len() as u64) {
-        return false;
-    }
-    let mut bytes = Vec::new();
-    fs::File::open(marker).and_then(|file| file.take(expected.len() as u64 + 1).read_to_end(&mut bytes)).is_ok()
-        && bytes == expected.as_bytes()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

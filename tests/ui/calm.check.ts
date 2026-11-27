@@ -411,7 +411,7 @@ check('calm: a helper sent to the background is a ring and a running one a dot, 
 });
 
 // The shell around the work, mounted whole.
-async function shell(vendors: AppState['vendors'], conversation: Conversation, run: (root: HTMLElement) => Promise<void> | void, extra: Partial<AppState> = {}) {
+async function shell(vendors: AppState['vendors'], conversation: Conversation, run: (root: HTMLElement) => Promise<void> | void) {
   const originalOpen = api.open;
   const originalClock = api.setClock;
   const stored = localStorage.getItem('faber.place');
@@ -424,7 +424,6 @@ async function shell(vendors: AppState['vendors'], conversation: Conversation, r
       vars: themes.css.base, scheme: 'dark', motion: 'none', effects, checks: [], notices: [],
       appearance: { base: 'sala', ground: 'sala', accent: '#f3f0e8', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects },
     },
-    ...extra,
   };
   api.open = async () => conversation;
   api.setClock = async () => {};
@@ -460,15 +459,6 @@ check('calm: a conversation opens with no permission sentence on top and no mode
     equal(root.querySelector('.composer .effort-hint'), null);
     ok(!/works without asking|asks before running/i.test(root.querySelector('.col')!.textContent!), 'no permission words in the conversation');
   });
-});
-
-check('calm: a storage choice Faber could not read says so at start, not that the folder is missing', async () => {
-  for (const notice of ['reason.storage.unreadable', 'reason.storage.default'] as const) {
-    const storageChoice = { folder: 'C:/Faber', custom: false, locked: false, notice, ask: false };
-    await shell([], chat(), (root) => {
-      equal(root.querySelector('.toast')?.textContent, t(notice), notice);
-    }, { storageChoice });
-  }
 });
 
 check('calm: with no AI connected there is no composer to type in', async () => {
