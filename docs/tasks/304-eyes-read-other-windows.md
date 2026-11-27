@@ -40,3 +40,13 @@ embedded window of a blocked program can show; `PrintWindow` and `AccessibleObje
 the hung check; a handle recycled inside the same process keeps its consent; the key's epoch is read after the window
 lookup; the pending card stores the full caption before consent; `is_self_change` omits the `faber.eyes.*` cards; and
 the final-reply race and same-process reuse have no test.
+
+State (2026-11-27, evening): a third round on the branch `night/eyes-text-only` dropped pictures (text through
+accessibility only) and fixed the nine points above. Its reviews (Codex, Antigravity) still find: the final check runs
+before the reply enters the driver queue; a handle reused by the same process, thread and class keeps its consent; a UWP
+frame is named by the class of its one foreign child, not its package identity; a tree remembers an allowed program by
+process id, and the Chromium warm-up contacts child windows without an owner check; looking up one window reads every
+top-level caption, blocked programs included, and can hang on Faber's own window; the accessibility read can outlive its
+deadline; lower-casing breaks the prefix match for some letters (final sigma); and a lookup can finish on the next turn
+or after the turn ended. The fifth and seventh points ask for a design change: read windows in a separate process that
+can be stopped. That is the owner's call before a fourth attempt.
