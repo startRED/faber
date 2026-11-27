@@ -1,9 +1,10 @@
 import { type Accessor, createEffect, createResource, createSignal, For, Index, on, onCleanup, onMount, Show } from 'solid-js';
-import { api, errorText, type Message, type RunAppView, type SiteTab, type SiteTabs, type SiteTabStep, type ToolUse } from './api.ts';
+import { api, errorText, type Message, type RunAppView, type SitePick, type SiteTab, type SiteTabs, type SiteTabStep, type ToolUse } from './api.ts';
+import { PAGE_PICK, type PagePick } from './Composer.tsx';
 import { appliedLook } from './appearance.ts';
 import { Cookies, cookieProfiles } from './Cookies.tsx';
 import { SiteExtensions } from './SiteExtensions.tsx';
-import { hasBrowserExtensions } from './shell.ts';
+import { hasBrowserExtensions, hasPagePick } from './shell.ts';
 import { type MenuItem, openMenu } from './contextmenu.ts';
 import { Icon } from './Glyphs.tsx';
 import { StateGlyph } from './icons/kinds.tsx';
@@ -428,6 +429,31 @@ function paintedCover(box: HTMLElement, departing: boolean): boolean {
   }));
 }
 
+/** Whether this shell offers pick mode (`site_pick`, only the host's pane has it); the screen's checks turn it on. */
+export const pagePick = { supported: hasPagePick };
+/** How long pick mode lasts without a pick, in ms (`act.js` holds the same limit in the page). */
+const PICK_LIMIT = 60_000;
+
+/** What the person picked on the page, as the composer of conversation `owner` takes it: the words written into the message
+ * and the picture beside them. Answers whether a composer took it. */
+export function sendPick(owner: string, answer: SitePick): boolean {
+  const p = answer.picked;
+  if (!p) return false;
+  const what = `${p.role}${p.name ? ` "${p.name}"` : ''}`;
+  // The page's words are data, framed as such: one labelled block of JSON, whose quotes and backticks cannot end it.
+  const fields = JSON.stringify({ page: p.page, role: p.role, name: p.name, text: p.text, selector: p.selector }, null, 2).replace(/`/g, '\\u0060');
+  const lines = [t('site.pick.heading'), '```json', fields, '```'];
+  const short = what.length > 40 ? `${what.slice(0, 39)}…` : what;
+  const detail: PagePick = {
+    conversationId: owner,
+    name: t('site.pick.name', { what: short }),
+    block: lines.join('\n'),
+    ...(answer.picture ? { image: { mediaType: 'image/jpeg', base64: answer.picture } } : {}),
+  };
+  document.dispatchEvent(new CustomEvent(PAGE_PICK, { detail }));
+  return detail.taken === true;
+}
+
 /** The page in the right column: Faber's browser sits over this box, measured here, and leaves when the box goes. Every
  * move of the box moves it, and it is placed again whenever the window changes size. The address field above it takes
  * the person anywhere on the web; with no page yet, only the field shows. */
@@ -734,6 +760,50 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
   ].map((listening) => listening.catch(() => () => {}));
   onCleanup(() => listening.forEach((stopping) => void stopping.then((unlisten) => unlisten()).catch(() => {})));
 
+  // Pick mode (task 205): the page outlines what is under the pointer and a click puts it in this conversation's composer
+  // instead of reaching the page. The screen waits for the pick a few seconds at a time; the page (Esc there), the button,
+  // Esc here, another page or anything that takes the page out of view ends it.
+  const [picking, setPicking] = createSignal(false);
+  const [pickRefused, setPickRefused] = createSignal(false);
+  let pickTurn = 0;
+  let pickOwner = '';
+  const endPick = (tell: boolean) => {
+    if (!picking()) return;
+    pickTurn++;
+    setPicking(false);
+    if (tell) void api.sitePick(pickOwner, false).catch(() => {});
+  };
+  const startPick = async () => {
+    const turn = ++pickTurn;
+    const owner = (pickOwner = conversation());
+    setPickRefused(false);
+    setPicking(true);
+    // However the page treats Esc, pick mode ends by itself a minute after it started.
+    const until = Date.now() + PICK_LIMIT;
+    while (turn === pickTurn) {
+      if (Date.now() > until) return endPick(true);
+      const answer: SitePick = await api.sitePick(owner, true).catch(() => ({ ended: true }));
+      if (turn !== pickTurn) return;
+      if (answer.waiting) continue;
+      endPick(false);
+      if (answer.picked && !sendPick(owner, answer)) setPickRefused(true);
+    }
+  };
+  createEffect(on([live, conversation, away, blank, front], () => (endPick(true), setPickRefused(false)), { defer: true }));
+  onCleanup(() => endPick(true));
+  createEffect(() => {
+    if (!picking()) return;
+    // Esc anywhere in the screen ends pick mode first, before it reaches anything else that Esc closes.
+    const escape = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      endPick(true);
+    };
+    window.addEventListener('keydown', escape, true);
+    onCleanup(() => window.removeEventListener('keydown', escape, true));
+  });
+
   /** Does `kind` to the tabs; the tab in front then shows. Closing the last tab closes the pane. */
   // The log of the agent's steps stays with its tab while the person looks at another.
   let agentSteps = props.site.steps;
@@ -950,6 +1020,18 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
             </Show>
             <span class="site-load" aria-hidden="true" />
           </div>
+          <Show when={pagePick.supported}>
+            <button
+              class="iconbtn site-pick"
+              aria-pressed={picking()}
+              aria-label={t('site.pick')}
+              title={t('site.pick')}
+              disabled={blank() || !!picked()}
+              onClick={() => (picking() ? endPick(true) : void startPick())}
+            >
+              <Icon name="pick" />
+            </button>
+          </Show>
           <button class="iconbtn site-more" aria-haspopup="menu" aria-label={t('site.more')} title={t('site.more')} onClick={more}>
             <Icon name="more" />
           </button>
@@ -964,6 +1046,15 @@ export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: bo
             return (url: string) => { if (before === navigation) void go(url); };
           }}
         />}
+      </Show>
+      <Show when={picking()}>
+        <div class="site-preview site-pick-hint" role="status">
+          <span>{t('site.pick.hint')}</span>
+          <button class="btn" onClick={() => endPick(true)}>{t('site.pick.stop')}</button>
+        </div>
+      </Show>
+      <Show when={pickRefused()}>
+        <p class="side-meta bad" role="alert">{t('site.pick.noComposer')}</p>
       </Show>
       <Show when={!blank() && !picked() && sizes()?.now}>
         <div class="site-preview">

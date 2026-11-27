@@ -888,6 +888,8 @@ html.sizing, html.sizing * { cursor: col-resize !important; user-select: none !i
 .site-bar { display: flex; align-items: center; gap: 2px; padding: 0 12px 8px; container-type: inline-size; }
 .site-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 0 12px 8px; color: var(--ink-2); font-size: var(--fs-xs); }
 .site-preview .site-fit { font-size: inherit; }
+/* Pick mode on: the button stays lit while the page takes the pointer (task 205). */
+.site-bar .site-pick[aria-pressed='true'] { background: var(--accent-soft); color: var(--accent-text); }
 .site-run-app:empty, .site-run-app > .site-preview:empty { display: none; }
 .site-run-app pre { flex-basis: 100%; min-width: 0; max-height: 7rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
 .site-run-confirm > span { flex-basis: 100%; }
