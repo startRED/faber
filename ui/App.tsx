@@ -804,6 +804,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const sideDetails = () => openedDetails() === current()?.id && current()?.area === 'project' ? current() : undefined;
   // The project map (task 206): the rooms of the project on screen, beside its work.
   const sideMap = () => openedMap() === current()?.id && current()?.area === 'project' ? current() : undefined;
+  const conversationNames = createMemo(() => Object.fromEntries(state().conversations.map((conversation) => [conversation.id, conversation.title])));
+  const openPlanConversation = (id: string) => {
+    const to = state().conversations.find((conversation) => conversation.id === id);
+    if (to) openSummary(to);
+  };
   const sideChanges = () => changesOpen() && changesOpen() === current()?.id ? changesOpen() : undefined;
   const canReview = () => {
     const c = current();
@@ -1927,6 +1932,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       }}
       onClose={closeColumn}
       details={sideDetails() ? { conversationId: sideDetails()!.id, messages: sideDetails()!.messages, copy: current()?.id === place().id ? sideDetails()!.copy : undefined,
+        plan: sideDetails()!.plan?.parts?.length ? sideDetails()!.plan : undefined, conversationNames: conversationNames(), onOpenConversation: openPlanConversation,
         background: state().background?.items ?? [], changes: { id: sideDetails()!.id, files: changeList()?.files ?? [], loading: changes.loading,
           incomplete: changeList()?.incomplete, loadingMore: loadingMoreChanges(), onMore: () => void moreChanges() } } : undefined}
       map={sideMap() ? {
@@ -2358,7 +2364,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                     background={state().background?.items ?? []}
                                     rewindNotice={c().rewindNotice}
                                     onRewind={() => go(place())}
-                                    conversationNames={Object.fromEntries(state().conversations.map((conversation) => [conversation.id, conversation.title]))}
+                                    conversationNames={conversationNames()}
                                     queued={c().queued}
                                     noConnectedAccounts={state().vendors.length === 0}
                                     busy={checking()}
@@ -2384,10 +2390,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                       void go({ ...place(), id: to.conversationId }, index);
                                     }}
                                     plan={c().plan}
-                                    onOpenConversation={(id) => {
-                                      const to = state().conversations.find((conversation) => conversation.id === id);
-                                      if (to) openSummary(to);
-                                    }}
+                                    onOpenConversation={openPlanConversation}
                                     onReply={(text) => void send({ text, images: [], files: [] })}
                                     onActChange={(target) => {
                                       if (target === 'composerModel') document.querySelector<HTMLButtonElement>('.composer .model-chip')?.focus();

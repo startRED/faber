@@ -5,9 +5,12 @@
 
 pub use crate::conversation_state::first_sentence;
 use crate::conversation_state::line;
-use crate::model::{ConclusionSummary, Estimate, Outcome, Plan, PlanContract, PlanSize, PlanStep, Requirement, StepState, WrapUp};
+use crate::model::{
+    ConclusionSummary, Estimate, Outcome, PartState, Plan, PlanContract, PlanPart, PlanSize, PlanStep, Requirement, StepState, WrapUp,
+};
 pub use crate::project::memory::{FollowUp, follow_up_ready};
 use serde_json::{Value, json};
+use std::collections::HashSet;
 
 /// The names both drivers give the calls, whatever the CLI calls them.
 pub const PLAN_TOOL: &str = "Plan";
@@ -24,6 +27,8 @@ pub const CLAUDE_WRAP_UP: &str = "mcp__faber__wrap_up";
 
 /// Steps one plan holds at most.
 pub const MAX_STEPS: usize = 12;
+const MAX_PARTS: usize = 60;
+const MAX_AREAS: usize = 8;
 /// The longest a step, a status, a recap, a question and a button are, in characters; longer ones are cut, never refused.
 const STEP_CHARS: usize = 80;
 const EVIDENCE_CHARS: usize = 200;
@@ -49,8 +54,9 @@ pub const CYCLE: &str = "error.plan.cycle";
 pub const NO_TEXT: &str = "error.plan.noText";
 pub const RUNNING: &str = "error.plan.running";
 pub const NO_EVIDENCE: &str = "error.plan.noEvidence";
+pub const BAD_BEFORE: &str = "error.plan.badBefore";
 
-const PLAN_DESCRIPTION: &str = "You can show a persistent checklist of up to 12 short imperative steps; update it when it changes. Keep exactly one in_progress while working. Every done step or advance needs evidence of what you ran or saw. Never repeat the list in text. Link a started conversation to its step. For big work give an estimate; for visible or behavior changes give a contract in the person's language, except questions and small fixes.";
+const PLAN_DESCRIPTION: &str = "You can show a persistent checklist of up to 12 short imperative steps; update it when it changes. Keep exactly one in_progress while working. Every done step or advance needs evidence of what you ran or saw. Never repeat the list in text. Link a started conversation to its step. For big work give an estimate; for visible or behavior changes give a contract in the person's language, except questions and small fixes. For work the person can use, list parts in their words and group them by area once at the start, then send only changes by id.";
 
 const STATUS_DESCRIPTION: &str = "Shows the person, in 3 to 6 words (at most 50 characters) and their language, what you are doing now, with no tool, command or file names: \"Fixing the login page\". You can use it when substantial work starts or the phase changes.";
 
@@ -75,6 +81,26 @@ fn plan_schema() -> Value {
                         "conversation": { "type": "string", "description": "Id of the conversation you started for this step." }
                     },
                     "required": ["text", "state"],
+                    "additionalProperties": false
+                }
+            },
+            "parts": {
+                "type": "array", "maxItems": MAX_PARTS,
+                "description": "Changed parts by id. A new part needs area, name and state. At most 8 areas.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "Short, stable id." },
+                        "area": { "type": "string", "description": "Up to 30 characters." },
+                        "name": { "type": "string", "description": "Up to 60 characters." },
+                        "state": { "type": "string", "enum": ["missing", "now", "done", "redo"] },
+                        "example": { "type": "string", "description": "A plain example, up to 120 characters." },
+                        "why": { "type": "string", "description": "Required for redo or removal, up to 120 characters." },
+                        "evidence": { "type": "string", "description": "Required when marking done, up to 200 characters." },
+                        "before": { "type": "string", "description": "A browse call id with a saved picture in this conversation." },
+                        "removed": { "type": "boolean", "description": "Keep this part as a ghost with its reason." }
+                    },
+                    "required": ["id"],
                     "additionalProperties": false
                 }
             },
@@ -275,15 +301,110 @@ fn no_evidence(id: &str, text: &str) -> String {
     format!("{NO_EVIDENCE}: {who}. Marking a step done needs evidence: what you ran or looked at that shows it is done.")
 }
 
-/// The plan after a `plan` call, from the one before: a new list replaces it, `advance` moves it one step on. At most one
-/// step is in progress (the first one the list marks), and a list with no step clears the plan. Err says what to fix: a
-/// list whose ids, files, waits or evidence are wrong is refused whole with an `error.plan.*` key, never trimmed to something else.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PartChange {
+    id: String,
+    area: Option<String>,
+    name: Option<String>,
+    state: Option<PartState>,
+    example: Option<String>,
+    why: Option<String>,
+    evidence: Option<String>,
+    before: Option<String>,
+    removed: Option<bool>,
+}
+
+fn merge_parts(before: Option<&Plan>, input: &Value, at: u64) -> Result<Vec<PlanPart>, String> {
+    let mut parts = before.map_or_else(Vec::new, |p| p.parts.clone());
+    let Some(changes) = input.get("parts") else { return Ok(parts) };
+    let changes = changes.as_array().ok_or("error.plan.badParts: send parts as a list")?;
+    if changes.len() > MAX_PARTS {
+        return Err(format!("error.plan.tooManyParts: keep at most {MAX_PARTS} parts"));
+    }
+    let mut seen = HashSet::new();
+    for change in changes {
+        if !change["id"].as_str().is_some_and(valid_id) {
+            return Err(format!("{BAD_ID}: {}", line(&change["id"].to_string(), ID_CHARS)));
+        }
+        let change: PartChange = serde_json::from_value(change.clone()).map_err(|err| format!("error.plan.badParts: {err}"))?;
+        let PartChange { id, area, name, state, example, why, evidence, before, removed } = change;
+        if !seen.insert(id.clone()) {
+            return Err(format!("{DUPLICATE_ID}: {id}"));
+        }
+        let index = parts.iter().position(|p| p.id == id);
+        let had = index.map(|i| &parts[i]);
+        let text = |given: Option<String>, old: Option<&String>, max| match given {
+            Some(text) => {
+                let bounded = line(&text, max);
+                let bounded = if bounded.chars().count() > max { line(&bounded, max - 1) } else { bounded };
+                Some(bounded).filter(|s| !s.is_empty())
+            }
+            None => old.cloned(),
+        };
+        let area = text(area, had.map(|p| &p.area), 30).ok_or_else(|| format!("error.plan.badParts: {id} needs an area"))?;
+        let name = text(name, had.map(|p| &p.name), 60).ok_or_else(|| format!("{NO_TEXT}: part {id} needs a name"))?;
+        let old_state = had.map(|p| p.state);
+        let mut state = state.or(old_state).ok_or_else(|| format!("error.plan.badParts: {id} needs a state"))?;
+        if old_state == Some(PartState::Done) && state == PartState::Now {
+            state = PartState::Redo;
+        }
+        let was_removed = had.is_some_and(|p| p.removed);
+        let new_reason = why.as_ref().is_some_and(|why| !why.trim().is_empty());
+        let new_proof = evidence.as_ref().is_some_and(|evidence| !evidence.trim().is_empty());
+        let why = text(why, had.and_then(|p| p.why.as_ref()), 120);
+        let evidence = text(evidence, had.and_then(|p| p.evidence.as_ref()), EVIDENCE_CHARS);
+        let removed = removed.unwrap_or(was_removed);
+        if ((removed && !was_removed) || (state == PartState::Redo && old_state != Some(state))) && !new_reason
+            || (removed || state == PartState::Redo) && why.is_none()
+        {
+            return Err(format!("error.plan.noWhy: part {id} needs a reason for redo or removal"));
+        }
+        let same_done = had.is_some_and(|p| p.state == PartState::Done && p.name == name);
+        if state == PartState::Done && (evidence.is_none() || (!same_done && !new_proof)) {
+            return Err(format!("{NO_EVIDENCE}: marking part {id} done needs evidence"));
+        }
+        let part = PlanPart {
+            id,
+            area,
+            name,
+            state,
+            why,
+            evidence,
+            removed,
+            example: text(example, had.and_then(|p| p.example.as_ref()), 120),
+            since: had.filter(|p| p.state == state).map_or(at, |p| p.since),
+            pictures: had.map_or_else(Vec::new, |p| p.pictures.clone()),
+            before: before.or_else(|| had.and_then(|p| p.before.clone())),
+        };
+        if let Some(i) = index {
+            parts[i] = part;
+        } else {
+            parts.push(part);
+        }
+    }
+    if parts.len() > MAX_PARTS {
+        return Err(format!("error.plan.tooManyParts: keep at most {MAX_PARTS} parts"));
+    }
+    if parts.iter().map(|p| &p.area).collect::<HashSet<_>>().len() > MAX_AREAS {
+        return Err(format!("error.plan.tooManyAreas: group parts in at most {MAX_AREAS} areas"));
+    }
+    Ok(parts)
+}
+
+fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().count() <= ID_CHARS && !id.contains(char::is_whitespace)
+}
+
+/// A new step list replaces the checklist, `advance` moves it one step on, and changed parts merge by id.
+/// A malformed update is refused whole. `at` is the engine's clock for the plan and its part state changes.
 pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan>, String> {
     let size = match input.get("size") {
         None => PlanSize::Small,
         Some(value) => serde_json::from_value::<PlanSize>(value.clone()).map_err(|_| "Send size as small, normal or risky.")?,
     }
     .max(before.map_or(PlanSize::Small, |p| p.size));
+    let parts = merge_parts(before, input, at)?;
     let mut steps = match input.get("steps").and_then(Value::as_array) {
         Some(list) => {
             let mut active = false;
@@ -310,9 +431,7 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
                 // No id sent: `s<position>`, so a rewrite of the same list keeps every id and waits on the position stay valid.
                 let id = match &s["id"] {
                     Value::Null => format!("s{}", steps.len() + 1),
-                    Value::String(id) if !id.is_empty() && id.chars().count() <= ID_CHARS && !id.contains(char::is_whitespace) => {
-                        id.clone()
-                    }
+                    Value::String(id) if valid_id(id) => id.clone(),
                     other => return Err(format!("{BAD_ID}: {}", line(&other.to_string(), ID_CHARS))),
                 };
                 let evidence = match state {
@@ -358,9 +477,10 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
             check_waits(&steps)?;
             steps
         }
-        None => before.map(|p| p.steps.clone()).ok_or("There is no plan yet: send the whole list in steps first.")?,
+        None if before.is_none() && input.get("parts").is_some() => Vec::new(),
+        None => before.map(|p| p.steps.clone()).ok_or("There is no plan yet: send steps or parts first.")?,
     };
-    if steps.is_empty() && size == PlanSize::Small {
+    if steps.is_empty() && parts.is_empty() && size == PlanSize::Small {
         return Ok(None);
     }
     if input.get("advance").and_then(Value::as_bool) == Some(true) {
@@ -388,7 +508,7 @@ pub fn plan(before: Option<&Plan>, input: &Value, at: u64) -> Result<Option<Plan
     } else {
         before.and_then(|p| p.contract.clone())
     };
-    Ok(Some(Plan { steps, size, raised_because: before.and_then(|p| p.raised_because.clone()), contract, at, estimate: None }))
+    Ok(Some(Plan { steps, parts, size, raised_because: before.and_then(|p| p.raised_because.clone()), contract, at, estimate: None }))
 }
 
 /// The strings of an optional list; anything that is not a string becomes "" (so the checks after refuse it), anything that
@@ -654,6 +774,114 @@ pub fn wrap_up(input: &Value) -> Result<WrapUp, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_parts_repeating_removal_keeps_the_first_reason() {
+        let plan = plan(
+            None,
+            &json!({"parts":[
+                {"id":"a","area":"Search","name":"Old route","state":"missing","removed":true,"why":"Covered by the new route"}
+            ]}),
+            1,
+        )
+        .unwrap()
+        .unwrap();
+        let next = super::plan(Some(&plan), &json!({"parts":[{"id":"a","removed":true}]}), 2).unwrap().unwrap();
+        assert_eq!(next.parts, plan.parts);
+        let restored = super::plan(Some(&next), &json!({"parts":[{"id":"a","removed":false}]}), 3).unwrap().unwrap();
+        assert!(
+            super::plan(Some(&restored), &json!({"parts":[{"id":"a","removed":true}]}), 4).unwrap_err().starts_with("error.plan.noWhy")
+        );
+    }
+
+    #[test]
+    fn plan_parts_merge_the_shared_example_without_checklist_steps() {
+        let first = plan(
+            None,
+            &json!({"parts":[
+                {"id":"search","area":"Busca","name":"Digitar na busca","state":"done","evidence":"Typed pizza, list showed 3 results"},
+                {"id":"open","area":"Busca","name":"Abrir a conversa","state":"now","example":"\"pizza\" -> looked at 40, found 3"},
+                {"id":"back","area":"Busca","name":"Voltar sem perder a busca","state":"missing"}
+            ]}),
+            10,
+        )
+        .unwrap()
+        .unwrap();
+        let first_json = json!(first);
+        assert_eq!(first_json["steps"], json!([]));
+        assert_eq!(first_json["parts"][0]["evidence"], "Typed pizza, list showed 3 results");
+        let next = plan(
+            Some(&first),
+            &json!({"steps":[],"parts":[
+            {"id":"search","state":"redo","why":"Total was wrong going from 1 to 2"}
+            ]}),
+            20,
+        )
+        .unwrap()
+        .unwrap();
+        let next_json = json!(next);
+        assert_eq!(next_json["parts"][0]["state"], "redo");
+        assert_eq!(next_json["parts"][0]["since"], 20);
+        assert_eq!(next_json["parts"][1], first_json["parts"][1]);
+        assert_eq!(next_json["parts"][2], first_json["parts"][2]);
+        let now = plan(Some(&first), &json!({"parts":[{"id":"search","state":"now","why":"Rechecking the total"}]}), 20).unwrap().unwrap();
+        assert_eq!(now.parts[0].state, PartState::Redo);
+        assert!(serde_json::from_value::<Plan>(json!({"steps":[],"at":5})).unwrap().parts.is_empty());
+    }
+
+    #[test]
+    fn plan_parts_bound_text_and_the_merged_list() {
+        let sample = json!({"id":"first","area":"á".repeat(31),"name":"é".repeat(60),"state":"done",
+            "example":"å".repeat(121),"why":"ç".repeat(121),"evidence":"ø".repeat(201)});
+        let first = plan(None, &json!({"parts":[sample]}), 10).unwrap().unwrap();
+        let part = &first.parts[0];
+        assert_eq!(part.area, format!("{}…", "á".repeat(29)));
+        assert_eq!(part.name, "é".repeat(60));
+        for (text, max) in [(&part.example, 120), (&part.why, 120), (&part.evidence, 200)] {
+            assert_eq!(text.as_ref().unwrap().chars().count(), max);
+            assert!(text.as_ref().unwrap().ends_with('…'));
+        }
+        let many = |count, areas| {
+            (0..count)
+                .map(|i| {
+                    json!({"id":format!("p{i}"),"area":format!("Area {}",i % areas),
+            "name":"Find","state":"missing"})
+                })
+                .collect::<Vec<_>>()
+        };
+        assert!(plan(Some(&first), &json!({"parts":many(60, 1)}), 20).unwrap_err().starts_with("error.plan.tooManyParts"));
+        assert!(plan(Some(&first), &json!({"parts":many(8, 8)}), 20).unwrap_err().starts_with("error.plan.tooManyAreas"));
+        assert!(plan(Some(&first), &json!({"parts":[{"id":"bad id"}]}), 20).unwrap_err().starts_with(BAD_ID));
+        assert!(plan(Some(&first), &json!({"parts":[{"id":"first","since":20}]}), 20).is_err());
+    }
+
+    #[test]
+    fn plan_parts_require_proof_for_done_and_a_reason_for_redo_or_removal() {
+        let first = plan(
+            None,
+            &json!({"steps":[{"text":"Check","state":"pending"}],"parts":[
+                {"id":"a","area":"Search","name":"Type a query","state":"done","evidence":"Found three"},
+                {"id":"b","area":"Search","name":"Open a result","state":"now"}
+            ]}),
+            10,
+        )
+        .unwrap()
+        .unwrap();
+        for (part, key) in [
+            (json!({"id":"a","state":"redo","why":" "}), "error.plan.noWhy"),
+            (json!({"id":"b","state":"done"}), "error.plan.noEvidence"),
+            (json!({"id":"b","removed":true}), "error.plan.noWhy"),
+        ] {
+            assert!(plan(Some(&first), &json!({"parts":[part]}), 20).unwrap_err().starts_with(key));
+        }
+        let next =
+            plan(Some(&first), &json!({"parts":[{"id":"b","removed":true,"why":"Already covered by search"}]}), 30).unwrap().unwrap();
+        let ghost = &json!(next)["parts"][1];
+        assert_eq!(ghost["id"], "b");
+        assert_eq!(ghost["removed"], true);
+        assert_eq!(ghost["why"], "Already covered by search");
+        assert_eq!(ghost["since"], 10);
+    }
 
     #[test]
     fn follow_up_brief_keeps_its_contents_and_refuses_oversize() {

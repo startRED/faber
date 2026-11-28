@@ -12,6 +12,7 @@ pub mod tabs;
 
 use crate::screens::{self, Kind, Screen, Viewport};
 use serde_json::{Value, json};
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -780,11 +781,59 @@ pub fn look_pictures(page: &Page) -> Vec<String> {
         .collect()
 }
 
-/// The file a call's picture is kept in, inside the conversation's attachments: only letters, digits, `-` and `_` from the
-/// call's id, so an id can never name a path.
+/// Encode the full id in a separate namespace from legacy files. Lowercase hex also distinguishes ids on Windows.
+/// Oversized ids are refused instead of shortened so each filename fits in a single filesystem component.
 pub fn picture_name(call: &str) -> Option<String> {
+    const MAX_ID_BYTES: usize = 120;
+    let (id, suffix) = picture_variant(call).map_or((call, ""), |id| (id, &call[id.len()..]));
+    let len = 10 + id.len() * 2 + suffix.len();
+    if id.is_empty() || id.len() > MAX_ID_BYTES || len > 255 {
+        return None;
+    }
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut name = String::with_capacity(len);
+    name.push_str("site-~");
+    for byte in id.bytes() {
+        name.push(char::from(HEX[usize::from(byte >> 4)]));
+        name.push(char::from(HEX[usize::from(byte & 15)]));
+    }
+    name.push_str(suffix);
+    name.push_str(".jpg");
+    Some(name)
+}
+
+fn legacy_picture_name(call: &str) -> Option<String> {
     let id: String = call.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')).take(80).collect();
     (!id.is_empty()).then(|| format!("site-{id}.jpg"))
+}
+
+fn picture_names(call: &str, legacy_aliases: bool) -> impl Iterator<Item = String> {
+    let old = legacy_picture_name(call).filter(|name| legacy_aliases || name.len() == call.len() + "site-.jpg".len());
+    [picture_name(call), old].into_iter().flatten()
+}
+
+pub fn picture_file(dir: &std::path::Path, call: &str, legacy_aliases: bool) -> Option<std::path::PathBuf> {
+    picture_names(call, legacy_aliases).find_map(|name| {
+        let path = dir.join(&name);
+        if !std::fs::symlink_metadata(&path).ok()?.is_file() {
+            return None;
+        }
+        // Legacy files could differ by case even though Windows lookup ignores it.
+        if cfg!(windows) && !legacy_aliases && !name.starts_with("site-~") {
+            return std::fs::read_dir(dir).ok()?.flatten().find(|e| e.file_name() == name.as_str()).map(|e| e.path());
+        }
+        Some(path)
+    })
+}
+
+fn picture_variant(id: &str) -> Option<&str> {
+    let (call, size) = id.rsplit_once("-s")?;
+    (!size.is_empty() && size.bytes().all(|b| b.is_ascii_digit())).then_some(call)
+}
+
+/// Size variants share the call's namespace and cannot themselves be used as a call id.
+pub fn is_picture_call(id: &str) -> bool {
+    !id.is_empty() && picture_variant(id).is_none()
 }
 
 /// The most the browser's pictures of one conversation take on disk. A long run that browses all night keeps its latest
@@ -792,6 +841,30 @@ pub fn picture_name(call: &str) -> Option<String> {
 pub const MAX_PICTURES_BYTES: u64 = 20 * 1024 * 1024;
 /// Reserved attachment subdirectory. Ordinary user attachments keep their filenames in the parent.
 pub const ANSWER_PICTURES_DIR: &str = "answer-pictures";
+
+/// Answer captures are never evicted to make room for a browser call.
+pub fn tool_picture_budget(dir: &std::path::Path, max: u64) -> std::io::Result<u64> {
+    use std::io::ErrorKind;
+    let entries = match std::fs::read_dir(dir.join(ANSWER_PICTURES_DIR)) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(max),
+        Err(error) => return Err(error),
+    };
+    let mut remaining = max;
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_name().to_str().is_some_and(|name| name.ends_with(".jpg")) {
+            continue;
+        }
+        match entry.metadata() {
+            Ok(meta) if meta.is_file() => remaining = remaining.saturating_sub(meta.len()),
+            Ok(_) => (),
+            Err(error) if error.kind() == ErrorKind::NotFound => (),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(remaining)
+}
 
 /// Checks the shared picture budget. Explicit browser calls can replace old tool pictures; automatic captures
 /// only use free space, and neither kind can evict a picture belonging to an answer's record.
@@ -853,9 +926,127 @@ fn picture_room_with_metadata(
     Ok(total <= max)
 }
 
+/// Trim unlinked files before linked middle pictures. Each part's before and newest stay even over budget.
+/// Without linked pictures, keep the newest file as usual. Returns whether a part lost a reference.
+pub fn trim_pictures(dir: &std::path::Path, max: u64, parts: &mut [crate::model::PlanPart]) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    let mut pictures: Vec<_> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            if !name.starts_with("site-") || !name.ends_with(".jpg") {
+                return None;
+            }
+            let meta = e.metadata().ok().filter(std::fs::Metadata::is_file)?;
+            Some((meta.modified().ok()?, meta.len(), name))
+        })
+        .collect();
+    pictures.sort();
+    let mut total: u64 = pictures.iter().map(|p| p.1).sum();
+    if total <= max {
+        return false;
+    }
+    let existing: HashSet<_> = pictures.iter().map(|(_, _, name)| name.as_str()).collect();
+    // Resolve references before deletion so an evicted new image cannot fall back to an unrelated legacy file.
+    let resolved: HashMap<_, _> = parts
+        .iter()
+        .flat_map(|part| part.pictures.iter().chain(&part.before))
+        .filter_map(|id| picture_names(id, false).find(|name| existing.contains(name.as_str())).map(|name| (id.clone(), name)))
+        .collect();
+    let mut linked = HashMap::new();
+    for part in parts.iter() {
+        for name in part.pictures.iter().filter_map(|id| resolved.get(id)) {
+            linked.entry(name).or_insert(false);
+        }
+        let before = part.before.as_ref().or_else(|| part.pictures.first());
+        for name in [before, part.pictures.last()].into_iter().flatten().filter_map(|id| resolved.get(id)) {
+            linked.insert(name, true);
+        }
+    }
+    let has_linked = !linked.is_empty();
+    let candidates = if has_linked { pictures.len() } else { pictures.len().saturating_sub(1) };
+    for (_, len, name) in pictures.iter().take(candidates) {
+        if total <= max {
+            return false;
+        }
+        if !linked.contains_key(name) && std::fs::remove_file(dir.join(name)).is_ok() {
+            total -= len;
+        }
+    }
+    // An unlinked file we failed to delete must not evict a linked picture.
+    let mut linked_bytes: u64 = pictures.iter().filter(|(_, _, name)| linked.contains_key(name)).map(|(_, len, _)| len).sum();
+    let mut removed = HashSet::new();
+    for (_, len, name) in &pictures {
+        if linked_bytes <= max {
+            break;
+        }
+        if linked.get(name) == Some(&false) && std::fs::remove_file(dir.join(name)).is_ok() {
+            linked_bytes -= len;
+            removed.insert(name);
+        }
+    }
+    if removed.is_empty() {
+        return false;
+    }
+    for part in parts {
+        part.pictures.retain(|id| resolved.get(id).is_none_or(|name| !removed.contains(name)));
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_parts_trim_unlinked_pictures_then_the_oldest_middle_keeping_before_and_newest() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = std::time::SystemTime::UNIX_EPOCH;
+        for (n, id) in ["before", "middle-old", "middle-new", "latest", "unlinked"].into_iter().enumerate() {
+            let path = dir.path().join(picture_name(id).unwrap());
+            std::fs::write(&path, [0; 100]).unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap().set_modified(at + std::time::Duration::from_secs(n as u64)).unwrap();
+        }
+        let mut parts: Vec<crate::model::PlanPart> = serde_json::from_value(json!([
+            {"id":"a","area":"Search","name":"Find it","state":"done","since":1,"before":"before",
+             "pictures":["middle-old","middle-new","latest"]}
+        ]))
+        .unwrap();
+        let exists = |id| dir.path().join(picture_name(id).unwrap()).exists();
+        trim_pictures(dir.path(), 400, &mut parts);
+        assert!(!exists("unlinked"));
+        assert!(exists("middle-old"));
+        trim_pictures(dir.path(), 300, &mut parts);
+        assert!(!exists("middle-old"));
+        assert_eq!(json!(parts)[0]["pictures"], json!(["middle-new", "latest"]));
+        trim_pictures(dir.path(), 0, &mut parts);
+        assert!(exists("before") && exists("latest"));
+        assert_eq!(json!(parts)[0]["pictures"], json!(["latest"]));
+    }
+
+    #[test]
+    fn trim_with_no_plan_keeps_the_newest_picture_and_leaves_other_files_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        for (n, name) in ["site-a.jpg", "site-b.jpg", "site-c.jpg", "notes.jpg", "site-d.png"].iter().enumerate() {
+            let path = dir.path().join(name);
+            std::fs::write(&path, [0u8; 100]).unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap().set_modified(at + std::time::Duration::from_secs(n as u64)).unwrap();
+        }
+        let left = || {
+            let mut names: Vec<String> =
+                std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name().into_string().unwrap()).collect();
+            names.sort();
+            names
+        };
+        trim_pictures(dir.path(), 300, &mut []);
+        assert_eq!(left().len(), 5, "under the limit nothing goes");
+        trim_pictures(dir.path(), 150, &mut []);
+        assert_eq!(left(), ["notes.jpg", "site-c.jpg", "site-d.png"], "the oldest pictures go, other files stay");
+        trim_pictures(dir.path(), 0, &mut []);
+        assert_eq!(left(), ["notes.jpg", "site-c.jpg", "site-d.png"], "the newest picture always stays");
+        trim_pictures(&dir.path().join("missing"), 0, &mut []);
+    }
 
     #[test]
     fn picture_budget_skips_a_file_removed_after_listing() {
@@ -1140,9 +1331,37 @@ mod tests {
     }
 
     #[test]
+    fn plan_parts_picture_names_keep_punctuation_case_and_the_full_id_distinct() {
+        for (first, second) in
+            [("a.b".into(), "ab".into()), ("pA".into(), "pa".into()), (format!("{}x", "a".repeat(80)), format!("{}y", "a".repeat(80)))]
+        {
+            assert_ne!(picture_name(&first).unwrap().to_ascii_lowercase(), picture_name(&second).unwrap().to_ascii_lowercase());
+        }
+    }
+
+    #[test]
     fn a_picture_is_named_by_the_call_and_never_by_a_path() {
-        assert_eq!(picture_name("toolu_01Ab-c").as_deref(), Some("site-toolu_01Ab-c.jpg"));
-        assert_eq!(picture_name("../../x").as_deref(), Some("site-x.jpg"));
-        assert_eq!(picture_name("../.."), None);
+        assert_eq!(picture_name("../../x").as_deref(), Some("site-~2e2e2f2e2e2f78.jpg"));
+        assert_eq!(picture_name(""), None);
+        assert_eq!(picture_name(&"a".repeat(123)), None);
+    }
+
+    #[test]
+    fn plan_parts_legacy_before_stays_readable_and_protected_from_trim() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("site-ab.jpg");
+        std::fs::write(&legacy, [1; 100]).unwrap();
+        let current = dir.path().join(picture_name("a.b").unwrap());
+        std::fs::write(&current, [2; 100]).unwrap();
+        let mut parts: Vec<crate::model::PlanPart> = serde_json::from_value(json!([
+            {"id":"a","area":"Search","name":"Find it","state":"done","since":1,"before":"ab","pictures":["a.b"]}
+        ]))
+        .unwrap();
+        trim_pictures(dir.path(), 0, &mut parts);
+        assert_eq!(picture_file(dir.path(), "ab", false), Some(legacy.clone()));
+        assert_eq!(picture_file(dir.path(), "a.b", false), Some(current));
+        assert_eq!(picture_file(dir.path(), "ab!", true), Some(legacy));
+        assert_eq!(picture_file(dir.path(), "ab!", false), None);
+        assert_eq!(picture_file(dir.path(), "AB", false), None);
     }
 }

@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createResource, createSignal, For, on, Show, type ComponentProps } from 'solid-js';
-import { api, errorText, type BackgroundCommand, type Checks, type Follow, type Message, type ToolUse, type WorkCopy } from './api.ts';
+import { api, errorText, type BackgroundCommand, type Checks, type Follow, type Message, type Plan, type ToolUse, type WorkCopy } from './api.ts';
 import { ToolChip } from './AgentChat.tsx';
 import { StateGlyph, stateKind } from './icons/kinds.tsx';
 import { CommandStop } from './Commands.tsx';
@@ -10,6 +10,7 @@ import { agentState, type AgentState } from './worklog.ts';
 import { showAgent } from './AgentChat.tsx';
 import { backgroundCalls, backgroundOf, createBackgroundCache, followedIn, indexed, referenceLines, prune, workStatus, type BackgroundWork, type ToolIndex } from './background.ts';
 import { LiveText } from './Background.tsx';
+import { PlanList } from './Plan.tsx';
 
 // Faber's own checks of a reply that changed files (R146): one quiet line while they run and once they ended, the failed
 // checks' first failures behind a disclosure. Checks that still fail after Faber's fixes wait for the person, in amber.
@@ -169,6 +170,7 @@ function ReasonText(props: { text: string }) {
 /** A view of facts in the existing column, mounted only while open. */
 export function DetailsPane(props: {
   conversationId: string; messages: Message[]; background: BackgroundCommand[]; copy?: WorkCopy;
+  plan?: Plan; conversationNames?: Record<string, string>; onOpenConversation?: (id: string) => void;
   changes: ComponentProps<typeof ChangesFiles>;
   onBack: () => void; onClose: () => void;
 }) {
@@ -231,6 +233,11 @@ export function DetailsPane(props: {
         <summary>{t('details.startCard')}</summary>
         <Show when={cardOpen()}><p class="side-meta" style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '4px 12px' }}><span>{bytes(new TextEncoder().encode(text()).length)}</span><Show when={omitted(text(), 'more rule lines')}><span>{t('details.cardRules', { n: omitted(text(), 'more rule lines') })}</span></Show><Show when={omitted(text(), 'older decisions')}><span>{t('details.cardDecisions', { n: omitted(text(), 'older decisions') })}</span></Show><Show when={omitted(text(), 'more taste lines')}><span>{t('details.cardTaste', { n: omitted(text(), 'more taste lines') })}</span></Show></p><pre class="command-output" style={{ 'font-family': 'var(--font-mono)', padding: '8px', border: '1px solid var(--line)', 'border-radius': 'var(--r-xs)' }}>{text()}</pre></Show>
       </details></section>}</Show>
+      <Show when={props.plan && (props.plan.steps.length || props.plan.contract) ? props.plan : undefined}>
+        {(plan) => <section class="det-g"><h3>{t('plan.label')}</h3>
+          <PlanList plan={plan()} names={props.conversationNames} onOpen={props.onOpenConversation} inDetails />
+        </section>}
+      </Show>
       <Show when={shownWork().length}><section class="det-g"><h3>{t('background.title')}</h3>
         <BackgroundList rows={shownWork()} conversationId={props.conversationId} follows={follows()} />
       </section></Show>

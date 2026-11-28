@@ -25,7 +25,9 @@ import { SignInCard } from './SignInCard.tsx';
 import { StallNote } from './StallNote.tsx';
 import { ResultsNote } from './Results.tsx';
 import { ChecksLine, DetailsLine, FollowLine } from './Details.tsx';
-import { PlanList, WrapUpBox } from './Plan.tsx';
+import { PlanList, PlanNotice, WrapUpBox } from './Plan.tsx';
+import { PlanMap, type PlanComparison } from './PlanMap.tsx';
+import { PlanBeforeAfter } from './PlanBeforeAfter.tsx';
 import { Rewind } from './Rewind.tsx';
 import { AnswerChanges } from './AnswerChanges.tsx';
 import { AnswersCard, answeredIn, folded, RunBlock, runsOf, type Answered } from './Run.tsx';
@@ -472,6 +474,7 @@ interface Shared {
   background?: import('./api.ts').BackgroundCommand[];
   /** The agent's plan for the request, drawn under the newest reply (task 017). */
   plan?: Plan;
+  onPlanComparison?: (comparison: PlanComparison, opener: HTMLButtonElement) => void;
   /** A button of a closing box: its words go as the person's message. */
   onReply?: (text: string) => void;
   onActChange?: (target: NonNullable<import('./api.ts').FaberAct['change']>) => void;
@@ -890,9 +893,15 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       {/* The agent's own work seems stuck (a step with no news, a long compaction, the same step again): said where the eye is, with Stop. */}
       <StallNote conversationId={props.conversationId} m={m()} />
       <Show when={props.last && props.area === 'project'}><ResultsNote conversationId={props.conversationId} message={m()} /></Show>
-      {/* The plan sits under the newest reply while the work goes on, and until every step is done. */}
-      <Show when={props.last && (props.plan?.steps.length || props.plan?.raisedBecause) && (working() || props.plan?.steps.some((s) => s.state !== 'done')) ? props.plan : undefined}>
-        {(plan) => <PlanList plan={plan()} now={planNow()} names={props.conversationNames} onOpen={props.onOpenConversation} />}
+      <Show when={props.last && props.plan?.parts?.length ? props.plan.parts : undefined} fallback={
+        <Show when={props.last && (props.plan?.steps.length || props.plan?.raisedBecause) && (working() || props.plan?.steps.some((s) => s.state !== 'done')) ? props.plan : undefined}>
+          {(plan) => <PlanList plan={plan()} now={planNow()} names={props.conversationNames} onOpen={props.onOpenConversation} />}
+        </Show>
+      }>
+        {(parts) => <>
+          <PlanNotice plan={props.plan!} />
+          <PlanMap conversationId={props.conversationId} parts={parts()} running={working()} onCompare={props.onPlanComparison} />
+        </>}
       </Show>
       <Show when={m().files?.length}>
         <div class="files" aria-label={t('files.label')} ref={animateList}>
@@ -1292,6 +1301,8 @@ export function Thread(props: Shared & { messages: Message[]; temporary?: boolea
       return { label: t(props.onWriteWaitMessage ? 'set.openSetup' : 'empty.noAiButton'), onClick: props.onOpenWaitAccounts };
     }
   };
+  const [comparison, setComparison] = createSignal<{ selection: PlanComparison; opener: HTMLButtonElement }>();
+  const openComparison = (selection: PlanComparison, opener: HTMLButtonElement) => setComparison({ selection, opener });
   const [restore, setRestore] = createSignal<{ message: Message; redo?: RewindRedoInfo }>();
   const [open, setOpen] = createSignal(false);
   const shown = keepForExit(open);
@@ -1352,6 +1363,7 @@ export function Thread(props: Shared & { messages: Message[]; temporary?: boolea
                 <Show when={drawn(m(), at()) || answered(at())?.length}>
                   <Answer
                     {...props}
+                    onPlanComparison={props.onPlanComparison ?? openComparison}
                     pieceRevision={revision()}
                     m={m}
                     prompt={prompt(at())}
@@ -1427,6 +1439,9 @@ export function Thread(props: Shared & { messages: Message[]; temporary?: boolea
         }}</For>
       }</Show>
       <Show when={shown() ? restore() : undefined} keyed>{(target) => <Rewind conversationId={props.conversationId} messageId={target.message.id} point={target.message.rewind} redo={target.redo} conversationNames={props.conversationNames} leaving={!open()} onClose={() => setOpen(false)} onChanged={async () => { await props.onRewind?.(); setRevision((n) => n + 1); }} />}</Show>
+      <Show when={comparison()?.selection.conversationId === props.conversationId ? comparison() : undefined} keyed>
+        {(target) => <PlanBeforeAfter {...target} messages={props.messages} onClose={() => setComparison(undefined)} />}
+      </Show>
       <Quote />
     </AnswerPictures.Provider>
     </ReplyMediaContext.Provider>

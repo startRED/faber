@@ -299,11 +299,26 @@ export interface PlanStep {
   conversation?: string;
   member?: 'running' | 'waiting' | 'done' | 'failed' | 'stopped';
 }
+/** One part of the request visible to the person (engine `PlanPart`). */
+export interface PlanPart {
+  id: string;
+  area: string;
+  name: string;
+  state: 'missing' | 'now' | 'done' | 'redo';
+  example?: string;
+  why?: string;
+  evidence?: string;
+  since: number;
+  removed: boolean;
+  pictures: string[];
+  before?: string;
+}
 /** A project agent's plan for the request (engine `Plan`): it belongs to the conversation. */
 export interface Plan {
   size?: 'small' | 'normal' | 'risky';
   raisedBecause?: 'credentials' | 'data' | 'outside' | 'publish' | 'delete' | 'unknown';
   steps: PlanStep[];
+  parts?: PlanPart[];
   contract?: { size?: 'small' | 'normal' | 'risky'; extends?: string; newBecause?: string; proof?: string; target?: string };
   at: number;
   /** The conversation's estimate, put here by the engine for the screen; `economy` once the job went half over it (rule 7). */

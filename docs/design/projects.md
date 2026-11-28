@@ -53,6 +53,10 @@ motion or polling. The engine caches the native executable lookup and checks aga
 A new conversation still starts in place, without a branch crumb or Changes; conversations already started in place
 stay there after Git becomes available. Chat and missing or disconnected project folders do not show this card.
 
+### Request map (R589)
+
+The [request map and its capture comparison](request-map.md) sit under the newest project reply.
+
 ### Standing goals
 
 A short line beneath each title explains standing goals, memory and terminal sessions whether the fold is open or closed. Above Memory, one more quiet fold (`ui/ProjectGoals.tsx`) built the same way: a text button, the shared Collapse, one

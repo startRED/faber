@@ -432,13 +432,26 @@ fn size_boundary_plan_input_defaults_and_never_lowers_or_expands_an_old_contract
 }
 
 async fn boundary_started() -> (support::DataFolder, tempfile::TempDir, Engine, support::Pipe, String) {
+    let (dir, folder, engine, mut pipe, id) = plan_started(None).await;
+    boundary_plan(&mut pipe, "initial-plan", json!({"steps":[{"text":"Check","state":"in_progress"}]})).await;
+    (dir, folder, engine, pipe, id)
+}
+
+async fn plan_started(
+    browser: Option<Arc<dyn faber_engine::browser::Browser>>,
+) -> (support::DataFolder, tempfile::TempDir, Engine, support::Pipe, String) {
     let dir = support::DataFolder::new();
     let folder = support::work_folder();
     let (spawn, made) = support::pipes();
     let (engine, _, _) = start(&dir, spawn, Some(Arc::new(|_| Box::pin(async { None }))));
-    engine
-        .save_settings(faber_engine::model::Settings { permissions: Some(faber_engine::model::Permissions::Ask), ..Default::default() })
-        .unwrap();
+    use faber_engine::model::{Permissions, Settings};
+    let permissions = if let Some(browser) = browser {
+        engine.set_browser(browser);
+        Permissions::FullAccess
+    } else {
+        Permissions::Ask
+    };
+    engine.save_settings(Settings { permissions: Some(permissions), ..Default::default() }).unwrap();
     let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
     let id = engine
         .send(faber_engine::SendRequest {
@@ -454,18 +467,109 @@ async fn boundary_started() -> (support::DataFolder, tempfile::TempDir, Engine, 
     let mut pipe = support::next_pipe(&made).await;
     support::until("first turn missing", || pipe.lines.lock().unwrap().iter().any(|m| m["type"] == "user")).await;
     pipe.say(json!({"type":"system","subtype":"init","session_id":"boundary","model":"claude-haiku-5-5"})).await;
-    boundary_plan(&mut pipe, "initial-plan", json!({"steps":[{"text":"Check","state":"in_progress"}]})).await;
     (dir, folder, engine, pipe, id)
 }
 
 async fn boundary_plan(pipe: &mut support::Pipe, request: &str, input: serde_json::Value) {
+    send_plan_tool(pipe, request, "plan", input).await;
+    let response = plan_tool_reply(pipe, request).await;
+    assert_ne!(response["isError"], true, "{response}");
+}
+
+async fn send_plan_tool(pipe: &mut support::Pipe, request: &str, tool: &str, input: serde_json::Value) {
     pipe.say(json!({"type":"control_request","request_id":request,"request":{"subtype":"mcp_message","server_name":"faber",
-        "message":{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"plan","arguments":input}}}}))
+        "message":{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":tool,"arguments":input,
+            "_meta":{"claudecode/toolUseId":request}}}}}))
         .await;
+}
+
+async fn plan_tool_reply(pipe: &support::Pipe, request: &str) -> serde_json::Value {
     support::until("plan never answered", || pipe.lines.lock().unwrap().iter().any(|m| m["response"]["request_id"] == request)).await;
     let messages = pipe.lines.lock().unwrap();
     let response = messages.iter().find(|m| m["response"]["request_id"] == request).unwrap();
-    assert_ne!(response["response"]["response"]["mcp_response"]["result"]["isError"], true, "{response}");
+    response["response"]["response"]["mcp_response"]["result"].clone()
+}
+
+struct PlanPictures(tokio::sync::mpsc::UnboundedSender<tokio::sync::oneshot::Sender<faber_engine::browser::Page>>);
+
+impl faber_engine::browser::Browser for PlanPictures {
+    fn act(
+        &self,
+        _: String,
+        _: String,
+        _: faber_engine::browser::Request,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<faber_engine::browser::Page, String>> + Send>> {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        self.0.send(send).unwrap();
+        Box::pin(async move { receive.await.map_err(|err| err.to_string()) })
+    }
+}
+
+#[tokio::test]
+async fn plan_parts_link_saved_calls_to_the_only_active_part_at_start_and_reopen_when_done() {
+    use faber_engine::browser::{Look, Page};
+    let (send, mut captures) = tokio::sync::mpsc::unbounded_channel();
+    let (dir, _folder, engine, mut pipe, id) = plan_started(Some(Arc::new(PlanPictures(send)))).await;
+    let part = |n| serde_json::to_value(engine.open_for_screen(&id).unwrap().plan.unwrap()).unwrap()["parts"][n].clone();
+    boundary_plan(
+        &mut pipe,
+        "parts",
+        json!({"parts":[
+            {"id":"search","area":"Busca","name":"Digitar na busca","state":"now"},
+            {"id":"open","area":"Busca","name":"Abrir a conversa","state":"missing"}
+        ]}),
+    )
+    .await;
+    assert!(part(0)["since"].as_u64().unwrap() > 1_000_000_000_000);
+    let first_picture = faber_engine::browser::picture_name("picture-0").unwrap();
+    std::fs::create_dir_all(dir.path().join("attachments").join(&id).join(first_picture)).unwrap();
+
+    for n in 0..=10 {
+        let call = format!("picture-{n}");
+        send_plan_tool(&mut pipe, &call, "browse", json!({"url":"https://example.org"})).await;
+        let capture = tokio::time::timeout(support::DEADLINE, captures.recv()).await.unwrap().unwrap();
+        if n == 9 {
+            boundary_plan(&mut pipe, "parallel", json!({"parts":[{"id":"open","state":"now"}]})).await;
+        } else if n == 10 {
+            boundary_plan(&mut pipe, "settled", json!({"parts":[{"id":"open","state":"done","evidence":"Opened the result"}]})).await;
+        }
+        let looks = if n == 1 {
+            vec![Look { size: faber_engine::screens::named("phone").unwrap(), picture: Some(vec![1]), wider: 0, cut: vec![], turn: None }]
+        } else {
+            vec![]
+        };
+        capture.send(Page { picture: (n != 1).then(|| vec![2]), looks, ..Default::default() }).unwrap();
+        assert_ne!(plan_tool_reply(&pipe, &call).await["isError"], true);
+        if n == 0 {
+            assert_eq!(part(0)["pictures"], json!([]), "a write that failed cannot leave a link");
+        }
+        if n == 1 {
+            let call = part(0)["pictures"][0].as_str().unwrap().to_string();
+            assert!(!call.ends_with("-s1"));
+            assert!(engine.site_picture(&id, &call).is_some());
+        }
+    }
+    let pictures = part(0)["pictures"].as_array().unwrap().clone();
+    assert_eq!(pictures.len(), 8);
+    assert!(
+        pictures.iter().enumerate().all(|(i, p)| p.as_str().unwrap().ends_with(&format!("picture-{}", if i == 0 { 1 } else { i + 2 })))
+    );
+    assert_eq!(part(1)["pictures"], json!([]));
+
+    let before = pictures[1].as_str().unwrap();
+    send_plan_tool(&mut pipe, "bad-before", "plan", json!({"parts":[{"id":"search","before":"never-saved"}]})).await;
+    assert_eq!(plan_tool_reply(&pipe, "bad-before").await["isError"], true);
+    boundary_plan(&mut pipe, "done", json!({"parts":[{"id":"search","state":"done","evidence":"Found the result","before":before}]})).await;
+    engine.shutdown();
+
+    let (reopened, _, _) = start(&dir, Arc::new(|_, _, _| panic!("reopening needs no CLI")), None);
+    let plan = reopened.open_for_screen(&id).unwrap().plan.unwrap();
+    assert!(plan.steps.is_empty());
+    let data = serde_json::to_value(plan).unwrap();
+    assert_eq!(data["parts"][0]["state"], "done");
+    assert_eq!(data["parts"][0]["before"], before);
+    assert_eq!(data["parts"][1]["state"], "done");
+    reopened.shutdown();
 }
 
 async fn boundary_ask(
