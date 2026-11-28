@@ -14,10 +14,12 @@ Build:
 - For each part whose removal cost no judge verdict and saved time or tokens beyond the spread, make it lighter or off
   by default; keep every part that won a verdict. A part that changes what a person sees or sets is the owner's
   decision: write the question in the commit and leave it on.
-- Run the same paired measurement once on the changed parts to confirm the saving.
+- Confirm the saving with cheap requests only (for example `5-everyday-question`, `2-plan-an-app`, `1-organize-folder`,
+  `6-fix-invoice`), each pair run three times, comparing medians and the spread. The owner said on 2026-11-28: no big
+  bench (the ~US$ 148.50 table is out); the whole confirmation stays under US$ 10 of API-price equivalents (`--max-usd`).
 - Update the numbers in `docs/dev/benchmark.md` and the goals line in `docs/product/README.md` if they moved.
 
 Leave out: parts the measurement did not cover.
 
-Done: the confirming table in the commit body (before and after, time and tokens, verdicts); the tests that covered
+Done: the confirming table in the commit body (before and after, median and spread of three runs, time and tokens, verdicts); the tests that covered
 each part still pass or say why they changed. Engine behaviour: review by a fresh session of the other vendor (R146).

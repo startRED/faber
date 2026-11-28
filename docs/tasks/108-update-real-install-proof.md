@@ -21,4 +21,4 @@ Leave out: any change in `update/` (the previous task) unless the proof finds a 
 
 Done: the scenario of the failing first start fails against the base before task update-checks-the-app-came-back and
 passes after; CI's install-update-self job runs the new scenarios. Processes: review by a fresh session of the other
-vendor (R146). Landing waits for the owner's yes together with that task.
+vendor (R146). The owner approved landing on 2026-11-28.
