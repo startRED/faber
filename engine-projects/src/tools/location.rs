@@ -6,11 +6,11 @@ use std::path::{Path, PathBuf};
 
 const FOLDER: &str = "locations";
 
-fn record(store: &Path, id: &str) -> PathBuf {
+pub(super) fn record(store: &Path, id: &str) -> PathBuf {
     store.join(FOLDER).join(format!("{id}.json"))
 }
 
-fn external(store: &Path, root: &Path) -> bool {
+pub(super) fn external(store: &Path, root: &Path) -> bool {
     store.parent().zip(root.parent()).is_some_and(|(data, parent)| {
         root.file_name().is_some_and(|name| name == "tools")
             && crate::storage::external_root_name(parent)
@@ -35,6 +35,48 @@ pub(super) fn source_root(store: &Path, id: &str) -> PathBuf {
             // A known location stays reserved while the drive is unavailable.
             .unwrap_or_else(unavailable),
     }
+}
+
+/// A rename is durable on Unix only once its folder is flushed too; NTFS journals the rename itself.
+pub(super) fn sync_dir(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    return fs::File::open(path)?.sync_all();
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+/// Records where item `id` lives: no record for the main data folder, else the external `tools` folder. When this returns
+/// the record is on disk, its folder flushed with `sync_dir`, so nothing is cleaned up on the strength of a switch a power
+/// cut could still undo.
+pub(super) fn switch(store: &Path, id: &str, root: &Path, sync_dir: &dyn Fn(&Path) -> io::Result<()>) -> io::Result<()> {
+    let file = record(store, id);
+    if !valid_id(id) {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    let parent = store.join(FOLDER);
+    if root == store {
+        if matches!(fs::symlink_metadata(&file), Err(error) if error.kind() == io::ErrorKind::NotFound) {
+            return Ok(());
+        }
+        real_path(&file).map_err(|_| io::ErrorKind::InvalidInput)?;
+        return match fs::remove_file(file) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+            Ok(()) => sync_dir(&parent),
+        };
+    }
+    if real_path(&file).is_err() || !external(store, root) {
+        return Err(io::ErrorKind::NotFound.into());
+    }
+    fs::create_dir_all(&parent)?;
+    let mut temp = tempfile::NamedTempFile::new_in(&parent)?;
+    temp.write_all(&serde_json::to_vec(root).map_err(io::Error::other)?)?;
+    temp.as_file().sync_all()?;
+    temp.persist(file).map_err(|failure| failure.error)?;
+    sync_dir(&parent)
 }
 
 impl Store {
@@ -70,30 +112,7 @@ impl Store {
     }
 
     pub(super) fn record_location(&self, id: &str, root: &Path) -> io::Result<()> {
-        let file = record(&self.root, id);
-        if !valid_id(id) {
-            return Err(io::ErrorKind::InvalidInput.into());
-        }
-        if root == self.root {
-            if matches!(fs::symlink_metadata(&file), Err(error) if error.kind() == io::ErrorKind::NotFound) {
-                return Ok(());
-            }
-            real_path(&file).map_err(|_| io::ErrorKind::InvalidInput)?;
-            return match fs::remove_file(file) {
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-                result => result,
-            };
-        }
-        if real_path(&file).is_err() || !external(&self.root, root) {
-            return Err(io::ErrorKind::NotFound.into());
-        }
-        let parent = self.root.join(FOLDER);
-        fs::create_dir_all(&parent)?;
-        let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-        temp.write_all(&serde_json::to_vec(root).map_err(io::Error::other)?)?;
-        temp.as_file().sync_all()?;
-        temp.persist(file).map_err(|failure| failure.error)?;
-        Ok(())
+        switch(&self.root, id, root, &sync_dir)
     }
 
     pub(super) fn file_roots(&self) -> std::collections::BTreeSet<PathBuf> {

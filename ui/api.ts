@@ -798,6 +798,28 @@ export interface StorageChoice {
   notice: 'reason.storage.default' | 'reason.storage.unreadable' | null;
   ask: boolean;
 }
+/** How the last tool move ended (`engine-projects/src/tools/moving.rs`). */
+export interface StorageMoveOutcome {
+  moved: string[];
+  bytes: number;
+  left: { id: string; reason: 'reason.storage.moveChanged' | 'reason.storage.moveInUse' | 'reason.storage.moveFailed' }[];
+  stopped: string | null;
+}
+export interface StorageMove {
+  movable: number;
+  movableBytes: number;
+  pending: boolean;
+  oldBytes: number | null;
+  last: StorageMoveOutcome | null;
+}
+/** A tool move at start, before the host answers anything; `done` when it ended. */
+export interface StorageMoveProgress {
+  number: number;
+  total: number;
+  copied: number;
+  bytes: number;
+  done: boolean;
+}
 /** Kept only in memory; the engine caps each conversation at 32 commands and each output at 20 lines / 8 KB. */
 export interface BackgroundCommand {
   id: string;
@@ -1287,6 +1309,11 @@ export const api = {
   storageUsage: () => invoke<StorageUsage>('storage_usage'),
   storageChoice: () => invoke<StorageChoice>('storage_choice'),
   storageChoose: (reset: boolean) => invoke<StorageChoice | null>('storage_choose', { reset }),
+  storageMove: () => invoke<StorageMove>('storage_move'),
+  /** True when Faber restarts now to move; otherwise the move waits for the next start. */
+  storageMoveRequest: () => invoke<boolean>('storage_move_request'),
+  storageMoveCancel: () => invoke<void>('storage_move_cancel'),
+  storageMoveRemove: () => invoke<void>('storage_move_remove'),
   saveTheme: (appearance: Appearance, name: string) => invoke<boolean>('save_theme', { appearance, name }),
   openTheme: () => invoke<ThemeFile | null>('open_theme'),
   saveFile: (id: string, path: string) => invoke<boolean>('save_file', { id, path }),

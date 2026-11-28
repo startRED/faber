@@ -715,6 +715,21 @@ table! {
     Write Person fn storage_choose(h, reset: bool) -> Option<crate::storage_choice::Status> {
         crate::storage_choice::change(h, reset).await
     }
+    /// Tools a move would take to the chosen folder, a move waiting for the next start, the originals kept and the last result.
+    Read Screen fn storage_move(h) -> crate::storage_choice::MoveStatus {
+        crate::storage_choice::move_status(h).await
+    }
+    /// Asks for the tools to move at the next start; true when Faber restarts for it now.
+    Write Person fn storage_move_request(h) -> bool {
+        crate::storage_choice::request_move(h).await
+    }
+    Write Person fn storage_move_cancel(h) -> () {
+        crate::storage_choice::cancel_move(&h.data_dir)
+    }
+    /// Deletes the originals that moves kept in the main data folder.
+    Write Person fn storage_move_remove(h) -> () {
+        crate::storage_choice::remove_old_copies(h).await
+    }
     /// A theme file comes from other people, so an appearance is checked here before anything is saved.
     Write Ask fn save_settings(h, patch: Settings) -> SavedSettings [Failure] {
         let mut patch = patch;

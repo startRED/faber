@@ -16,6 +16,7 @@ import { useLanguage } from '../../ui/i18n.ts';
 import { level } from '../../ui/motion.ts';
 import { accountLine, seedQuotas, usageRows } from '../../ui/sidebar.ts';
 import { forgetSection, Settings } from '../../ui/Settings.tsx';
+import { MovingTools } from '../../ui/MovingTools.tsx';
 import { check, deepEqual, equal, frames, ok } from './check.ts';
 
 check('R107: Settings names Chat and Projects and discloses the shared default', () => {
@@ -1860,11 +1861,103 @@ check('storage: the new destination is shown and Reset restores the default fold
 
 check('storage: every language has the view written by hand, and the closed line fits its row', () => {
   const keys = Object.keys(en).filter((key) => key.startsWith('set.storage') || key === 'set.group.storage') as (keyof typeof en)[];
-  equal(keys.length, 28);
+  equal(keys.length, 42);
+  const written = (value: unknown) => typeof value === 'string' ? value.length > 0 : !!value && typeof value === 'object' && 'one' in value && 'other' in value;
   for (const [code, words] of Object.entries({ ptBR, es, fr, de })) {
-    for (const key of keys) ok(typeof words[key] === 'string' && words[key].length > 0, `${code}: ${key}`);
+    for (const key of keys) ok(written(words[key]), `${code}: ${key}`);
+    for (const key of ['set.storage.moveConfirm', 'set.storage.movePending', 'set.storage.oldConfirm', 'moving.title', 'moving.note', 'reason.storage.moveChanged', 'error.storage.moveInterrupted'] as const) ok(words[key] !== en[key], `${code}: ${key} is not left in English`);
+    ok((words['moving.progress'] as string).includes('{number}') && (words['moving.progress'] as string).includes('{copied}'), `${code}: the progress keeps its numbers`);
     for (const key of ['set.storage', 'set.storage.kind.copies', 'set.storage.kind.rewind', 'set.storage.sweep', 'set.storage.unknown'] as const) ok(words[key] !== en[key], `${code}: ${key} is not left in English`);
     ok((words['set.storage.free'] as string).includes('{size}'), `${code}: the free space keeps its size`);
   }
   for (const words of [en, ptBR, es, fr, de]) ok(words['set.storage.line'].length <= 70, words['set.storage.line']);
+});
+
+check('storage: tools in the main folder move at the next start, a waiting move can be cancelled, what stayed is named, and old copies need a second click', async () => {
+  const saved = { storageChoice: api.storageChoice, storageUsage: api.storageUsage, storageMove: api.storageMove, storageMoveRequest: api.storageMoveRequest, storageMoveCancel: api.storageMoveCancel, storageMoveRemove: api.storageMoveRemove };
+  const calls: string[] = [];
+  const idle = { movable: 3, movableBytes: 2.5 * 1024 ** 3, pending: false, oldBytes: 0, last: null };
+  let state: Awaited<ReturnType<typeof api.storageMove>> = idle;
+  api.storageChoice = async () => ({ folder: 'D:/Chosen/Faber-storage', custom: true, locked: false, notice: null, ask: false });
+  api.storageUsage = async () => STORAGE;
+  api.storageMove = async () => { calls.push('read'); return state; };
+  // A conversation is working: the request is saved and the move waits for the next start.
+  api.storageMoveRequest = async () => { calls.push('request'); state = { ...idle, pending: true }; return false; };
+  api.storageMoveCancel = async () => { calls.push('cancel'); state = idle; };
+  api.storageMoveRemove = async () => { calls.push('remove'); state = { ...state, oldBytes: 0, last: null }; };
+  const view = storageView();
+  try {
+    view.host.querySelector<HTMLButtonElement>('#set-storage')!.click();
+    await tick();
+    const location = view.host.querySelector<HTMLElement>('.storage-location')!;
+    const row = () => location.querySelector('[data-opt="set-storage-move"]');
+    ok(row()!.textContent!.includes(en['set.storage.move']), 'the tools still in the main folder have their own row');
+    ok(row()!.textContent!.includes('3 tools') && row()!.textContent!.includes('GB'), `it says how many and how big: ${row()!.textContent}`);
+    row()!.querySelector<HTMLButtonElement>('button')!.click();
+    await tick();
+    deepEqual(calls, ['read'], 'Move here asks first and saves nothing');
+    const ask = location.querySelector<HTMLElement>('.store-ask')!;
+    equal(ask.querySelector('p')!.textContent, en['set.storage.moveConfirm']);
+    const back = [...ask.querySelectorAll<HTMLButtonElement>('button')][1];
+    equal(back.textContent, en['set.storage.moveBack']);
+    back.click();
+    await tick();
+    ok(!location.querySelector('.store-ask'), 'Cancel takes the question away');
+    row()!.querySelector<HTMLButtonElement>('button')!.click();
+    await tick();
+    const now = location.querySelector<HTMLElement>('.store-ask')!.querySelector<HTMLButtonElement>('.btn.primary')!;
+    equal(now.textContent, en['set.storage.moveNow']);
+    now.click();
+    await tick(); await tick();
+    deepEqual(calls, ['read', 'request', 'read']);
+    ok(location.textContent!.includes(en['set.storage.movePending']), 'a move that waits says when it runs');
+    ok(!row(), 'and is not offered twice');
+    const cancel = [...location.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === en['set.storage.moveCancel'])!;
+    cancel.click();
+    await tick(); await tick();
+    deepEqual(calls.slice(3), ['cancel', 'read']);
+    ok(row(), 'cancelled, the tools can be moved again');
+
+    // After a move at start: what moved, what stayed and why, how it stopped, and the originals kept.
+    state = {
+      movable: 0, movableBytes: 0, pending: false, oldBytes: 2 * 1024 ** 3,
+      last: { moved: ['notes', 'kokoro'], bytes: 2 * 1024 ** 3, left: [{ id: 'voice-clone', reason: 'reason.storage.moveInUse' }], stopped: 'error.storage.moveSpace' },
+    };
+    view.host.querySelector<HTMLButtonElement>('#set-storage')!.click();
+    await leave();
+    view.host.querySelector<HTMLButtonElement>('#set-storage')!.click();
+    await tick(); await tick();
+    const shown = view.host.querySelector<HTMLElement>('.storage-location')!;
+    ok(shown.textContent!.includes('Moved 2 tools'), `the result says what moved: ${shown.textContent}`);
+    ok(shown.textContent!.includes(en['reason.storage.moveInUse']), 'and why a tool stayed');
+    ok(shown.textContent!.includes(en['error.storage.moveSpace']), 'and why the move stopped');
+    ok(!shown.querySelector('[data-opt="set-storage-move"]'), 'nothing left to move offers nothing');
+    const old = shown.querySelector('[data-opt="set-storage-old"]')!;
+    ok(old.textContent!.includes(en['set.storage.old']) && old.textContent!.includes('GB'));
+    old.querySelector<HTMLButtonElement>('button')!.click();
+    await tick();
+    ok(!calls.includes('remove'), 'Remove asks first');
+    const confirm = shown.querySelector<HTMLElement>('.store-ask')!;
+    equal(confirm.querySelector('p')!.textContent, en['set.storage.oldConfirm']);
+    confirm.querySelector<HTMLButtonElement>('.btn.danger')!.click();
+    await tick(); await tick();
+    equal(calls.filter((call) => call === 'remove').length, 1);
+    ok(!shown.querySelector('[data-opt="set-storage-old"]'), 'removed, the old copies are gone from the view');
+  } finally {
+    Object.assign(api, saved);
+    view.stop();
+  }
+});
+
+check('storage: the move at start shows its tool and bytes over the first frame', () => {
+  const host = document.body.appendChild(document.createElement('div'));
+  const stop = render(() => createComponent(MovingTools, { progress: { number: 2, total: 5, copied: 512 * 1024 ** 2, bytes: 1024 ** 3, done: false } }), host);
+  try {
+    const status = host.querySelector<HTMLElement>('.moving-tools')!;
+    equal(status.getAttribute('role'), 'status');
+    equal(status.querySelector('.moving-tools-title')!.textContent, en['moving.title']);
+    ok(status.textContent!.includes('Tool 2 of 5'), status.textContent!);
+    ok(status.textContent!.includes('MB') && status.textContent!.includes('GB'), `copied and total sizes are shown: ${status.textContent}`);
+    ok(getComputedStyle(status).position === 'fixed' && Number(getComputedStyle(status).zIndex) > 100, 'it sits above the first frame');
+  } finally { stop(); host.remove(); }
 });

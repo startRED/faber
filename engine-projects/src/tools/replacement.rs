@@ -59,7 +59,7 @@ pub(super) fn plain(path: &Path, directory: bool) -> Result<(), String> {
     Ok(())
 }
 // These uv links are data in receipts: never follow them while fingerprinting or copying.
-fn runtime_link(root: &Path, path: &Path) -> Result<Option<PathBuf>, String> {
+pub(super) fn runtime_link(root: &Path, path: &Path) -> Result<Option<PathBuf>, String> {
     #[cfg(not(unix))]
     let _ = root;
     if !std::fs::symlink_metadata(path).map_err(|e| e.to_string())?.file_type().is_symlink() {

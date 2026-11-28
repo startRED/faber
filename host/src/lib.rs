@@ -201,6 +201,18 @@ pub trait Shell: Send + Sync + 'static {
     fn emit(&self, _event: &Value) {}
     /// Replaces the shell's external storage roots before the browser pane can load extensions from them.
     fn storage_roots(&self, _roots: Vec<PathBuf>) {}
+    /// How a tool move at start goes, before the engine answers anything: the screen shows it over its first frame.
+    fn storage_move(&self, progress: MoveProgress) {
+        self.emit(&json!({ "type": "storageMove", "progress": progress }));
+    }
+    /// Closes Faber the usual way (drafts saved, the engine stopped) and opens it again, for a tool move at start.
+    fn relaunch(&self) -> Res<()> {
+        Err(NO_WINDOW.into())
+    }
+    /// Whether this shell's window can show a tool move while Faber starts: only then does Storage offer one.
+    fn moves_tools(&self) -> bool {
+        false
+    }
     /// The version of the program that runs; the screen shows it.
     fn version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
@@ -313,6 +325,7 @@ pub fn default_data_dir(config_dir: &std::path::Path) -> PathBuf {
 
 mod storage_choice;
 pub use storage_choice::Choice as StorageChoice;
+pub use storage_choice::MoveProgress;
 
 /// The data folder: `FABER_DATA_DIR` when set (tests, a second copy), else the default under the config folder.
 pub fn data_dir_from_env() -> Option<PathBuf> {
@@ -397,6 +410,7 @@ impl Wiring {
             #[cfg(test)]
             live_modes: Mutex::default(),
             storage_choice: Mutex::new(storage_choice::Choice::locked(&data_dir)),
+            _start_lock: None,
         }
     }
 }
@@ -427,9 +441,40 @@ pub struct Host {
     #[cfg(test)]
     live_modes: Mutex<std::collections::HashMap<String, faber_engine::model::Permissions>>,
     storage_choice: Mutex<storage_choice::Choice>,
+    /// Held for the host's life, so a later start on the same data folder moves no tool while this one runs.
+    _start_lock: Option<std::fs::File>,
+}
+
+/// CLI and catalog installs running now: a restart for a tool move waits for none of them to be cut.
+static INSTALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Held for the whole of a CLI or catalog install: the shell's own hold (no update ends the process meanwhile) and the count
+/// [`installing`] reads.
+pub(crate) struct Installing(#[allow(dead_code)] Box<dyn Send>);
+
+impl Installing {
+    fn begin(held: Box<dyn Send>) -> Self {
+        INSTALLS.fetch_add(1, Ordering::SeqCst);
+        Self(held)
+    }
+}
+
+impl Drop for Installing {
+    fn drop(&mut self) {
+        INSTALLS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+pub(crate) fn installing() -> bool {
+    INSTALLS.load(Ordering::SeqCst) > 0
 }
 
 impl Host {
+    /// Begins an install: refused when an update is already closing the program.
+    pub(crate) fn hold_install(&self) -> Res<Installing> {
+        self.shell.hold_install().map(Installing::begin)
+    }
+
     /// Gives the host the pane the window commands `site_*` and `cookie_*` ask. Set once; a second call changes nothing.
     pub fn set_pane(&self, pane: Arc<pane::Pane>) {
         let _ = self.pane.set(pane);
@@ -708,6 +753,8 @@ pub struct StartOptions {
 pub fn start(options: StartOptions, shell: Arc<dyn Shell>) -> std::io::Result<Arc<Host>> {
     let StartOptions { data_dir, storage_choice, hidden, runtime, installed_data_dir, game_guard, browser } = options;
     let _data_directory = faber_engine::workspace::DataDirectory::open(&data_dir)?;
+    // A tool move the person asked for runs now, before anything can use a tool, and an interrupted one is put right.
+    let start_lock = storage_choice::at_start(&data_dir, &storage_choice, shell.as_ref());
     let clis = setup::detect_clis();
     faber_engine::startup::mark("clis");
     let wiring = Wiring::new(shell);
@@ -758,6 +805,7 @@ pub fn start(options: StartOptions, shell: Arc<dyn Shell>) -> std::io::Result<Ar
     }
     let mut host = wiring.host(engine, data_dir.clone(), hidden, runtime);
     host.storage_choice = Mutex::new(storage_choice);
+    host._start_lock = start_lock;
     let host = Arc::new(host);
     faber_engine::startup::mark("host");
     // R161 step 7: Faber's own browser, for a project's agent, set before any turn can resume.

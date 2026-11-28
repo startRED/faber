@@ -91,6 +91,10 @@ pub enum Order {
     Reveal { path: String },
     /// Folders that browser extensions must not read, sent before the pane can use them.
     StorageRoots { roots: Vec<std::path::PathBuf> },
+    /// A tool move at start, before the host answers anything: the shell hands it to the screen as a `storageMove` event.
+    StorageMove { progress: crate::MoveProgress },
+    /// Close the app the usual way (drafts saved, the host stopped) and start it again: a tool move waits for that start.
+    Relaunch,
     /// End the app at once, without waiting for the host: the update installer is about to replace it, and the host has
     /// already stopped the engine. The host ends right after.
     Quit,

@@ -14,6 +14,8 @@ test('draft import finishes before the application starts its host and screen', 
   assert.ok(importing < main.indexOf('host = startHost(window)'));
 });
 
+const PROOF_MS = 90_000;
+
 async function prove(modes) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'faber-profile-515b-'));
   const electron = createRequire(import.meta.url)('electron');
@@ -31,7 +33,10 @@ async function prove(modes) {
       const child = spawn(electron, [fileURLToPath(new URL('./migration.proof.mjs', import.meta.url)), mode, dir], { env, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
       let output = '';
       child.stdout.on('data', (chunk) => { output += chunk; }); child.stderr.on('data', (chunk) => { output += chunk; });
-      const code = await new Promise((resolve, reject) => { child.on('exit', resolve); child.on('error', reject); });
+      // The proof's own watchdog cannot fire while an uncaught error's dialog blocks Electron's main loop: bound it here.
+      const limit = setTimeout(() => { output += `
+${mode}: no exit within ${PROOF_MS} ms`; child.kill(); }, PROOF_MS);
+      const code = await new Promise((resolve, reject) => { child.on('exit', resolve); child.on('error', reject); }).finally(() => clearTimeout(limit));
       assert.equal(code, 0, `${mode}: ${output}`);
       for (const line of output.split('\n').filter((line) => /^(PASS|COST)/.test(line))) console.log(line);
     }

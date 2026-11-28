@@ -1,7 +1,8 @@
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
-import { api, type Project, type StorageChoice, type StorageUsage } from './api.ts';
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
+import { api, type Project, type StorageChoice, type StorageMove, type StorageUsage } from './api.ts';
 import { Opt } from './controls.tsx';
-import { bytes, failureText, t } from './i18n.ts';
+import { bytes, catalogName, failureText, t } from './i18n.ts';
+import type { Key } from './locales/en.ts';
 
 // How much disk Faber's data folder takes, inside General > Storage. It measures when its fold opens (this component is
 // only in the page while the fold is open) and when "Measure again" is pressed; there is no timer. A size the engine
@@ -40,6 +41,102 @@ export function StorageLocation() {
         }}>{t('set.storage.reset')}</button>
       </Opt>
       <Show when={choice()?.notice}>{(key) => <p class="hint store-note" role="status">{t(key())}</p>}</Show>
+      <Show when={error()}>{(failure) => <p class="note err store-note" role="alert">{failureText(failure())}</p>}</Show>
+      <ToolMove choice={choice} />
+    </div>
+  );
+}
+
+// Moving the tools already installed in the main data folder to the chosen one. The move itself runs when Faber starts
+// again, before anything can use a tool (host/src/storage_choice/storage_move.rs); here the person asks for it, cancels a
+// move that waits, reads how the last one ended and removes the originals it kept. Nothing here deletes without a second
+// click.
+function ToolMove(props: { choice: () => StorageChoice | undefined }) {
+  const [move, setMove] = createSignal<StorageMove>();
+  const [asking, setAsking] = createSignal<'move' | 'remove'>();
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<unknown>();
+  let request = 0;
+  const load = () => {
+    const mine = ++request;
+    api.storageMove().then((found) => { if (mine === request) setMove(found); }, (failure) => { if (mine === request) setError(failure); });
+  };
+  // Read when the fold opens, and again when the chosen folder changes: what can move depends on it, and a change cancels
+  // a waiting move.
+  onMount(load);
+  createEffect(on(() => props.choice()?.folder, (folder, previous) => { if (previous !== undefined && folder !== previous) load(); }, { defer: true }));
+  onCleanup(() => { request++; });
+  const act = async (work: () => Promise<unknown>) => {
+    if (busy()) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await work();
+      setAsking(undefined);
+    } catch (failure) {
+      setError(failure);
+    } finally {
+      setBusy(false);
+      load();
+    }
+  };
+  const last = () => move()?.last;
+  const canMove = () => !!props.choice()?.custom && !props.choice()?.locked && !move()?.pending && (move()?.movable ?? 0) > 0;
+  return (
+    <div class="store-move" aria-busy={busy()}>
+      <Show when={move()?.pending}>
+        <div class="st-opt">
+          <span class="st-text"><span class="st-hint" role="status">{t('set.storage.movePending')}</span></span>
+          <span class="st-ctl">
+            <button type="button" class="btn" aria-disabled={busy()} onClick={() => void act(api.storageMoveCancel)}>{t('set.storage.moveCancel')}</button>
+          </span>
+        </div>
+      </Show>
+      <Show when={canMove() && move()}>
+        {(found) => (
+          <Opt id="set-storage-move" label={t('set.storage.move')} hint={t('set.storage.moveHint', { n: found().movable, size: bytes(found().movableBytes) })}>
+            <button type="button" class="btn" aria-disabled={busy()} aria-expanded={asking() === 'move'} onClick={() => { if (!busy()) setAsking('move'); }}>
+              {t('set.storage.moveHere')}
+            </button>
+          </Opt>
+        )}
+      </Show>
+      <Show when={asking() === 'move' && canMove()}>
+        <div class="store-ask" role="group" aria-label={t('set.storage.move')}>
+          <p class="hint">{t('set.storage.moveConfirm')}</p>
+          <span class="store-ask-actions">
+            <button type="button" class="btn primary" aria-disabled={busy()} onClick={() => void act(api.storageMoveRequest)}>{t('set.storage.moveNow')}</button>
+            <button type="button" class="btn" onClick={() => setAsking(undefined)}>{t('set.storage.moveBack')}</button>
+          </span>
+        </div>
+      </Show>
+      <Show when={last()}>
+        {(outcome) => (
+          <div class="store-note" role="status">
+            <Show when={outcome().moved.length > 0}>
+              <p class="hint">{t('set.storage.moved', { n: outcome().moved.length, size: bytes(outcome().bytes) })}</p>
+            </Show>
+            <For each={outcome().left}>{(left) => <p class="hint">{t('set.storage.moveLeft', { name: catalogName(left.id), why: t(left.reason) })}</p>}</For>
+            <Show when={outcome().stopped}>{(key) => <p class="note err">{t(key() as Key)}</p>}</Show>
+          </div>
+        )}
+      </Show>
+      <Show when={(move()?.oldBytes ?? 0) > 0}>
+        <Opt id="set-storage-old" label={t('set.storage.old')} hint={t('set.storage.oldHint', { size: bytes(move()?.oldBytes ?? 0) })}>
+          <button type="button" class="btn" aria-disabled={busy()} aria-expanded={asking() === 'remove'} onClick={() => { if (!busy()) setAsking('remove'); }}>
+            {t('set.storage.oldRemove')}
+          </button>
+        </Opt>
+        <Show when={asking() === 'remove'}>
+          <div class="store-ask" role="group" aria-label={t('set.storage.old')}>
+            <p class="hint">{t('set.storage.oldConfirm')}</p>
+            <span class="store-ask-actions">
+              <button type="button" class="btn danger" aria-disabled={busy()} onClick={() => void act(api.storageMoveRemove)}>{t('set.storage.oldRemove')}</button>
+              <button type="button" class="btn" onClick={() => setAsking(undefined)}>{t('set.storage.moveBack')}</button>
+            </span>
+          </div>
+        </Show>
+      </Show>
       <Show when={error()}>{(failure) => <p class="note err store-note" role="alert">{failureText(failure())}</p>}</Show>
     </div>
   );

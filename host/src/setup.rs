@@ -177,7 +177,7 @@ pub(crate) async fn sign_in(vendor: String) -> Res<()> {
 
 pub(crate) async fn install(h: &Host, vendor: String) -> Res<()> {
     // An update never ends the process in the middle of an install: the shell holds it off until this is dropped.
-    let _running = h.shell.hold_install()?;
+    let _running = h.hold_install()?;
     let Some(v) = parse_vendor(&vendor) else {
         h.announce(&SetupProgressEvent {
             event_type: "setup".into(),

@@ -12,6 +12,7 @@ use std::sync::{Mutex, OnceLock};
 
 pub mod kits;
 mod location;
+pub mod moving;
 mod npm;
 pub use crate::store::retry_busy;
 pub use npm::Package;
