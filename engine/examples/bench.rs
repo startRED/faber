@@ -8,7 +8,7 @@
 //!     cargo run -p faber-engine --example bench -- [--dry-run] [--plain claude|codex] [--vendors claude[,codex]]
 //!         [--only id,id] [--run-id id] [--dir folder] [--cap-usd 8] [--cap-tokens 3000000] [--per-run-usd 1.5]
 //!         [--plain-model m] [--plain-effort e] [--judge-model m] [--judge-effort e] [--busy-account]
-//!         [--parts all|part,part]
+//!         [--parts all|part,part] [--parts-model model@effort]
 //!     --tool-definitions exports both toolbox wire formats as JSON without starting a CLI or spending quota.
 //!
 //! The pure parts (request files, the A/B deal, the verdict, what a CLI reported, the cap, the tables) are
@@ -64,6 +64,7 @@ struct Options {
     busy_account: bool,
     workflow_pair: bool,
     parts: Vec<BenchPart>,
+    parts_model: Option<String>,
 }
 
 impl Options {
@@ -79,6 +80,8 @@ impl Options {
         } else {
             vec![]
         };
+        let parts_model = value("--parts-model");
+        pure::parts_model(parts_model.as_deref(), BenchPart::Persona)?;
         let vendor = |name: &str| {
             [Vendor::Claude, Vendor::Codex].into_iter().find(|v| v.name() == name).ok_or_else(|| format!("{name} is claude or codex"))
         };
@@ -116,6 +119,7 @@ impl Options {
             busy_account: args.iter().any(|a| a == "--busy-account"),
             workflow_pair,
             parts,
+            parts_model,
         })
     }
 }
@@ -515,7 +519,9 @@ async fn run_faber(
     billed: bool,
     paired: Option<&Choice>,
     bench_trial: Option<Option<BenchPart>>,
+    pinned: Option<Choice>,
 ) -> SideResult {
+    let requested = pinned.as_ref().and_then(|choice| choice.model.clone());
     let started = Instant::now();
     let state = root.join(&request.id).join("faber").join("state");
     let engine = match Engine::new(
@@ -604,7 +610,7 @@ async fn run_faber(
             text: request.prompt.clone(),
             images: vec![],
             files: vec![],
-            choice: paired.cloned().unwrap_or_else(|| Choice { vendor: "auto".into(), model: None, effort: None }),
+            choice: paired.cloned().or(pinned).unwrap_or_else(|| Choice { vendor: "auto".into(), model: None, effort: None }),
         })?;
         Ok::<_, String>((id.clone(), settle(&engine, &id, request.kind == Kind::Project, allowance, baseline, bench_trial.is_some()).await))
     }
@@ -652,7 +658,7 @@ async fn run_faber(
             SideResult {
                 side: Side::Faber,
                 // Auto asks per reply; a reply whose CLI swapped the model says so in `models`.
-                requested_model: None,
+                requested_model: requested,
                 ok: error.is_none() && !reply.trim().is_empty() && !waiting,
                 error: error.or(waiting.then(|| "the answer waits for the person".into())),
                 secs: Some(replies.iter().filter_map(|m| m.took).sum::<u64>()).filter(|t| *t > 0).map_or(wall, |t| t as f64 / 1000.0),
@@ -1052,7 +1058,7 @@ async fn main() -> Result<(), Failure> {
                 write_checkpoint(&root, &options, &rows, &row, &spent)?;
                 return Err(error.into());
             }
-            run_faber(&clis, request, &work, &root, options.cap.allowance(&spent, options.per_run_usd), false, None, None).await
+            run_faber(&clis, request, &work, &root, options.cap.allowance(&spent, options.per_run_usd), false, None, None, None).await
         };
         accounts.worked(&options.vendors);
         spent.add(&faber.usage, faber.cost_usd);

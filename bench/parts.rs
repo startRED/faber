@@ -33,7 +33,9 @@ pub(super) async fn run(mut options: Options) -> Result<(), Failure> {
     );
     for (index, (part, request)) in plan() {
         let [first, second] = part_order(&options.run_id, index).map(Condition::name);
-        println!("  {} / {}: {first} then {second}", part.name(), request.id);
+        let on = pure::parts_model(options.parts_model.as_deref(), part)?
+            .map_or("Auto".into(), |(model, effort)| format!("{model}@{}", effort.name()));
+        println!("  {} / {}: {first} then {second}, both on {on}", part.name(), request.id);
     }
     println!(
         "Allowance-based spend estimate: US${nominal:.2} before the run cap; admission cap US${:.2} or {} first-time tokens",
@@ -68,6 +70,11 @@ pub(super) async fn run(mut options: Options) -> Result<(), Failure> {
     };
     save(&rows, &spent)?;
     for (index, (part, request)) in plan() {
+        let pinned = pure::parts_model(options.parts_model.as_deref(), part)?.map(|(model, effort)| Choice {
+            vendor: author.name().into(),
+            model: Some(model),
+            effort: Some(effort),
+        });
         let pair_root = root.join(part.name());
         for condition in rows[index].order {
             if let Some(why) = options.cap.reached(&spent) {
@@ -90,6 +97,7 @@ pub(super) async fn run(mut options: Options) -> Result<(), Failure> {
                 false,
                 None,
                 Some((condition == Condition::Off).then_some(part)),
+                pinned.clone(),
             )
             .await;
             accounts.worked(&[author]);

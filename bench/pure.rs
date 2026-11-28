@@ -516,6 +516,7 @@ pub fn choose_judge<'a>(plain: &str, authors: &Authors, available: &'a [&str], p
 // --- The report -----------------------------------------------------------------------------------------------------
 
 use faber_engine::BenchPart;
+use faber_engine::router::Effort;
 
 pub fn parse_parts(value: &str) -> Result<Vec<BenchPart>, String> {
     if value == "all" {
@@ -530,6 +531,22 @@ pub fn parse_parts(value: &str) -> Result<Vec<BenchPart>, String> {
         parts.push(part);
     }
     Ok(parts)
+}
+
+/// The model both trials of a pair run on, from `--parts-model model@effort`. Auto picks per trial, and on one request it
+/// may pick two models, which then decide the verdict more than the part does. The router's pair stays on Auto: choosing
+/// the model is what that part does.
+pub fn parts_model(value: Option<&str>, part: BenchPart) -> Result<Option<(String, Effort)>, String> {
+    let Some(value) = value else { return Ok(None) };
+    let efforts = [Effort::Low, Effort::Medium, Effort::High, Effort::Xhigh];
+    let Some((model, effort)) = value
+        .split_once('@')
+        .filter(|(model, _)| !model.is_empty())
+        .and_then(|(model, effort)| Some((model, efforts.into_iter().find(|known| known.name() == effort)?)))
+    else {
+        return Err("--parts-model takes model@effort, with effort low, medium, high or xhigh".into());
+    };
+    Ok((part != BenchPart::Router).then(|| (model.into(), effort)))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1285,6 +1302,17 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn a_pinned_model_holds_both_trials_of_a_pair_but_the_router_s() {
+        let pinned = Some(("gpt-6.2-sol".to_string(), Effort::Medium));
+        assert_eq!(parts_model(Some("gpt-6.2-sol@medium"), BenchPart::Guide).unwrap(), pinned);
+        assert_eq!(parts_model(Some("gpt-6.2-sol@medium"), BenchPart::Router).unwrap(), None, "the router's part is the pick");
+        assert_eq!(parts_model(None, BenchPart::Guide).unwrap(), None);
+        for wrong in ["gpt-6.2-sol", "@medium", "gpt-6.2-sol@", "gpt-6.2-sol@huge"] {
+            assert!(parts_model(Some(wrong), BenchPart::Guide).is_err(), "{wrong}");
+        }
+    }
+
     #[test]
     fn part_rows_alternate_whats_run_and_reveal_both_verdicts() {
         let parts = parse_parts("guide,router").unwrap();

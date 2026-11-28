@@ -32,7 +32,7 @@ Other launch differences include local progress, decisions, project map and cata
 
 One request (`organize-folder`), Codex on both sides, one pair per part, alternating order, judged blind by the other
 vendor. Spent US$ 3.54 in all. One pair is one sample: a verdict here is a lead to check, not a reason to cut a part. The
-three-request set the task names was estimated at US$ 148.50 and waits for the owner.
+three-request set, estimated at US$ 148.50, is out: the owner chose on 2026-11-28 cheap requests repeated three times.
 
 | Part | Time on / off (s) | Input on / off | Output on / off | Extra calls on / off | Judge picked |
 | :--- | ---: | ---: | ---: | ---: | :--- |
@@ -52,3 +52,33 @@ The judge picked the side with the part on for 3 parts (`start-card`, `checks`, 
 other 8. Input excludes cached reads; time is wall seconds for the whole turn. Raw rows: run `parts-1`.
 In 8 of the 11 pairs the picked side wrote the longer answer, so a length bias in the judge is a likely part of these
 verdicts; the next run should hold the answer length in view before reading a part as worth cutting.
+
+## Measured on 2026-11-28
+
+Three more runs of eight parts on `organize-folder`, Codex on both sides, judged blind by Claude: US$ 7.04 (runs
+`parts-112-1` to `-3`). They showed why one pair says little. Auto picks the model per trial, and on this one request it
+picked `gpt-6.1-terra` for some trials and `gpt-6.2-sol` for others, so 14 of the 24 pairs ran the two sides on different
+models. In all 14 the side on `gpt-6.2-sol` won, and the side with the longer answer won 19 of 24. The verdicts above
+and in these runs measure the model Auto happened to pick more than the part.
+
+`--parts-model model@effort` now runs both sides of every pair on that model. The `router` pair stays on Auto, because
+choosing the model is that part (`bench_pure::tests::a_pinned_model_holds_both_trials_of_a_pair_but_the_router_s`).
+
+Three pinned runs on `gpt-6.1-terra@medium` of the parts whose cut looked like it saved time, US$ 2.03 (runs
+`parts-112-pin-1` to `-3`). Median and [lowest-highest] of three; input includes cache writes.
+
+| Part | Time on / off (s) | Input on / off | Output on / off | Extra calls on / off | Judge picked | Proofs |
+| :--- | ---: | ---: | ---: | ---: | :--- | :--- |
+| `review` | 54 [51-57] / 53 [51-54] | 17901 / 35292 | 1199 / 1192 | 1 / 1 | on, off, off | all pass |
+| `delegation` | 54 [50-55] / 51 [50-57] | 23117 / 32881 | 1140 / 1117 | 1 / 1 | off, on, off | all pass |
+| `creative-judge` | 52 [49-59] / 55 [46-56] | 18005 / 35451 | 1132 / 1318 | 1 / 1 | on, on, on | all pass |
+
+No part was cut. `creative-judge` won every verdict; `review` and `delegation` each lost one with the part off, and their
+time differences sit inside the spread. The side without a part writes more fresh input, most likely because its tool list
+differs from the one earlier trials left in the provider's cache; that is a cost of the measurement, not of the part.
+
+Two findings are the owner's to decide, because they change what a person gets:
+
+- `router`: with it off, Auto ran `gpt-6.2-sol` every time and the judge preferred that side 3 of 3, while each turn took
+  about 15 s longer (median 71 s against 56 s, one model call fewer).
+- `title`: off saves one model call per conversation; the judge preferred the side with it on 2 of 3, on different models.

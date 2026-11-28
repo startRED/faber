@@ -20,7 +20,8 @@ Start it by hand at below-normal priority so a game in front keeps the processor
 | `--cap-usd`, `--cap-tokens`, `--per-run-usd` | 8, 3000000, 1.5 | The run's cap in API-equivalent dollars and first-time tokens, and what one side of one request may spend |
 | `--plain-model`, `--plain-effort` | claude-sonnet-5-5 medium | The plain CLI's model, the everyday default Faber itself starts on |
 | `--judge-model`, `--judge-effort` | strongest measured profile of the selected vendor | Optional overrides for the fresh judge; default model and effort come from `route::PROFILES`, ordered by intelligence then agent score |
-| `--busy-account` | off | Skip the wait for a quiet account (below). Each request's dollars come from the CLI's own report and stay exact; `results.json` records `accountQuiet: false`, and the run says nothing about the account's windows |
+| `--parts-model m@e` | Auto | [Parts](bench-parts.md#measured-on-2026-11-28): both trials of a pair on one model, but the router's |
+| `--busy-account` | off | Skip the wait for a quiet account (below). Dollars still come from each CLI's report; `results.json` records `accountQuiet: false` |
 | `--dir`, `--run-id` | the system temp folder's `faber-bench`, the time | Where the run folder `<dir>/<run-id>/` goes |
 
 Choose an output outside Cargo's `target` for receipts you need to keep. Build storage is replaceable and can be swept.
