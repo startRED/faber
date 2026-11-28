@@ -1,0 +1,92 @@
+[
+  {
+    "mutant": "N1-remove",
+    "test": "removing_a_live_chat_retires_its_running_counter_once",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "N2-chat-gate",
+    "test": "mission_storage_failures_never_block_chat_or_overwrite_the_owner",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "N2-preserve",
+    "test": "mission_storage_failures_never_block_chat_or_overwrite_the_owner",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "N2-write",
+    "test": "a_failed_chat_journal_write_keeps_chat_available_and_projects_closed",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "N3-old-counter",
+    "test": "pruned_old_unknown_cost_does_not_invalidate_a_current_baseline",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "N4-expiry",
+    "test": "abandoned_windows_expire_without_shrinking_active_pacing_history",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "N5-bound-identity",
+    "test": "routing_never_transplants_an_exposure_to_another_profile",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "N6-late-report",
+    "test": "a_late_report_with_fresh_quota_books_the_actual_day_and_span",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "N6-future-clock",
+    "test": "future_report_or_pause_does_not_poison_the_admission_clock",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "runner-job-limit",
+    "test": "configured_build_jobs_limit_the_runner_without_changing_its_default",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "audit-cli-identity",
+    "test": "an_unfinished_cli_record_cannot_claim_a_reused_process_id",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "audit-exit-identity",
+    "test": "an_exit_record_only_settles_its_exact_cli_process",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "audit-wmi-precision",
+    "test": "the_fake_clis_creation_time_matches_the_process_snapshot",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "merge-native-completion",
+    "test": "opus_4_interrupt_after_completion_keeps_the_warm_session",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "merge-runner-limit",
+    "test": "configured_build_jobs_limit_the_runner_without_changing_its_default",
+    "exitCode": 101,
+    "killed": true
+  }
+]

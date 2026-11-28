@@ -1,0 +1,1 @@
+{"msg":{"method":"item/completed","params":{"threadId":"t","turnId":"turn","item":{"id":"native-patch","type":"fileChange","status":"completed","changes":[{"path":"native-tools.txt","kind":{"type":"update"},"diff":"-baseline\n+escaped"}]}}}}

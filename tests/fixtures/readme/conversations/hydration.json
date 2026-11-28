@@ -1,0 +1,42 @@
+{
+  "id": "c4a70003-0000-4000-8000-000000000001",
+  "title": "Explain dough hydration in simple words",
+  "area": "chat",
+  "sessions": {},
+  "createdAt": -180000000,
+  "updatedAt": -179960000,
+  "queued": [],
+  "messages": [
+    {
+      "id": "c4a70003-0000-4000-8000-0000000000a1",
+      "role": "user",
+      "text": "Explain dough hydration in simple words. I need to teach it to a new apprentice tomorrow.",
+      "at": -180000000
+    },
+    {
+      "id": "c4a70003-0000-4000-8000-0000000000a2",
+      "role": "assistant",
+      "at": -179994000,
+      "took": 28000,
+      "finishedAt": -179966000,
+      "vendor": "claude",
+      "model": "claude-haiku-5-5",
+      "effort": "medium",
+      "reason": "reason.route.chat.easy",
+      "status": "done",
+      "costUsd": 0.01,
+      "inputTokens": 5200,
+      "outputTokens": 610,
+      "acts": [
+        {
+          "kind": "route",
+          "actor": { "who": "faber" },
+          "what": "act.route.chose",
+          "why": "reason.route.chat.easy",
+          "params": { "model": "claude-haiku-5-5", "effort": "medium" }
+        }
+      ],
+      "text": "Hydration is how much water a dough has for its flour, by weight.\n\n- 1,000 g of flour and 700 g of water is **70% hydration**.\n- A lower number gives a firm dough that is easy to shape, like a bagel.\n- A higher number gives a wet dough with big holes, like a ciabatta.\n\nFor the apprentice: weigh the flour, multiply by the number on the recipe card, and that is the water."
+    }
+  ]
+}

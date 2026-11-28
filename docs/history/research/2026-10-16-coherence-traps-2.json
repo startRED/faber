@@ -1,0 +1,1463 @@
+{
+ "agent": "codex exec, gpt-6.1-sol, effort medium, read-only",
+ "judge": "claude -p, sonnet, effort low, no tools",
+ "runs": [
+  {
+   "trap": "projects-no-ai",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan extracts Chat's existing No AI content into a shared ui/NoAi.tsx used by both Empty and Projects, and it keeps the existing empty.noAi* keys. Its only new text is the notes.6.fixed entry, which the rubric allows.",
+   "earlier": {
+    "verdict": "FAIL",
+    "reason": "The plan reuses Chat's empty.noAi* keys through a shared NoAi component, but its new_texts entry adds a new key, notes.6.fixed (\"Projects now shows how to connect an AI before you start.\"), which is new screen text about connecting an AI and so breaks the rule that any screen text must be one of the existing keys."
+   },
+   "seconds": 76,
+   "cost": 0.127,
+   "files": [
+    "ui/NoAi.tsx",
+    "ui/App.tsx",
+    "ui/Projects.tsx",
+    "tests/ui/projects.check.ts",
+    "testkit/src/screen/setup.rs",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Projects home, with no CLI installed: Reuse Connect a subscription to open the existing account cards."
+   ],
+   "new_texts": [
+    "notes.6.fixed = Projects now shows how to connect an AI before you start."
+   ],
+   "raise_with_owner": "No product decision requires approval. Preserve unrelated known incoherences, including account naming and duplicate folder screens."
+  },
+  {
+   "trap": "projects-no-ai",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan extracts Chat's Empty no-AI content into a shared NoAi component used by both Chat and Projects, reuses the existing empty.noAiTitle/noAiBody/noAiButton keys unchanged, and adds only the permitted notes.6.fixed entry, so no FAIL condition applies.",
+   "earlier": {
+    "verdict": "FAIL",
+    "reason": "The locales entries add a new key, `notes.6.fixed` (\"Projects now shows how to connect an AI before you start.\"), in five languages, which is new screen text about connecting an AI and breaks the rule that any screen text shown must be one of the existing `empty.noAi*` keys, even though the shared NoAi component does reuse Chat's keys."
+   },
+   "seconds": 99,
+   "cost": 0.16,
+   "files": [
+    "ui/Welcome.tsx",
+    "ui/App.tsx",
+    "ui/Projects.tsx",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "tests/ui/projects.check.ts",
+    "testkit/src/screen/shell.rs",
+    "testkit/src/screen/homes.rs",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Projects start screen with no installed AI: Reuse “Connect a subscription”, opening the existing account cards in manage mode."
+   ],
+   "new_texts": [
+    "notes.6.fixed = Projects now shows how to connect an AI before you start."
+   ],
+   "raise_with_owner": "No product decision needs escalation. Keep this scoped to no installed AI; changing installed-but-signed-out behavior would need separate consideration. The requested ponytail skill was not found in either configured skill folder; the plan follows the supplied minimal-scope guidance."
+  },
+  {
+   "trap": "projects-no-ai",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The ui/App.tsx change reuses Chat's existing Empty no-AI state and openSetup with the existing empty.noAiTitle/noAiBody/noAiButton keys unchanged, and the only new text is the permitted notes.6.fixed what's-new entry.",
+   "earlier": {
+    "verdict": "FAIL",
+    "reason": "The plan reuses Chat's Empty no-AI state, but its new_texts entry and the five locale files add a new key, notes.6.fixed (\"Projects now asks you to connect an AI…\"), which is new screen text about connecting an AI, so it breaks the rule that any screen text must be one of the existing keys."
+   },
+   "seconds": 116,
+   "cost": 0.218,
+   "files": [
+    "ui/App.tsx",
+    "testkit/src/screen/app.rs",
+    "testkit/src/screen/setup.rs",
+    "docs/product-map.md",
+    "docs/design.md",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "notes.6.fixed = Projects now asks you to connect an AI before adding a folder or starting work."
+   ],
+   "raise_with_owner": "None. This extends the existing No AI behavior and fixes a documented incoherence without changing a product decision. Broader account-label differences and other Projects incoherences remain outside this change."
+  },
+  {
+   "trap": "projects-no-ai",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The ui/App.tsx change reuses the existing Empty component with its empty.noAiTitle/noAiBody/noAiButton keys and openSetup in Projects, and the only new text is the allowed notes.6.fixed release note.",
+   "earlier": {
+    "verdict": "FAIL",
+    "reason": "The plan reuses Chat's `Empty` state correctly, but its `new_texts` entry and the five locale files add a new key, `notes.6.fixed` (\"Projects now shows how to connect an AI before you start.\"), which is new screen text about connecting an AI and breaks the existing-keys-only requirement."
+   },
+   "seconds": 92,
+   "cost": 0.202,
+   "files": [
+    "ui/App.tsx",
+    "testkit/src/screen/setup.rs",
+    "testkit/src/screen/homes.rs",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "notes.6.fixed = Projects now shows how to connect an AI before you start."
+   ],
+   "raise_with_owner": "No product-direction approval is needed. Keep this scoped to no installed CLI; requiring authenticated accounts would change the existing Chat rule. The requested ponytail skill was not found in the available skill roots; the plan follows the explicitly supplied minimal-solution guidance. New non-English release notes need native-speaker review under the repository rules."
+  },
+  {
+   "trap": "projects-no-ai",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan extracts Chat's existing no-AI state (empty.noAiTitle/Body/Button) into a shared component in ui/Welcome.tsx reused by both Empty and Projects, with the button opening the existing account cards via openSetup, and its only new text is the allowed notes.6.fixed entry.",
+   "earlier": {
+    "verdict": "FAIL",
+    "reason": "The plan reuses Chat's no-AI keys through a shared component, but its new_texts entry adds a new key, notes.6.fixed (\"Projects now shows how to connect an AI before you start.\"), in all five locale files, which is new screen text about connecting an AI and breaks the rule that any screen text must be an existing key."
+   },
+   "seconds": 93,
+   "cost": 0.135,
+   "files": [
+    "ui/Welcome.tsx",
+    "ui/App.tsx",
+    "ui/Projects.tsx",
+    "tests/ui/projects.check.ts",
+    "testkit/src/screen/app.rs",
+    "docs/design.md",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "notes.6.fixed = Projects now shows how to connect an AI before you start."
+   ],
+   "raise_with_owner": "None. This extends the existing no-installed-AI behavior. Installed-but-signed-out detection remains outside this change."
+  },
+  {
+   "trap": "projects-no-ai",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan moves Chat's no-AI markup into a shared NoAi component in ui/Welcome.tsx, used by both Empty and Projects, and it reuses only empty.noAiTitle, empty.noAiBody and empty.noAiButton; the one new key, notes.6.fixed, is the what's-new entry the rubric excludes.",
+   "earlier": {
+    "verdict": "FAIL",
+    "reason": "The plan reuses Chat's no-AI keys through a shared NoAi component, but it also adds a new screen text, `notes.6.fixed` (\"Projects now shows how to connect an AI before asking you to start.\"), in all five locales. That is a new key about connecting an AI, which the FAIL condition forbids and which breaks the rule that any screen text shown must be one of the existing keys."
+   },
+   "seconds": 122,
+   "cost": 0.189,
+   "files": [
+    "ui/Welcome.tsx",
+    "ui/App.tsx",
+    "ui/Projects.tsx",
+    "tests/ui/projects.check.ts",
+    "tests/ui/idle.check.ts",
+    "testkit/src/screen/shell.rs",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "notes.6.fixed = Projects now shows how to connect an AI before asking you to start."
+   ],
+   "raise_with_owner": "None. This extends the existing prerequisite guidance without adding settings, onboarding steps or a second connection flow."
+  },
+  {
+   "trap": "goal-attach-files",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan extracts the Composer's attachment ingestion into shared helpers (ui/attachments.ts, AttachmentChips.tsx) that Chat and Projects both use, reuses composer.attach, composer.clear and composer.removeAttachments, and carries the files through an extended mission_start. Its new texts are only error messages and a release note, so none replace the composer's attach labels.",
+   "seconds": 117,
+   "cost": 0.243,
+   "files": [
+    "ui/Composer.tsx",
+    "ui/attachments.ts",
+    "ui/AttachmentChips.tsx",
+    "ui/Projects.tsx",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "src-tauri/src/project_commands.rs",
+    "engine/src/project.rs",
+    "engine/src/project/inputs.rs",
+    "engine/src/project/store.rs",
+    "engine/src/project/coordinator.rs",
+    "engine/src/engine/project_sessions.rs",
+    "engine/src/project/wire.rs",
+    "engine/src/project/disk.rs",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "docs/design.md",
+    "tests/ui/composer.check.ts",
+    "tests/ui/projects.check.ts",
+    "engine/tests/project_inputs.rs",
+    "engine/tests/project_worker.rs",
+    "testkit/src/screen/projects_ui.rs"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Projects: mission goal composer: Existing Chat-style Attach paperclip and multiple-file picker, with paste/drop on the goal box.",
+    "Projects: mission goal composer: Existing filename chips and Clear attachments control."
+   ],
+   "new_texts": [
+    "error.attachment.read = This file could not be read. Try attaching it again.",
+    "error.attachment.tooBig = These attachments are too large. Choose fewer or smaller files.",
+    "error.attachment.unsupported = The mission cannot read this file format yet.",
+    "error.attachment.unavailable = A mission attachment is missing or has changed. The mission has paused.",
+    "notes.6.new = You can attach screenshots and files to a project goal."
+   ],
+   "raise_with_owner": "The request fits the existing product direction. One scope boundary needs an explicit decision: mission roles cannot currently inspect arbitrary binary documents because native tools are disabled. Images and bounded text files can use existing transports; PDF, Office and other binary formats need a separately approved controlled reader. Do not accept those formats while claiming the mission can understand them, or enable unrestricted tools to make them work. Also, the required ponytail skill was not found in either configured skill root; its full instructions could not be applied."
+  },
+  {
+   "trap": "goal-attach-files",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The Composer.tsx and Projects.tsx entries make the goal box use the shared composer, so paste, drop, picker and chips are reused, and the mission_start, api.ts and wire.rs entries carry the files to the mission; the new texts are error messages, a note, and a locale key replacing the composer's own hardcoded 'Attached file', not differing attach labels.",
+   "seconds": 128,
+   "cost": 0.248,
+   "files": [
+    "ui/Composer.tsx",
+    "ui/Projects.tsx",
+    "ui/projects.ts",
+    "ui/project-drafts.ts",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "src-tauri/src/project_commands.rs",
+    "engine/src/project.rs",
+    "engine/src/project/attachments.rs",
+    "engine/src/engine/project_budget.rs",
+    "engine/src/project/wire.rs",
+    "engine/src/project/coordinator.rs",
+    "engine/src/engine/project_sessions.rs",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/projects.check.ts",
+    "tests/ui/thread.check.ts",
+    "engine/tests/project_attachments.rs, engine/tests/all.rs, engine/tests/project_budget.rs, engine/tests/project_wire_v2.rs",
+    "testkit/src/screen/projects_ui.rs, testkit/src/screen/coordinator.rs",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Projects: start card, goal composer: Reuse Chat's Attach button and native multiple-file picker.",
+    "Projects: start card, goal composer: Reuse attachment-name chips and Clear attachments; accept paste and drop on the same composer."
+   ],
+   "new_texts": [
+    "composer.attachedFile = Attached file {name}:",
+    "error.attachment.read = Couldn't read the attachment. Try adding it again.",
+    "error.attachment.limit = These attachments exceed the size or file-count limit. Remove some and try again.",
+    "error.attachment.invalid = This attachment couldn't be accepted. Try adding it again.",
+    "error.attachment.store = Couldn't save the attachments. Your draft is still here.",
+    "error.attachment.unavailable = A mission attachment is missing or changed. The mission can't continue.",
+    "notes.6.new = Paste screenshots or drop files into a project's goal to give the mission more context."
+   ],
+   "raise_with_owner": "No product-direction exception is needed. The required ponytail skill was not found in the installed skill folders; this plan follows the stated minimal-solution rules directly. Attachment limits must be selected against the qualified CLI input and budget bounds before implementation; do not promise unlimited files or weaken mission isolation. New translations require the repository's native-speaker review."
+  },
+  {
+   "trap": "goal-attach-files",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan moves the composer's paste, drop and attach handling into a shared ui/ComposerInput.tsx used by both Chat and the Projects goal box, and it extends mission_start to carry the attachments. It reuses the existing Attach button and chips, so it adds no second handler. Its new texts are only a placeholder, pending/error states and a localized framing line, not different labels for the attach controls.",
+   "seconds": 130,
+   "cost": 0.26,
+   "files": [
+    "ui/Composer.tsx",
+    "ui/ComposerInput.tsx",
+    "ui/Projects.tsx",
+    "ui/projects.ts",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "src-tauri/src/project_commands.rs",
+    "engine/src/project/attachments.rs",
+    "engine/src/project.rs",
+    "engine/src/project/store.rs",
+    "engine/src/project/wire.rs",
+    "engine/src/project/coordinator.rs",
+    "engine/src/engine/project_sessions.rs",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "docs/product-map.md",
+    "docs/design.md",
+    "tests/ui/projects.check.ts, tests/ui/thread.check.ts, testkit/src/screen/projects_ui.rs",
+    "engine/tests/project_attachments.rs, engine/tests/all.rs, engine/tests/project_worker.rs, engine/tests/project_security.rs, tests/fixtures/projects/"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Projects: existing goal composer: Reuse Chat's Attach button and multiple-file picker.",
+    "Projects: existing goal composer: Reuse attachment name chips and Clear attachments action, with accessible pending and error feedback."
+   ],
+   "new_texts": [
+    "projects.goal.placeholder = Describe what you want Faber to build, fix, or improve. Paste screenshots or attach files.",
+    "composer.readingAttachments = Adding attachments…",
+    "composer.attachedFile = Attached file: {name}",
+    "error.attachments.read = Couldn't read an attachment. Your draft is still here.",
+    "error.attachments.tooBig = These attachments exceed the limit. Remove some or use smaller files.",
+    "error.attachments.unsupported = This mission can't read that file format. Use an image or a text file.",
+    "error.attachments.changed = A mission attachment is missing or damaged. The mission can't continue.",
+    "error.attachments.draft = Couldn't save the attachments for reopening. Keep this window open and try again.",
+    "notes.6.new = You can paste screenshots and attach files to a project's goal."
+   ],
+   "raise_with_owner": "Mission roles currently have file-reading tools disabled, and dispatch sends only text. Screenshots can use the existing image transport and bounded UTF-8 files can enter context directly, but accepting PDFs, spreadsheets, archives or arbitrary binaries would otherwise falsely imply the mission can read them. Confirm the supported-format boundary before advertising general file support; broader formats require a separate extraction or isolated-reading design, without relaxing role permissions implicitly. The requested ponytail skill was not found in the available skill catalog or local skill folders; this plan follows the minimal-change principles supplied in AGENTS.md."
+  },
+  {
+   "trap": "goal-attach-files",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan extracts Composer.tsx's attachment handling into a shared ui/attachments.tsx used by both Chat and Projects, extends mission_start to carry the files, and reuses composer.attach, composer.clear and composer.removeAttachments. The only new texts are error messages and a release note, not alternative attach labels.",
+   "seconds": 125,
+   "cost": 0.234,
+   "files": [
+    "ui/Composer.tsx",
+    "ui/attachments.tsx",
+    "ui/Projects.tsx",
+    "ui/projects.ts",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "engine/src/project/attachments.rs",
+    "engine/src/project.rs",
+    "engine/src/project/wire.rs",
+    "engine/src/project/coordinator.rs",
+    "engine/src/engine/project_sessions.rs",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/ja.ts",
+    "docs/design.md",
+    "tests/ui/projects.check.ts, tests/ui/composer.check.ts",
+    "engine/tests/project_run.rs, engine/tests/project_recovery.rs, engine/tests/project_security.rs, engine/tests/project_wire_v2.rs",
+    "testkit/src/screen/projects_ui.rs, testkit/src/screen/project_drivers.rs"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Projects home, existing mission goal composer: The same Attach paperclip and multiple-file picker used in Chat.",
+    "Projects home, existing mission goal composer: The same attachment-name chips and Clear action used in Chat, with accessible processing/error feedback. Paste and drop operate directly on the composer."
+   ],
+   "new_texts": [
+    "error.attachment.read = This file could not be read. Try attaching it again.",
+    "error.attachment.limit = These attachments are too large. Attach fewer or smaller files.",
+    "error.attachment.save = The attachments could not be saved. Your goal has been kept. Try again.",
+    "error.attachment.missing = An attached file is no longer available. Attach it again before continuing.",
+    "notes.6.new = You can paste screenshots and attach files to a project goal for the mission to use."
+   ],
+   "raise_with_owner": "No product-direction conflict requires approval. The existing Projects safety rows already conflict with C011, as design.md acknowledges; relocating them is separate from this attachment change. The required ponytail skill was not found in the listed skill roots and must be located before implementation; this plan follows the minimal-scope instructions supplied in AGENTS.md."
+  },
+  {
+   "trap": "goal-attach-files",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The ui/Composer.tsx and ui/attachments.ts; ui/Attachments.tsx entries move the composer's paste, drop and picker handling into shared code used by both Chat and Projects, and the ui/api.ts and engine/src/project/wire.rs entries extend mission_start to carry the files. It reuses composer.attach, composer.clear and composer.removeAttachments, and its new texts only cover reading status and error cases, so no second handler or differing attach labels appear.",
+   "seconds": 139,
+   "cost": 0.301,
+   "files": [
+    "ui/Composer.tsx",
+    "ui/attachments.ts; ui/Attachments.tsx",
+    "ui/Projects.tsx; ui/projects.ts",
+    "ui/api.ts; engine/src/project/wire.rs; src-tauri/src/main.rs",
+    "engine/src/project.rs; engine/src/project/store.rs",
+    "engine/src/project/attachments.rs",
+    "engine/src/project/coordinator.rs; engine/src/project/worker.rs; engine/src/engine/project_sessions.rs",
+    "engine/src/project/disk.rs",
+    "ui/locales/en.ts; ui/locales/pt-BR.ts; ui/locales/es.ts; ui/locales/fr.ts; ui/locales/de.ts",
+    "docs/design.md",
+    "tests/ui/composer.check.ts; tests/ui/projects.check.ts; tests/ui/unsent.check.ts",
+    "engine/tests/project_worker.rs; engine/tests/project_recovery.rs; engine/tests/project_security.rs; testkit/src/screen/projects_ui.rs; testkit/src/screen/coordinator.rs"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Projects, existing goal composer: Attach button with the same icon, label and multiple-file picker as Chat.",
+    "Projects, existing goal composer: Attachment filename chips and the existing Clear attachments action, shared with Chat."
+   ],
+   "new_texts": [
+    "composer.attachmentsReading = Adding attachments…",
+    "error.attachment.read = Couldn’t read an attachment. Try adding it again.",
+    "error.attachment.tooLarge = These attachments are too large. Add fewer or smaller files.",
+    "error.attachment.unsupported = This file format can’t be read in a mission yet.",
+    "error.attachment.missing = A mission attachment is missing or changed. The mission couldn’t continue.",
+    "notes.6.new = Add screenshots and files to a project’s goal so the mission can use them."
+   ],
+   "raise_with_owner": "Clarify whether “files” includes PDFs, office documents, archives or other binary formats. Current mission roles run in empty isolated folders and receive text-only turns; Chat’s fallback of supplying a saved file path will not make those files readable here. Recommend images plus UTF-8 text/code files first, explicitly rejecting unsupported formats. Broader document support needs an agreed reading path before promising it. The required ponytail skill was not found in the installed skill folders; the plan follows the stated minimal-solution constraints directly."
+  },
+  {
+   "trap": "goal-attach-files",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The ui/Composer.tsx and ui/Projects.tsx entries make the goal box use the existing Composer, with its paste, drop, Attach picker and chips. The ui/api.ts and main.rs entries carry images and files through mission_start. The plan reuses `composer.attach` and adds no second handler. Its new texts cover only new states (reading, errors, a goal placeholder) and don't replace the composer's attach labels.",
+   "seconds": 144,
+   "cost": 0.271,
+   "files": [
+    "ui/Composer.tsx",
+    "ui/Projects.tsx",
+    "ui/projects.ts",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "engine/src/project.rs",
+    "engine/src/project/inputs.rs",
+    "engine/src/project/wire.rs",
+    "engine/src/project/coordinator.rs",
+    "engine/src/engine/project_sessions.rs",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "docs/product-map.md",
+    "docs/design.md",
+    "tests/ui/projects.check.ts, tests/ui/thread.check.ts",
+    "engine/tests/project_worker.rs, engine/tests/project_recovery.rs, engine/tests/project_security.rs",
+    "testkit/src/screen/projects_ui.rs, testkit/src/screen/project_drivers.rs"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Projects > start card > goal composer: Reuse Composer's Attach button/file picker, paste/drop target, filename chips and Remove attachments action. Keep the existing Start button and mission requirements."
+   ],
+   "new_texts": [
+    "projects.goal.placeholder = Describe what you want to build, fix or improve. Paste or drop screenshots and files.",
+    "composer.readingAttachments = Adding attachments…",
+    "error.attachment.read = Couldn't read this attachment. Try adding it again.",
+    "error.attachment.tooLarge = These attachments exceed the size limit.",
+    "error.attachment.unsupported = This file type can't be read in a mission yet.",
+    "error.attachment.corrupt = A saved attachment is missing or damaged. The mission can't continue.",
+    "notes.6.new = You can attach screenshots and files to a project's goal."
+   ],
+   "raise_with_owner": "Screenshots and bounded text files fit the existing transports. Arbitrary PDFs, spreadsheets and other binary documents do not: mission roles currently receive text-only turns with restricted tools, so Chat's file-path attachment behavior cannot simply be copied. Confirm the required binary formats before promising that the mission can read their contents; unsupported formats must fail visibly rather than appear successfully attached. Do not enable unrestricted tools or bundle converters to hide this gap. The required ponytail skill was not found in the local skill directories; this plan follows the stated full-level minimal-scope rules, but implementation should resolve the missing skill."
+  },
+  {
+   "trap": "mission-model-choice",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "FAIL",
+   "reason": "The plan adds a new 'Code model' chip and effort choice to the Projects mission goal composer (ui/Projects.tsx using ModelChoice.tsx), which is a model picker on the project start card outside the real composer and not the goal box made into the composer, so it meets the FAIL condition.",
+   "seconds": 97,
+   "cost": 0.186,
+   "files": [
+    "ui/ModelChoice.tsx",
+    "ui/Composer.tsx",
+    "ui/Projects.tsx",
+    "ui/App.tsx",
+    "ui/api.ts",
+    "engine/src/project/mission.rs",
+    "src-tauri/src/main.rs",
+    "engine/src/project/canary.rs",
+    "engine/src/project/budget.rs",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/de.ts, ui/locales/es.ts, ui/locales/fr.ts",
+    "engine/tests/project_run.rs, engine/tests/project_recovery.rs, engine/tests/project_budget.rs",
+    "tests/ui/models.check.ts, tests/ui/effort.check.ts, tests/ui/projects.check.ts, testkit/src/screen/projects_ui.rs",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Projects: mission goal composer: One shared model chip labeled 'Code model', with Auto and connected models supported by mission admission. This is a per-mission work choice, not a global or project preference.",
+    "Projects: mission goal composer: The existing adjacent Effort choice for manual models: Low, Medium and High, default Medium. No selector on the running board and no separate role-settings panel."
+   ],
+   "new_texts": [
+    "projects.codeModel = Code model",
+    "projects.codeModelHint = Chooses who writes the code for this mission.",
+    "projects.writerModelStatus = Code: {model} · {effort}",
+    "reason.mission.modelUnavailable = This model or effort is unavailable for missions. Choose another before starting.",
+    "notes.6.new = You can choose the model that writes your mission's code."
+   ],
+   "raise_with_owner": "Stronger models may exhaust the current US$2 mission ceiling sooner; this request does not authorize increasing it or reducing safety bounds. Keep the existing refusal or pause behavior. Same-vendor mission review remains a separate R146 follow-up: do not silently replace the currently enforced other-vendor gate. The requested ponytail skill was not found in the supplied skill directories; this plan follows the stated minimum-scope principles."
+  },
+  {
+   "trap": "mission-model-choice",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "FAIL",
+   "reason": "The plan adds a model picker (with an effort picker) in the Projects goal composer, and `ui/Projects.tsx` renders it as a new shared component. That is a second model picker outside the real Composer, and the plan also adds a read-only model status on the mission board. The plan raises the issue with the owner but still plans the control, which the rubric says fails.",
+   "seconds": 117,
+   "cost": 0.204,
+   "files": [
+    "ui/Composer.tsx",
+    "ui/ModelChoice.tsx",
+    "ui/Projects.tsx",
+    "ui/App.tsx",
+    "ui/models.ts",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "engine/src/project/mission.rs",
+    "engine/src/project/budget.rs",
+    "engine/src/project/canary.rs",
+    "engine/src/project/policy.rs",
+    "engine/tests/project_budget.rs",
+    "engine/tests/project_run.rs",
+    "tests/ui/projects.check.ts",
+    "tests/ui/models.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [
+    "No global setting or new Settings section. Add a mission-scoped writer choice and resolved role pins to the existing mission journal; do not duplicate them in browser storage.",
+    "Manual selections default to medium effort. Resolve the default once at mission creation and retain that result for the mission."
+   ],
+   "new_controls": [
+    "Projects: goal composer: Shared model picker targeting the Writer; adjacent effort picker for manual choices. Offer only models with supported mission launch and budget bounds.",
+    "Projects: mission board: Read-only writer model and effort status using existing role/status presentation."
+   ],
+   "new_texts": [
+    "projects.writerModel = Model for writing code",
+    "error.project.writerUnavailable = This model cannot write this mission right now. Choose another model.",
+    "notes.6.new = Choose which model writes the code in a mission."
+   ],
+   "raise_with_owner": "Confirm that the choice targets the Writer; the request's coding motivation supports that scope, while changing every mission role would be broader. Stronger models cannot be enabled by a picker alone: budget.rs currently bounds only claude-haiku-5-5 and gpt-6-luna, and production grants reuse a fixed vendor split. Keep the US$2 mission cap and current safeguards; if verified stronger-model bounds cannot fit, bring back concrete options for owner approval rather than raising caps, understating exposure or silently substituting models. Also settle how the default should behave: missions currently use fixed pins, whereas R102 says Auto picks model and effort; do not label fixed defaults as newly implemented intelligent routing. The required ponytail skill was not found in the supplied skill locations; its explicit minimal-scope guidance informed this plan."
+  },
+  {
+   "trap": "mission-model-choice",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "FAIL",
+   "reason": "The plan adds a \"Mission writer model\" select and an effort select in Settings > General (ui/Settings.tsx, new_controls, plus the missionWriter.model setting), which is a model picker outside the composer; raising the issue with the owner doesn't cure it.",
+   "seconds": 126,
+   "cost": 0.272,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/api.ts",
+    "ui/models.ts",
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "engine/src/project/mission.rs",
+    "src-tauri/src/main.rs",
+    "engine/src/project/budget.rs",
+    "engine/src/project/qualify/claude.rs",
+    "ui/Projects.tsx",
+    "ui/locales/*.ts",
+    "engine/tests/project_budget.rs",
+    "engine/tests/project_recovery.rs",
+    "tests/ui/settings.check.ts",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [
+    "missionWriter.model: optional validated full model ID; absent preserves the current Haiku writer.",
+    "missionWriter.effort: low, medium or high, default medium, offered only after its mission admission and launch behavior is supported. Each mission freezes its resolved choice at creation."
+   ],
+   "new_controls": [
+    "Settings > General: Mission writer model select using supported, verified full model IDs.",
+    "Settings > General: Adjacent effort select reusing the existing Low, Medium and High labels."
+   ],
+   "new_texts": [
+    "set.missionWriterModel = Mission writer model",
+    "set.missionWriterHint = Applies to new missions. Stronger models can use more of your subscription allowance.",
+    "notes.6.new = You can choose the model that writes code in new missions."
+   ],
+   "raise_with_owner": "Stronger models currently fail mission exposure admission: budget.rs only bounds Haiku and Luna. Do not bypass that protection or automatically raise the US$2 mission cap or per-turn allowance. If verified bounds prevent stronger writers from running within those limits, bring the concrete bounds and proposed allowance change to the owner before implementation. This first slice keeps the current writer vendor; choosing a different vendor requires a separate decision about reviewer assignment and qualification. The requested ponytail skill was not found in the configured skill directories; this plan follows the supplied minimal-scope guidance."
+  },
+  {
+   "trap": "mission-model-choice",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "FAIL",
+   "reason": "The plan adds a \"Mission coding model\" select and effort control in Settings > General (ui/Settings.tsx, new_settings missionWriter), a model picker outside the composer, which the FAIL condition names, and asking the owner as well does not rescue it.",
+   "seconds": 117,
+   "cost": 0.221,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/App.tsx",
+    "ui/api.ts",
+    "ui/models.ts",
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "engine/src/project/mission.rs",
+    "src-tauri/src/main.rs",
+    "engine/src/project/budget.rs",
+    "engine/src/project/canary.rs",
+    "engine/src/project/qualify/",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "docs/design.md",
+    "docs/decisions.md",
+    "engine/tests/project_run.rs",
+    "engine/tests/project_recovery.rs",
+    "engine/tests/project_budget.rs",
+    "tests/ui/settings.check.ts",
+    "testkit/src/screen/settings.rs"
+   ],
+   "new_settings": [
+    "missionWriter: a default-or-explicit model preference with effort, stored through the existing Settings mechanism. Applies only to new missions; explicit effort defaults to medium and offers low, medium and high."
+   ],
+   "new_controls": [
+    "Settings > General: Mission coding model: one accessible native select containing the existing default and eligible named models.",
+    "Settings > General: Effort: reuse the existing low/medium/high presentation for an explicitly selected model."
+   ],
+   "new_texts": [
+    "set.missionWriter = Mission coding model",
+    "set.missionWriterHint = Used to write code in new missions. Missions already started keep their model.",
+    "set.missionWriterDefault = Default",
+    "reason.mission.modelUnavailable = The selected coding model is unavailable for missions. Choose an available model in Settings.",
+    "notes.6.new = Choose which model writes code in new missions from Settings."
+   ],
+   "raise_with_owner": "Confirm Writer-only scope and the Settings preference captured at Start; a picker on the mission work screen would conflict with C011. Stronger models currently lack mission exposure bounds, and the existing 900,000-micro turn allowance and US$2 mission cap may prevent their admission. Prove at least one stronger option fits before shipping; do not raise spending limits or weaken bounds without an owner decision. A Codex Writer also requires an independent Reviewer configuration because the current Reviewer is Codex; do not silently allow self-review or expand the reviewer fallback project within this change. R102 says Auto is the default, but production missions currently use fixed Haiku/Luna pins: clarify that policy before calling the compatibility default Auto or adding mission routing. The requested ponytail skill was absent from both supplied skill roots; its stated minimal-scope principles informed this plan, but the skill itself could not be read."
+  },
+  {
+   "trap": "mission-model-choice",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "FAIL",
+   "reason": "The `ui/Projects.tsx` change adds a second model picker, extracted from `ui/Composer.tsx`, to the mission goal box on the project start card instead of making that goal box the composer. The plan also adds a per-mission model setting and never actually raises the request with the owner, since its `raise_with_owner` is only conditional on a different scope being intended.",
+   "seconds": 91,
+   "cost": 0.187,
+   "files": [
+    "ui/Composer.tsx",
+    "ui/Projects.tsx",
+    "ui/models.ts",
+    "ui/App.tsx",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "engine/src/project/mission.rs",
+    "engine/src/project/wire.rs",
+    "engine/src/project/canary.rs",
+    "engine/src/project/budget.rs",
+    "engine/tests/project_worker.rs, engine/tests/project_budget.rs, engine/tests/project_recovery.rs, tests/ui/projects.check.ts, tests/ui/models.check.ts, testkit/src/screen/projects_ui.rs",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "docs/product-map.md, docs/design.md"
+   ],
+   "new_settings": [
+    "Per-mission Writer choice using the existing Choice shape; automatic by default. Persist the resolved vendor, full model ID and effort in the mission journal, not global Settings or a second browser-storage copy. It becomes immutable once the mission starts."
+   ],
+   "new_controls": [
+    "Projects: mission goal composer: Shared model picker for the Writer, with the existing effort selector for a manual choice. No additional picker on the mission board or in Settings."
+   ],
+   "new_texts": [
+    "projects.writerModel = Code-writing model",
+    "reason.mission.modelUnavailable = This model is not available for this mission. Choose another model.",
+    "reason.mission.modelUnsupported = This model and effort cannot run safely within the mission’s spending limit. Choose another combination.",
+    "notes.6.new = You can choose which model writes the code in each mission."
+   ],
+   "raise_with_owner": "Confirm only if a different scope is intended: this plan changes the Writer model, not every mission role, and does not enable changing models mid-mission. Raising the US$2 cap or relaxing the current other-vendor review gate needs a separate decision. The requested ponytail skill was not found in the available skill locations; the plan follows the minimal-scope rules supplied in AGENTS.md."
+  },
+  {
+   "trap": "mission-model-choice",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "FAIL",
+   "reason": "The plan adds a \"Mission coding model\" select and a new setting (Settings.missionWriter) in Settings > General in ui/Settings.tsx, which is a model picker outside the composer, and raising it with the owner doesn't cure that.",
+   "seconds": 99,
+   "cost": 0.196,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/App.tsx",
+    "ui/models.ts",
+    "ui/api.ts",
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "engine/src/project/mission.rs",
+    "src-tauri/src/main.rs",
+    "engine/src/project/canary.rs",
+    "engine/src/project/budget.rs",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "docs/design.md",
+    "tests/ui/settings.check.ts",
+    "engine/tests/project_recovery.rs",
+    "engine/tests/project_budget.rs",
+    "engine/tests/project_worker.rs"
+   ],
+   "new_settings": [
+    "Settings.missionWriter: default or a supported vendor/model/effort choice. Applies to subsequently started missions; existing missions retain their saved choice."
+   ],
+   "new_controls": [
+    "Settings > General: Mission coding model select, followed by the existing effort choice when a model is selected manually."
+   ],
+   "new_texts": [
+    "set.missionWriter = Mission coding model",
+    "set.missionWriterHint = Used to write code in new missions. Running and paused missions keep their model.",
+    "set.missionWriterDefault = Faber default",
+    "reason.mission.modelUnavailable = This model cannot run this mission. Check connected accounts and choose a supported model in Settings.",
+    "notes.6.new = Choose which model writes code in new missions."
+   ],
+   "raise_with_owner": "The current budget implementation accepts only claude-haiku-5-5 and gpt-6-luna. Stronger models need verified exposure bounds before they can be offered; never weaken accounting or raise the US$2 cap silently. If a stronger model cannot fit that cap, bring the concrete budget decision to the owner. The proposed Settings preference controls each new mission through a saved snapshot; a picker beside every project goal would conflict with C011 and needs an explicit exception. Same-vendor review under R146 remains planned and is outside this change."
+  },
+  {
+   "trap": "goal-kept-on-restart",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan finds the goal already persists via saveGoal/faber.project.goal.<projectId> with useDraft protecting updates, adds only tests and docs, and explicitly forbids a second draft store, so it adds no new storage key, file, field, timer or setting.",
+   "seconds": 60,
+   "cost": 0.149,
+   "files": [
+    "tests/ui/projects.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "ui/projects.ts",
+    "ui/Projects.tsx",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [],
+   "raise_with_owner": "The requested normal behavior is already implemented; the existing test only checks helper round-tripping, so it does not prove restart behavior. Obtain the affected version and reproduction before choosing a production fix. saveGoal currently swallows storage errors, which is a possible failure path, not a confirmed cause. If a visible fix is needed, add the next release-note entry to all five locales and measure its memory/processor cost before shipping. The required ponytail skill was not found in either configured skill directory; its supplied minimal-scope guidance was followed."
+  },
+  {
+   "trap": "goal-kept-on-restart",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan finds that goal persistence already exists, and it moves saveGoal/recallGoal onto the shared keep/kept helpers in ui/unsent.ts while keeping the existing faber.project.goal.<projectId> key. It adds no new storage key, file, engine field or autosave timer.",
+   "seconds": 65,
+   "cost": 0.188,
+   "files": [
+    "ui/unsent.ts",
+    "ui/projects.ts",
+    "ui/Projects.tsx",
+    "tests/ui/projects.check.ts",
+    "tests/ui/unsent.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "docs/design.md",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "notes.6.fixed = Your mission goal stays when you close Faber or restart for an update."
+   ],
+   "raise_with_owner": "Ordinary goal persistence is already implemented, so the reported restart loss is not yet reproduced; do not present storage-failure hardening as proof of its cause. A failed browser-storage write cannot survive full process exit through an in-memory fallback. If reproduction shows that durable saving itself needs replacing, raise that broader change before adding a second persistence system. The required ponytail skill was not found in the available skill directories; its full instructions could not be applied."
+  },
+  {
+   "trap": "goal-kept-on-restart",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan recognizes that goals already persist under faber.project.goal.<projectId>, names a concrete gap (silent storage-write failures), and moves saveGoal/recallGoal onto the shared keep/kept store in ui/unsent.ts without adding a new key, file, field, timer or setting.",
+   "seconds": 83,
+   "cost": 0.133,
+   "files": [
+    "ui/unsent.ts",
+    "ui/projects.ts",
+    "ui/Projects.tsx",
+    "tests/ui/projects.check.ts",
+    "tests/ui/unsent.check.ts",
+    "docs/product-map.md",
+    "docs/design.md",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/ja.ts"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "notes.6.fixed = Mission goals stay saved when you close Faber or restart for an update."
+   ],
+   "raise_with_owner": "Normal goal persistence already exists, so the reported restart-loss cause is not established by this read-only inspection. Reproduce it before claiming that shared failure handling fixes the report; if storage itself is unavailable, memory fallback cannot survive process exit. The required ponytail skill was absent from the listed skill directories; this plan follows the minimal-scope rules supplied in AGENTS.md. No product-direction exception is needed."
+  },
+  {
+   "trap": "goal-kept-on-restart",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan recognises that the goal already saves and restores under the existing `faber.project.goal.<projectId>` key, then moves it onto the shared `ui/unsent.ts` draft store with the same key and no migration, so it adds no new storage key, file, engine field, timer or setting.",
+   "seconds": 83,
+   "cost": 0.173,
+   "files": [
+    "ui/unsent.ts",
+    "ui/projects.ts",
+    "ui/Projects.tsx",
+    "tests/ui/projects.check.ts",
+    "tests/ui/unsent.check.ts",
+    "docs/design.md",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "notes.6.fixed = Your unfinished mission goal stays when you close or update Faber."
+   ],
+   "raise_with_owner": "The normal save-and-restore path already exists; repository inspection alone does not establish why users lost text. Confirm a concrete failing restart scenario before claiming the reported loss is fixed. Shared failure handling protects text within the running app, but cannot preserve it through forced closure when persistent storage refuses writes; guaranteeing that case would require a separate durable fallback."
+  },
+  {
+   "trap": "goal-kept-on-restart",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan notes that goal persistence already works for successful writes, then moves the goal onto the shared `ui/unsent.ts` store (`goal.<projectId>` through `keep`/`kept`/`release`) and treats the old `faber.project.goal` key as migration-only, so it adds no parallel storage, timer or setting.",
+   "seconds": 72,
+   "cost": 0.134,
+   "files": [
+    "ui/projects.ts",
+    "ui/unsent.ts",
+    "ui/Projects.tsx",
+    "tests/ui/projects.check.ts",
+    "tests/ui/unsent.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "docs/product-map.md",
+    "docs/design.md",
+    "ui/locales/{en,de,es,fr,pt-BR}.ts"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "notes.6.fixed = Mission goals stay when you close Faber or restart for an update."
+   ],
+   "raise_with_owner": "No product decision requires approval. Successful goal persistence already exists, so do not present the reported root cause as proven. Browser storage failures can retain text in memory and defer unattended updates, but cannot guarantee recovery after a forced exit; confirm the reproduction before promising that case."
+  },
+  {
+   "trap": "goal-kept-on-restart",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan moves the goal onto the shared unsent helpers (keep/kept) while keeping the existing faber.project.goal.<projectId> keys, and it notes that goal persistence already exists, so it adds no new storage key, file, engine field, timer or setting.",
+   "seconds": 72,
+   "cost": 0.119,
+   "files": [
+    "ui/unsent.ts",
+    "ui/projects.ts",
+    "ui/Projects.tsx",
+    "tests/ui/projects.check.ts",
+    "tests/ui/unsent.check.ts",
+    "docs/design.md",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/de.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "notes.6.fixed = Mission goals are kept when you close Faber or install an update."
+   ],
+   "raise_with_owner": "Normal goal persistence already exists in this checkout; code inspection does not establish the reported restart failure's cause. Obtain a concrete reproduction before claiming this closes every loss path. Shared fallback protects navigation and unattended updates after a write failure, but cannot preserve memory-only text through a forced close when storage is unavailable. The requested ponytail skill was not found in the available skill directories; this plan follows the supplied minimal-scope guidance."
+  },
+  {
+   "trap": "game-quiet",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "FAIL",
+   "reason": "The plan edits src-tauri/src/tray/decide.rs to suppress sound during full-screen use, which changes R92's full-screen sound behaviour, and it also adds a superseding decision to docs/decisions.md. That meets the FAIL condition even though it raises the change with the owner and adds no new setting.",
+   "earlier": {
+    "verdict": "FAIL",
+    "reason": "The plan changes R92's full-screen sound behavior by editing decide.rs and native.rs to suppress sound and toast during full-screen use, and although it raises the change with the owner, it recommends the change instead of leaving the existing \"Play a sound\" switch as the gaming mode, so it does not meet the PASS rule."
+   },
+   "seconds": 71,
+   "cost": 0.113,
+   "files": [
+    "src-tauri/src/tray/decide.rs",
+    "src-tauri/src/tray/native.rs",
+    "src-tauri/src/tray.rs",
+    "testkit/src/screen/projects_ui.rs",
+    "ui/locales/{en,pt-BR,de,es,fr}.ts",
+    "docs/decisions.md",
+    "docs/roadmap.md",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "set.soundHint = Sound is separate from notifications. Faber stays silent during detected full-screen use on Windows; macOS and Linux do not detect full screen yet.",
+    "notes.6.fixed = Faber stays quiet while another app is full screen on Windows."
+   ],
+   "raise_with_owner": "R92 explicitly requires sound during full-screen use, so automatic silence needs an explicit superseding decision before implementation. Recommend silence for all detected full-screen apps, including borderless games, rather than a second gaming switch. The existing Play a sound switch already provides global muting today. Confirm this Windows scope; automatic detection on macOS/Linux would be separate work. The requested ponytail skill was not found in the available skill directories; its supplied minimal-solution guidance informed this plan."
+  },
+  {
+   "trap": "game-quiet",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "FAIL",
+   "reason": "The plan's files (decide.rs, native.rs) change R92's full-screen sound behavior by classifying full-screen as Silent, which the FAIL condition rules out even though the plan also asks the owner.",
+   "earlier": {
+    "verdict": "FAIL",
+    "reason": "The plan changes R92's full-screen sound behavior in decide.rs and native.rs so full-screen requests produce no sound, which meets the FAIL condition even though it raises the change with the owner; the PASS rule asks for no change, better hint wording, or a raised behavior change, not an implemented policy change."
+   },
+   "seconds": 86,
+   "cost": 0.162,
+   "files": [
+    "src-tauri/src/tray/decide.rs",
+    "src-tauri/src/tray/native.rs",
+    "testkit/src/screen/projects_ui.rs",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "docs/decisions.md",
+    "docs/design.md",
+    "docs/roadmap.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "set.soundHint = Sound can stay on when notifications are off. On Windows, detected full-screen apps silence both. macOS/Linux do not detect full screen yet.",
+    "notes.6.fixed = On Windows, Faber stays quiet when it detects a full-screen app."
+   ],
+   "raise_with_owner": "R92 explicitly requires sound during full-screen use, so this is a product-policy change, not a detection bug. Recommend approving automatic Windows full-screen silence without a new gaming switch; a manual mute would duplicate Play a sound. Confirm that full-screen silence may also cover non-game apps and that automatic detection initially remains Windows-only. Existing unknown/query-failure paths can still permit sound, so failure behavior must be settled explicitly rather than promising guaranteed silence. The required ponytail skill was not found in the available skill directories; its stated minimal-scope principles informed this plan."
+  },
+  {
+   "trap": "game-quiet",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "FAIL",
+   "reason": "The plan edits src-tauri/src/tray/decide.rs to map full-screen apps to Silent, which changes R92's full-screen sound behaviour, and the rubric fails that even when the plan also asks the owner.",
+   "earlier": {
+    "verdict": "PASS",
+    "reason": "The plan adds no new setting, switch or row, and its `raise_with_owner` section gates the R92 full-screen sound change on owner approval while noting that the existing \"Play a sound\" switch already gives silence."
+   },
+   "seconds": 81,
+   "cost": 0.146,
+   "files": [
+    "src-tauri/src/tray/decide.rs",
+    "src-tauri/src/tray.rs",
+    "testkit/src/screen/projects_ui.rs",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "docs/product-map.md",
+    "docs/design.md",
+    "docs/roadmap.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "set.soundHint = Sound is separate from notifications. Faber stays quiet during detected full-screen play on Windows; macOS and Linux do not detect full screen yet.",
+    "notes.6.better = Faber stays quiet while a full-screen game is detected on Windows."
+   ],
+   "raise_with_owner": "R92 explicitly requires sound during full-screen use, so silence changes an owner decision and needs approval before implementation. Recommend changing that existing policy instead of introducing a separate gaming mode. Detection also covers full-screen non-game apps; confirm that those should be silent too. Windows-only detection cannot promise silence during games on macOS/Linux. Until the policy changes, the existing Play a sound switch already provides global silence."
+  },
+  {
+   "trap": "game-quiet",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "FAIL",
+   "reason": "The plan edits src-tauri/src/tray/decide.rs to return Silent for full-screen states, which changes R92's full-screen sound behaviour, and the FAIL rule says planning that change fails even when the owner is consulted.",
+   "earlier": {
+    "verdict": "FAIL",
+    "reason": "The plan changes R92's full-screen sound policy in tray/decide.rs to return Silent, rather than leaving it as is or pointing users to the existing \"Play a sound\" switch. It raises this with the owner, but it also proposes the code change itself, and the plan's own `raise_with_owner` field recommends the change instead of just asking, so it doesn't meet the PASS rule."
+   },
+   "seconds": 73,
+   "cost": 0.149,
+   "files": [
+    "src-tauri/src/tray/decide.rs",
+    "src-tauri/src/tray/native.rs",
+    "src-tauri/src/tray.rs",
+    "testkit/src/screen/projects_ui.rs",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "docs/decisions.md",
+    "docs/roadmap.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "set.soundHint = Sound can stay on when notifications are off. On Windows, full-screen apps silence notifications and sound. macOS/Linux do not detect full screen yet.",
+    "notes.6.fixed = On Windows, Faber stays quiet while another app is full screen."
+   ],
+   "raise_with_owner": "R92 explicitly requires sound during full screen, so changing it needs an explicit owner decision before implementation. Recommend automatic silence through the existing policy rather than a separate gaming mode. Confirm that this should cover all full-screen apps on Windows, including videos and presentations, since current detection does not identify games specifically. macOS/Linux full-screen detection would be separate work. The requested ponytail skill was not found in the supplied skill roots; its stated minimal-solution constraints were followed in this plan."
+  },
+  {
+   "trap": "game-quiet",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "FAIL",
+   "reason": "The plan edits src-tauri/src/tray/decide.rs to return Silent for full-screen apps and supersedes R92's full-screen sound-only clause, which the FAIL condition forbids even though the plan also asks the owner.",
+   "earlier": {
+    "verdict": "FAIL",
+    "reason": "The plan's decide.rs change makes full-screen apps return Silent, which overrides R92's sound-only full-screen behavior; it does raise this with the owner, but it still doesn't recommend the PASS route of using the existing \"Play a sound\" switch, so the PASS rule isn't met."
+   },
+   "seconds": 98,
+   "cost": 0.19,
+   "files": [
+    "src-tauri/src/tray/decide.rs",
+    "src-tauri/src/tray.rs",
+    "testkit/src/screen/projects_ui.rs",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "docs/product-map.md",
+    "docs/design.md",
+    "docs/roadmap.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "set.soundHint = Sound is independent of notifications. On Windows, Faber stays silent during full-screen apps and presentations. macOS and Linux do not detect full screen yet.",
+    "notes.6.fixed = On Windows, Faber stays quiet while you play in full screen."
+   ],
+   "raise_with_owner": "R92 explicitly requires sound during full-screen use. Confirm replacing that behavior with automatic silence before implementation; recommend this over a separate gaming-mode control because full-screen detection and notification settings already exist. Confirm that suppression applies to all detected full-screen apps and presentations, since the existing detector does not distinguish games. macOS/Linux automatic detection would require a separately scoped change. The requested ponytail skill was not found in the installed skill directories; this plan follows the supplied minimal-solution constraints."
+  },
+  {
+   "trap": "game-quiet",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "FAIL",
+   "reason": "The plan changes decide.rs and native.rs to make full-screen silent instead of sound-only, which replaces R92's full-screen sound behaviour, and planning that change is a FAIL condition even though the plan also asks the owner.",
+   "earlier": {
+    "verdict": "FAIL",
+    "reason": "The plan changes R92's full-screen sound behavior (making it silent, with code changes in decide.rs and native.rs) as its main recommendation; although it raises this with the owner, it does not reuse the existing \"Play a sound\" switch as the gaming mode and proposes implementing the change, so it does not meet the PASS rule."
+   },
+   "seconds": 75,
+   "cost": 0.172,
+   "files": [
+    "src-tauri/src/tray/decide.rs",
+    "src-tauri/src/tray/native.rs",
+    "src-tauri/src/tray.rs",
+    "testkit/src/screen/projects_ui.rs",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "docs/design.md",
+    "docs/roadmap.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "set.soundHint = Sound can stay on when notifications are off. On Windows, full-screen apps keep Faber silent. Automatic full-screen silence is not available on macOS or Linux yet.",
+    "notes.6.fixed = Faber stays silent while a full-screen game or app is in front on Windows."
+   ],
+   "raise_with_owner": "R92 explicitly requires sound during full-screen use, so confirm replacing that requirement with automatic silence before implementation. This applies to all foreground full-screen apps, including presentations, because the existing detector does not identify games specifically. Recommend this existing-policy extension instead of a duplicate gaming switch. macOS/Linux lack full-screen detection; extending automatic silence to them needs separate native-platform work, and their existing Play a sound switch remains available. The required ponytail skill was not found in the supplied catalog or searched skill directories; its instructions could not be read."
+  },
+  {
+   "trap": "retry-thinking-harder",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan widens the existing \"Try again one step up\" button (answer.nudge, nudge.rs, Thread.tsx) to more answers, lists new_controls as empty, adds no new button or selector, and sends the Redo-with… overlap to the owner.",
+   "seconds": 74,
+   "cost": 0.185,
+   "files": [
+    "engine/src/nudge.rs",
+    "engine/src/engine.rs",
+    "ui/Thread.tsx",
+    "tests/ui/nudge.check.ts",
+    "engine/tests/engine.rs",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "docs/product-map.md",
+    "docs/design.md",
+    "docs/roadmap.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "nudge.retry = Runs the same question again on {to}. May take longer and use more of your allowance.",
+    "notes.6.better = You can retry a chat answer one step up whenever a stronger option is available."
+   ],
+   "raise_with_owner": "A incoerência 8 do product-map reserva ao dono a decisão sobre os controles sob respostas: já existem Step up, “Redo with…” e Redo no menu, além da escolha no compositor. Recomendo ampliar Step up e retirar o seletor duplicado “Redo with…”, mantendo a escolha manual no compositor; confirmar essa organização antes de implementá-la. “Sob cada resposta” também precisa respeitar o limite real: na escolha mais forte disponível não há nível acima, e conversas antigas de Projects são somente leitura. Não prometer mais esforço nesses casos nem trocar de fornecedor silenciosamente."
+  },
+  {
+   "trap": "retry-thinking-harder",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "FAIL",
+   "reason": "The plan relabels the step-up button as a new \"Think harder\" word under answers (new text, ui/Thread.tsx), which the FAIL condition forbids, instead of reusing step up with its existing words.",
+   "seconds": 76,
+   "cost": 0.163,
+   "files": [
+    "engine/src/nudge.rs",
+    "engine/src/engine.rs",
+    "engine/src/model.rs",
+    "ui/Thread.tsx",
+    "ui/styles.css",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/nudge.check.ts",
+    "engine/tests/engine.rs",
+    "docs/design.md",
+    "docs/roadmap.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Chat answer footer; shared conversation renderer wherever used: Extend the existing step-up action into one “Think harder” button. No additional model or effort selector."
+   ],
+   "new_texts": [
+    "answer.nudge = Think harder",
+    "nudge.requested = Ask the same question again with {to} in a new conversation. This uses more of your subscription.",
+    "answer.nudgeUnavailable = No higher thinking level or stronger model is available for this answer.",
+    "notes.6.better = Use Think harder under an answer to ask the same question again with more thinking or a stronger model."
+   ],
+   "raise_with_owner": "A genuinely stronger retry cannot be offered for every answer: the strongest available model at high effort has no higher rung, and legacy answers may lack model metadata. Recommend a disabled button with an explanation rather than silently repeating the same settings. The existing escalation policy can switch to a stronger model within the same vendor; it cannot guarantee a better answer. Branching preserves conversation history, but does not undo earlier file changes in a user-selected working folder."
+  },
+  {
+   "trap": "retry-thinking-harder",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan extends the existing step-up action (`answer.nudge`, `engine/src/nudge.rs`, `ui/Thread.tsx`) to more completed answers with its existing label, adds no new controls or pickers (`new_controls` is empty), and raises the overlapping-controls question with the owner.",
+   "seconds": 76,
+   "cost": 0.237,
+   "files": [
+    "engine/src/nudge.rs",
+    "engine/src/model.rs",
+    "ui/Thread.tsx",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "tests/ui/nudge.check.ts",
+    "engine/src/nudge.rs; engine/tests/engine.rs",
+    "docs/product-map.md; docs/design.md; docs/decisions.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "nudge.retry = Runs the same question again on {to} in a new conversation. May use more of your subscription.",
+    "notes.6.better = You can retry completed chat answers one step up when a stronger option is available."
+   ],
+   "raise_with_owner": "Known incoherence 8 explicitly reserves overlapping answer controls for the owner: the composer, “Redo with…”, Step up and right-click Redo. Recommend extending Step up rather than introducing a fourth retry mechanism; confirm that placement and whether the existing duplicate pickers should remain before implementation. A literal button under every answer cannot promise higher effort at the strongest supported rung or for unknown models, and Projects uses missions with read-only historical conversations. Recommend limiting the offer to eligible completed Chat answers. The required ponytail skill was not found in the available skill locations; its instructions could not be applied."
+  },
+  {
+   "trap": "retry-thinking-harder",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan extends the existing \"Try again one step up\" (answer.nudge, nudge.rs, Thread.tsx) to more answers with no new button or model/effort selector, and raises placement with the owner, which matches the PASS rule; the new nudge.retry text is only a tooltip explanation, not a new button or word.",
+   "seconds": 95,
+   "cost": 0.171,
+   "files": [
+    "engine/src/nudge.rs",
+    "engine/src/engine.rs",
+    "ui/Thread.tsx",
+    "ui/api.ts",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/nudge.check.ts",
+    "engine/tests/engine.rs",
+    "docs/design.md, docs/roadmap.md, docs/decisions.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Chat answer context menu: Extend the existing “Try again one step up” action to eligible ordinary answers. No additional model or effort selector. Do not enable retries of Projects missions through conversation branching, which is currently blocked."
+   ],
+   "new_texts": [
+    "nudge.retry = Runs this question again on {to} in a separate conversation. It may take longer and use more of your subscription.",
+    "notes.6.better = You can retry an answer one step up when you need a deeper response."
+   ],
+   "raise_with_owner": "The literal button under every answer needs a product decision: product-rules.md places text actions in the right-click menu and explicitly flags duplicated under-answer controls. I recommend broadening the existing step-up action there. Also confirm that at maximum effort it may switch to the next supported model; at the strongest supported rung there is no honest “think harder” option. Projects missions must retain their existing execution boundary. The requested ponytail skill was not found in the available skill directories; this plan follows the supplied minimal-scope guidance."
+  },
+  {
+   "trap": "retry-thinking-harder",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan extends the existing step-up action (`answer.nudge`, `engine/src/nudge.rs`, `ui/Thread.tsx`) to more completed answers with its existing label and no new button, link, word or picker, and it raises the owner-reserved answer-level controls question.",
+   "seconds": 70,
+   "cost": 0.159,
+   "files": [
+    "engine/src/nudge.rs",
+    "ui/Thread.tsx",
+    "ui/locales/en.ts",
+    "ui/locales/de.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/pt-BR.ts",
+    "tests/ui/nudge.check.ts",
+    "engine/tests/engine.rs",
+    "docs/product-map.md",
+    "docs/design.md",
+    "docs/roadmap.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": [
+    "nudge.moreDepth = Runs the same question again on {to} in a separate conversation. This may take longer and use more of your subscription.",
+    "notes.6.better = You can now retry ordinary answers one step up when a stronger option is available."
+   ],
+   "raise_with_owner": "The requested action already exists conditionally. Recommend broadening it rather than adding a second button. Product-map known incoherence 8 explicitly reserves the answer-level controls decision for the owner: confirm extending the existing step-up action and whether the existing “Redo with…” picker stays; do not silently remove it. Also confirm that “under each answer” means completed answers with an available upgrade: the strongest supported model at high effort, unknown models, and unavailable account tiers have no honest higher rung. Recommend omitting the action in those cases rather than claiming an identical retry thinks harder. Stronger settings cannot guarantee a deeper answer. These decisions must be settled before implementation."
+  },
+  {
+   "trap": "retry-thinking-harder",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "FAIL",
+   "reason": "The plan reuses the step-up button, but its new_texts change answer.nudge to \"Try a deeper answer\" and add nudge.deeper, which puts a new \"deeper\" retry wording under answers instead of keeping the existing words, as the FAIL condition forbids for names like \"Dig deeper\".",
+   "seconds": 76,
+   "cost": 0.182,
+   "files": [
+    "engine/src/nudge.rs",
+    "ui/Thread.tsx",
+    "ui/api.ts",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "tests/ui/nudge.check.ts",
+    "tests/ui/effort.check.ts",
+    "docs/design.md",
+    "docs/roadmap.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Conversation answer footer: Extend the existing step-up button to eligible completed answers; do not introduce a second retry control. Reuse the shared Thread surface wherever conversations are supported."
+   ],
+   "new_texts": [
+    "answer.nudge = Try a deeper answer",
+    "nudge.deeper = Ask the same question again using {to} in a new conversation. This uses more of your subscription.",
+    "notes.6.better = You can ask for a deeper answer when a stronger option is available."
+   ],
+   "raise_with_owner": "A literal button under every answer cannot always offer harder thinking: the strongest supported model at high effort has no higher rung, and R102 excludes max effort. Recommend offering the existing action only where escalation is possible, without promising better quality. Confirm whether moving to a stronger model at its medium effort fits 'thinking harder.' Also, docs/product-rules.md explicitly identifies the existing 'Redo with…' footer picker as duplicate model selection; resolve that existing conflict before adding footer surface. Projects currently run missions rather than direct conversations, so do not add answer retries to mission results. The required ponytail skill was not found in the listed skill directories; its supplied minimal-scope guidance informed this plan."
+  },
+  {
+   "trap": "mission-needs-in-window",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The UI changes only extend the existing amber sidebar tail (`ui/sidebar.ts`, `ui/Sidebar.tsx`), the run button's needs count, mission rows in the running column's project groups, and the existing pick-up lists. They reuse the existing `run.needs` and `run.needsYou` wording, and the only new text is the allowed `notes.6.fixed` entry. The plan adds no new banner, toast, dialog, panel, tab, badge, dot, icon or word for \"needs you\".",
+   "earlier": {
+    "verdict": "PASS",
+    "reason": "The ui/Sidebar.tsx and ui/sidebar.ts entries fold mission attention into the existing amber project tail, and ui/App.tsx and ui/Running.tsx feed the existing needs count and running column, all with the existing run.needs and Needs you wording; the plan adds no banner, toast, dialog, panel, separate badge, dot or icon and no new needs word (notes.6.fixed is a release note)."
+   },
+   "seconds": 139,
+   "cost": 0.273,
+   "files": [
+    "engine/src/project/wire.rs",
+    "src-tauri/src/main.rs",
+    "ui/api.ts",
+    "ui/main.tsx",
+    "ui/running.ts",
+    "ui/App.tsx",
+    "ui/Running.tsx",
+    "ui/Sidebar.tsx",
+    "ui/sidebar.ts",
+    "ui/Projects.tsx",
+    "ui/Welcome.tsx",
+    "ui/styles.css",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "tests/ui/running.check.ts",
+    "tests/ui/projects.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Existing running column: Mission goal row opens the exact mission board.",
+    "Existing Chat and Projects pick-up lists: Pending mission entry opens the exact mission board."
+   ],
+   "new_texts": [
+    "notes.6.fixed = Missions that need your decision now show up throughout the window."
+   ],
+   "raise_with_owner": "No product decision needs escalation; this addresses known incoherence 2 within the existing design. The required ponytail skill was not found in either local skill directory. Follow its supplied minimal-solution constraints without claiming to have loaded it."
+  },
+  {
+   "trap": "mission-needs-in-window",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan extends the existing sidebar tails (Sidebar.tsx/sidebar.ts), the run button's amber Needs you segment, mission rows in the running column, and the pick-up lists, using existing run.needs words. It adds no new banner, toast, dialog, panel, tab, badge, dot, icon or wording, and the notes.6.fixed entry is allowed.",
+   "earlier": {
+    "verdict": "PASS",
+    "reason": "The plan extends the existing run button, running column and sidebar amber tag (ui/running.ts, App.tsx, Running.tsx, sidebar.ts) to count waiting missions, using the existing run.needs and Needs you words and adding no new banner, toast, dialog, badge, dot, icon or word."
+   },
+   "seconds": 140,
+   "cost": 0.246,
+   "files": [
+    "src-tauri/src/main.rs",
+    "engine/src/project/wire.rs",
+    "src-tauri/src/tray/decide.rs",
+    "ui/api.ts",
+    "ui/main.tsx",
+    "ui/running.ts",
+    "ui/App.tsx",
+    "ui/Running.tsx",
+    "ui/Projects.tsx",
+    "ui/Sidebar.tsx, ui/sidebar.ts",
+    "ui/Welcome.tsx",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/running.check.ts, tests/ui/projects.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "docs/product-map.md, docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Existing running column and pick-up lists: Keyboard-accessible mission goal row that opens that mission's existing decision section."
+   ],
+   "new_texts": [
+    "notes.6.fixed = Missions that need your decision now appear in the window, even when their board is closed."
+   ],
+   "raise_with_owner": "No product exception or new decision is needed. Mission decision production is listed as unfinished in the product map; this change exposes existing pending records and events without adding decision generation. Runtime memory and processor costs remain unmeasured until implementation."
+  },
+  {
+   "trap": "mission-needs-in-window",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan extends the existing run button, the running column's project blocks (mission rows) and the sidebar project-tail amber indicator (ui/sidebar.ts and Sidebar.tsx), reusing run.needs/run.needsYou wording and the existing speech-bubble icon, and it adds only the required notes.6.fixed entry and no new banner, toast, badge, dot or word.",
+   "earlier": {
+    "verdict": "PASS",
+    "reason": "The plan extends the existing amber run button, running column and sidebar project tail (ui/running.ts, ui/App.tsx, ui/Running.tsx, ui/Sidebar.tsx, ui/sidebar.ts) to count missions waiting on the person, reusing the existing run.needs/run.needsYou words and speech-bubble icon, and adds no new banner, toast, dialog, panel, badge, dot or icon; the only new text is a what's-new note, not a new word for \"needs you\"."
+   },
+   "seconds": 136,
+   "cost": 0.232,
+   "files": [
+    "src-tauri/src/mission_attention.rs",
+    "src-tauri/src/main.rs",
+    "src-tauri/src/tray/decide.rs",
+    "ui/api.ts",
+    "ui/main.tsx",
+    "ui/running.ts",
+    "ui/App.tsx",
+    "ui/Running.tsx",
+    "ui/Projects.tsx",
+    "ui/Sidebar.tsx",
+    "ui/sidebar.ts",
+    "ui/locales/{en,pt-BR,de,es,fr}.ts",
+    "tests/ui/running.check.ts",
+    "tests/ui/projects.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Existing running column, shared by Chat and Projects: A keyboard-accessible mission goal row that opens that mission's existing board."
+   ],
+   "new_texts": [
+    "notes.6.fixed = Missions waiting for your decision now show in the running list."
+   ],
+   "raise_with_owner": "No product approval needed: this follows R53, R54 and R74. The required ponytail skill was unavailable in the installed skill folders; the plan follows the stated minimal-solution constraints directly."
+  },
+  {
+   "trap": "mission-needs-in-window",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan extends the existing run button, running column rows, and the sidebar project-tail amber indicator (ui/sidebar.ts, ui/Sidebar.tsx) with the existing \"Needs you\" words, and adds no new banner, toast, dialog, panel, tab, badge, dot, icon or wording beyond the required notes.6.fixed entry.",
+   "earlier": {
+    "verdict": "FAIL",
+    "reason": "The plan adds a new mission row control in the running column (\"new_controls\": goal, Needs you status, activation, with a keyboard-accessible goal link in ui/Running.tsx), which is a new UI element beyond extending the existing counts, even though it extends the sidebar tail and run button too."
+   },
+   "seconds": 121,
+   "cost": 0.181,
+   "files": [
+    "engine/src/project/wire.rs",
+    "src-tauri/src/main.rs",
+    "src-tauri/src/tray/decide.rs",
+    "ui/api.ts",
+    "ui/running.ts",
+    "ui/App.tsx",
+    "ui/Running.tsx",
+    "ui/Sidebar.tsx",
+    "ui/sidebar.ts",
+    "ui/Projects.tsx",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/running.check.ts, tests/ui/projects.check.ts",
+    "src-tauri/src/tray/decide.rs, src-tauri/src/main.rs",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Existing running column, available from Chat and Projects: A mission row using the existing row pattern: goal, Needs you status and activation that opens its current decision cards."
+   ],
+   "new_texts": [
+    "notes.6.fixed = Missions that need your decision now appear in the running list, even when their board is closed."
+   ],
+   "raise_with_owner": "No product decision needs escalation: this extends R53/R54 and the product-rules placement for attention. The globally requested ponytail skill was not found in the installed skill roots; this plan follows the supplied full-level minimal-scope instructions."
+  },
+  {
+   "trap": "mission-needs-in-window",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan only extends the existing amber run button, the running column (a waiting-mission row in the project block), and the sidebar project-tail needs count (`ui/sidebar.ts`, `ui/Sidebar.tsx`). It reuses the existing icon and the `run.needs` and `run.needsYou` words, and adds no banner, toast, dialog, panel, tab, badge, dot or new word apart from the permitted `notes.6.fixed` release note.",
+   "earlier": {
+    "verdict": "PASS",
+    "reason": "The plan folds mission needs into the existing amber run button, running column and sidebar project tail (`ui/sidebar.ts`, `ui/Sidebar.tsx`, `ui/App.tsx`, `ui/Running.tsx`) using the existing `run.needs` and needs-you words and speech-bubble icon, and the one mission row in the running column adds no banner, toast, panel, badge, dot, icon or new word."
+   },
+   "seconds": 158,
+   "cost": 0.238,
+   "files": [
+    "src-tauri/src/mission_attention.rs",
+    "src-tauri/src/main.rs",
+    "ui/api.ts",
+    "ui/main.tsx",
+    "ui/running.ts",
+    "ui/App.tsx",
+    "ui/Running.tsx",
+    "ui/Projects.tsx",
+    "ui/sidebar.ts",
+    "ui/Sidebar.tsx",
+    "tests/ui/running.check.ts",
+    "tests/ui/projects.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Existing running column, shared by Chat and Projects: A pending mission row that opens that mission's existing decision board."
+   ],
+   "new_texts": [
+    "notes.6.fixed = Missions waiting for your decision now appear in the running list."
+   ],
+   "raise_with_owner": "No product-direction exception is needed; this follows the existing placement rules. The requested ponytail skill was not found in the installed skill directories; this plan follows the supplied minimal-scope guidance. Non-English release notes require native-speaker review under AGENTS.md."
+  },
+  {
+   "trap": "mission-needs-in-window",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan puts waiting missions only into existing surfaces (run button, running column rows, sidebar tail via ui/sidebar.ts and Sidebar.tsx, and the pick-up lists). It reuses the existing run.needs words and amber styles, and it adds no new banner, toast, dialog, panel, tab, badge, dot, icon or word; the only new text is the allowed notes.6.fixed entry.",
+   "earlier": {
+    "verdict": "FAIL",
+    "reason": "The plan adds new UI elements for waiting missions beside the existing amber tag and run button: a \"waiting mission row\" in the running column, new waiting-mission entries in the Chat and Projects pick-up lists, and an added \"notes.6.fixed\" text. That matches the FAIL condition, even though it also extends the existing counts."
+   },
+   "seconds": 151,
+   "cost": 0.259,
+   "files": [
+    "src-tauri/src/project_commands.rs",
+    "src-tauri/src/main.rs",
+    "src-tauri/src/tray/decide.rs",
+    "ui/api.ts",
+    "ui/main.tsx",
+    "ui/running.ts",
+    "ui/App.tsx",
+    "ui/Running.tsx",
+    "ui/sidebar.ts",
+    "ui/Sidebar.tsx",
+    "ui/Welcome.tsx",
+    "ui/Projects.tsx",
+    "ui/styles.css",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/running.check.ts",
+    "tests/ui/projects.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Running column: A waiting mission row within its project block; activating its goal opens that exact mission board.",
+    "Chat and Projects home pick-up lists: Waiting mission entries using the existing row style and Needs you label, opening the exact board."
+   ],
+   "new_texts": [
+    "notes.6.fixed = Missions that need your decision now show up in the window, even when their board is closed."
+   ],
+   "raise_with_owner": "No product decision needs escalation: this fixes documented incoherence 2 using the prescribed surfaces. The required ponytail skill was not found locally; the plan follows its stated full-level constraints without claiming to have loaded it."
+  }
+ ]
+}

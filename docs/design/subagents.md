@@ -1,0 +1,183 @@
+# Subagent steps
+
+A dead helper immediately returns a failure and received words. It leaves the live count; unknown cost stays approximate.
+Silence checks use workers and admission. Stops retain cause and partial words. Failed delivery or caller closure saves `wake.childDone`, held behind Stop; shutdown retains a bounded wait. Past causes are unknown.
+
+## Current activity
+
+Waiting buttons fit title, status, reason and return time.
+
+A running helper row shows its latest unfinished tool under its task name, using the translated tool label and bounded detail. Between tools, the last observed step stays with its explicit result, so the row
+does not collapse and grow again. This is observed activity. Waiting and stuck helpers retain
+the observed action so the person can see what needs attention; a known result precedes a clipped detail. Stopped,
+declined and completed helpers do not keep an activity line. `tests/ui/agents.check.ts` covers arrival and removal of this line.
+
+Nested tasks have independent rows and the same reader route (R450), with a small inset and a parent-name tooltip.
+Each task owns its tools; its parent keeps the delegation as a button that opens the child. The child's reader names
+its parent above the metadata, and Back returns to that parent before the running list. A child inherits background
+status from its ancestors, so ending the main reply does not falsely stop it. Older calls retain their existing
+16,000-character preview limit; new calls use the paged history below. The nested routing, direct-step ordering and background-state
+regressions live in `tests/ui/agents.check.ts`.
+
+## After restart or copying a conversation
+
+Calls without a known outcome are marked interrupted when no running CLI owns the restored or copied reply.
+The existing stopped label replaces the live mark, including nested background tasks under a completed answer.
+Known results, saved briefs and history remain intact; no completion time or result is invented, and no call is replayed.
+Chat and Projects reuse the same rows and reader.
+
+## Retained visible history
+
+New calls retain visible text, steps and full tool results in atomic pages outside the conversation JSON. The engine never
+copies private reasoning or a vendor's own history. Helper text is buffered until a content boundary or 8 KiB;
+process-writer and cursor metadata never split streamed words into separate pages.
+The reader loads a bounded window of up to eight immutable pages at a time and offers Earlier,
+Later and Latest in the same pane or full-thread view. Selecting an older page, scrolling up or selecting text holds the window steady while new output arrives;
+Latest resumes following the newest saved page. The same floating Latest action remains reachable while reading up; late font loading and pane resizing keep the tail visible only while following it. Tool results wrap without horizontal overflow; the helper's final report
+uses the existing frame removal and Markdown. A background task's steps are resolved across the conversation's turns.
+The retained transcript itself does not animate: a transform on the long text would make the floating action belong to
+that text rather than the viewport. The column and its metadata keep their existing motion. The paused-arrival check in
+`tests/ui/agents.check.ts` holds an arrival and requires the same Latest action to remain inside the reader and work.
+Read failures remain inside the reader with a translated retry action. A failed save leaves a persistent incomplete-history
+notice; older discarded text cannot be recovered. Empty and legacy calls keep the existing preview behavior. The new pages
+follow a branch's retained calls and are removed with the owning conversation; rewind retains them for Redo. The existing
+conversation export still exports answers, not the work log. No complete vendor session or user-research claim is made.
+
+How a reply shows the subagents and helpers its agent hands work to: the rows, the running column, the stuck signs, and the pages
+the agent opens in Faber's browser, which open in the same place.
+The reply and steps they sit in are in [conversation.md](conversation.md) and [work-log.md](work-log.md).
+
+## Subagent steps
+
+When the agent hands part of the work to a subagent (R161), the reply shows one row per helper in its place in the
+reply (`ui/timeline.ts`), in the work log's surface and type: a check, a cross or the live mark, the few words it was given in bold, and
+on the right its kind, its state, its step count and, once it ended, how long it took ("2 min", "45 s"; from a second up,
+none for a refused one) in the third ink, and an arrow pointing right (R411). The time comes from the engine's own
+stamps on the call, so no clock runs on the screen. A click opens the
+subagent in the running column (R161 step 3, R176), which is the one place on the right: its head has a back arrow to
+the running list, the subagent's title and the column's close; under it the meta line, the brief word for word in the
+person's own bubble (the agent wrote it to the subagent; Codex gives none, and then nothing shows), the tool chips it
+ran in runs with what it wrote between its steps (R416) between the runs, drawn as the conversation's own Markdown in the
+second ink and the column's full width, outside the chips so no chip rule (border, padding, nowrap) reaches a fenced block's
+spans; the paragraphs lose the outer margins, so the gap above and below is the column's own 12 px. Its last words give way
+to its report only when the report starts with them, since a cut, failed or stopped report may not say them. The words are
+read when the view opens and again when they grow, never carried by the reply's updates. For legacy previews without paged history,
+the old 16,000-character limit cuts after a whole message or at a paragraph or sentence. A cut preview has one quiet line in the third ink
+right after the last words kept says "It wrote more than fits here. What it wrote after this point is not kept." Then,
+once it ended, "What it did" (R161 step 4): a quiet block in the work log's surface with the files it changed
+in the data face, its checks and how many failed (a failed count gets the error note's 2 px edge), and the changed files
+its brief never named. These are counted by the engine from its steps (`engine-core/src/facts.rs`), never taken from the
+main agent's word. Then its report as Markdown. While it works, a quiet line says a CLI subagent cannot be written to while it runs and
+"Talk to the main AI about this helper" readies a message to the main agent: the conversation's box stays empty, and one
+quiet line above its field in the second ink says "To the main AI, about <name>" with a small close button that drops it
+(the field's description, so a screen reader hears it too). On send, the words the AI named the helper with (else the start
+of its brief) go once in front of the message ("About the helper “…”: "), and the line goes with it. Nothing is written into
+the field, so nothing looks typed by the person (task 130). A helper from the other AI is a session of its own, so it gets a box
+instead (R196): a line saying the words go straight to it, a field and "Send" (Enter sends, Shift+Enter breaks the
+line). What the person wrote stays above the box in their own bubble, with a line in the third ink under it: sent, read,
+or never read because the helper had finished. Once a subagent ended, in a project with both AIs connected, a quiet line
+and "Continue with a helper" start the conversation's box asking the main agent to hand the rest to a helper. The row open there has the hover surface and a 2 px accent edge on its
+left (amber on a stuck row). In the column nothing is cut: the brief, its code and the files wrap, a tool line wraps to two lines and a click shows the rest, and a button in the head opens the whole view as a full thread over the work area (how the column sizes: [layout.md](layout.md#arranging-the-shell)). The tool line is a button (`aria-expanded`) and its tooltip always has the whole text; nothing scrolls sideways at any width or text size. The button (`expand` icon, "Open as a full thread") moves the column over the whole work area: its text keeps the 660 px reading width, the conversation under it is inert, the box stays below for "Talk to the main AI about this helper" and the edge to drag is gone; the same button (`shrink` icon, "Back to the side column") returns it, focus stays on it, and closing the column ends the full thread. The column is drawn again where it sits, with its usual entrance and none in reduced or no motion. The column opens the way it always does; the content swaps without motion, since it is a
+click the person just made. Opening another conversation goes back to the list. Rows sit in a `minmax(0, 1fr)` grid, so a long
+tool line ellipsizes instead of widening the reply. A helper that never finished reads "stopped" once the reply has
+ended; one sent to the background keeps the live mark until its task notice arrives (a ring, never the square of a stop button); a refused one reads "declined" in
+the third ink, never as a failure. Known limit: when a reply moves to another AI after a quota stop, its open tools,
+helpers included, read as working again with the new reply.
+
+A Codex subagent (`spawn_agent`, started only when the person asks for one) is the same row. Codex gives it a path instead of a description, so its title is the
+path's last part with spaces (`/root/read_docs` reads "read docs"), and it has no kind.
+
+A helper's name is the few words the AI gave it only when they read in the screen's language (`ui/language.ts`: the
+language's own letters, small words and verb endings, never a guessed translation); otherwise, or with none, it is
+"Helper 1", "Helper 2"… by its place among its reply's helpers, the same in its row, its view and Technical details, and
+its view says "Named by the AI: …" under the meta line. Its state reads "done and checked" only when the engine counted
+checks on its steps and none failed; a helper whose call only returned reads "finished" (task 130). Its approvals show on the
+conversation's own card, since the person cannot open the subagent; one that arrives after the reply ended is refused,
+and Stop and closing the conversation reach the subagent too. With any subagent or helper at work, Stop asks first in place of
+its button: one line in the second ink saying how many it ends, then "Stop all" (the Stop look) and "Keep working" (the
+accent, focused, and Escape picks it); the question goes by itself when they are done. A message written meanwhile never
+stops one. What a subagent still does after its reply ended reaches
+no reply, so its step reads "stopped". Codex counts each thread's usage on its own, so the
+engine adds the subagent's tokens and cost to the reply that started it, and marks the reply's usage incomplete when a
+subagent is still at work as it ends.
+
+A subagent waiting on the person's answer reads "waiting for you" with its live mark in amber; the card under the rows is
+that answer. One that seems stuck (R161 step 6, R174) is the conversation's other amber: the mark and the row's edge
+turn amber, its state reads "seems stuck", and one line under the row says in plain words what the engine saw, with
+"Look", which opens it in the running column, and "Talk to the main AI about this helper", which focuses the conversation's
+empty box with the helper named above it (Codex takes the message into the running turn; Claude Code after it, or at once
+with "Send now"). The line arrives with
+the normal entrance (`--dur-arrive`, none in reduced motion) and goes when the subagent moves again or the reply ends; the
+words carry the meaning, the amber only repeats it. The signs are counted by the engine (`engine-core/src/stuck.rs`): the
+same step six times in a row, the same step failing three times with no file changed between (twice and its retry), or
+no step for 10 minutes (30 while a command runs, since builds say nothing until they end). The time a question waits for
+the person never counts, and only for the subagent that asked it: a sibling that hangs meanwhile still turns amber
+(task 110). Neither CLI lets Faber speak to the main agent while it waits for its subagent, so the main agent's own
+chance is the retry the numbers leave it. Background subagents are followed the same way while the reply that sent them
+runs.
+
+The main agent gets the same line, under its reply's status line instead of under a row (`ui/StallNote.tsx`, task 110):
+the same `.agent-stuck` amber box and entrance, its words, and Stop (which asks first, like the composer's, when helpers
+would end with it). It says that the agent has given no news for N minutes (10 even with no open step, or 30 while a
+command runs; the number moves once a minute), that compacting the conversation has taken N minutes (past 5), that it keeps running the same
+step (six times in a row, or 10 with no file changed whatever came between), or that the same step failed three times
+with no file changed. The sign stops nothing: the existing 15-minute stop with no open step still applies.
+Quiet or stuck pieces: [queue](queue.md#child-reports).
+The running column shows the same words on the row, with "Open conversation", like a stuck helper's.
+
+Up to three helpers run if memory allows; reports, saved logs and their exchanges with the lead: [team channel](helper-team.md).
+
+Faber helpers form a [team block](team-screen.md), with pieces, models, effort and exchanges. Names reserve ended rows too. Older rows keep the AI name; the member view keeps commands and reports. Approval cards stay hidden: in a mode that asks, what the helper needed approval for is refused and named in its
+report, and the agent does that step itself, where the card shows. Known limit: a conversation resumed from before the
+helper tool existed keeps its Codex thread without it, since Codex takes dynamic tools only when a thread starts.
+
+### Pages in Faber's browser
+
+The page's head has an expand button, the subagent's own: the page fills the work area over the conversation, the composer
+below, and the same button (then "Back to the side column") returns it. Its More menu names the screen size the page is drawn at
+and opens the existing list of sizes; a desktop size is drawn whole and shrunk to fit the box, so 1920×1080 in a 560 px column
+shows the full page small.
+
+An active emulated screen size stays visible above the live page as “Preview: PC · 1920 × 1080”, with “Fit to panel” beside it. The normal panel size needs no notice; recorded pictures keep their own size labels. Reset uses the same size command as the menu, ignores repeated activation while pending, keeps the confirmed size and shows a translated error if it fails, and returns keyboard focus to the address after success.
+
+Back and Forward refresh after each completed load, including when the address already shows the requested page; an older history reply cannot replace a newer one. An unsupported address and a native failure to open a valid page have distinct translated errors beside the address. The field retains its text for retry; only an unsupported address is marked invalid.
+
+The native child explicitly reuses the host's WebView2 environment while keeping its InPrivate controller and the per-conversation clearing rules. Creating a second environment with different browser options in the same data folder is refused by WebView2, including in hidden test runs.
+
+A page a project's agent opened in Faber's browser (R161 step 7) is a card among the reply's files, in the file card's
+surface: the picture the browser took of the page's top (a 16:10 crop at most 480 px wide, the page loaded at 1280 by 800
+and drawn at 0.375), then the page's title over its site in the third ink, both ellipsized, and "See the page". The
+title and address come from Faber's own first lines of the answer, never from the page's words. Inside the page, where the agent last clicked or typed carries a 2 px ring (#4c8dff, 6 px radius, a 12% fill,
+4 px outside the thing) and a 20 px pointer of the same blue with a white edge at its middle: the page has none of
+Faber's tokens, so the colours are fixed; nothing moves, so no motion level applies. An app the agent
+started on this computer (the app pane) has the same card with no picture: "Your app, running here" over its address
+and port in the third ink, read from a line of a command's output that says a server is up there (never from an error
+line), and "See the page" opens it the same way. "See the page" opens it
+in the running column, the subagent's place: a head with the title and close (once a link or redirect leaves the
+card's site, the title is the site the page is on now; no back arrow, since the topbar's pane buttons and the run button
+pick what the column shows), Back, Forward and Reload as quiet icon buttons, then an address field in the data font with where the page is (Enter opens what was typed, Esc
+puts the address back) and, once there is a page, a quiet icon button that opens it in the person's own browser, a meta line with the site it is on now,
+and under it a box that fills the rest of the column, in the third surface with the hairline edge, over which the page
+itself is drawn by a second webview of the same window. The box is measured and the page placed again when it changes
+size, when the window does and once the column has slid in; when the box goes, the page moves out of the window, where
+it keeps drawing, and it closes after five minutes nobody used it. Opening a subagent parks the live page; reopening
+the browser replaces the subagent view. A menu, dialog or toast covering its box temporarily parks the native page; it returns when the layer goes.
+While it is on screen the page is the person's: they click and type in it, and the agent's call waits for them
+to go back. A page clicked through several times is one card, its latest. Under the box, once the agent did more than one thing in the
+browser during the reply, the log of its steps fills at most a third of the column, oldest first, one quiet row each in the
+third ink (a number in the data face, then the step's words; what the agent typed never shows, only the field), the step
+on view in the first ink on the second surface. Picking a step puts the picture taken after it in the box, from the page's
+top, and moves the live page out of the window; the latest step, or "Back to the live page" above the log, brings it back.
+Arrow keys, Home and End walk the log. Nothing in it moves. A check at several screen sizes is one step, "Checked it on 6
+screen sizes", and its log shows even when it is the reply's only step; picking it, even as the latest, puts a grid in
+the box instead of one picture: each size's picture whole at its own shape (columns of at least 132 px, at most 240 px
+tall, the hairline edge, 4 px radius), its name under it in the third ink and the data size ("Phone · 390 × 844"), and
+"Runs past the edge" in the conversation's amber where the page is wider than that screen or the edge cuts something. A
+size with no picture keeps its place as a plain block of the second surface. Where the page asks for a login, a captcha or a
+payment the card has one line in the conversation's other amber, with the 2 px edge of a stuck subagent's line: "Your
+turn: log in on this page", and no picture, since one could hold what the person typed; the agent cannot click or type
+there.
+
+Windows memory admission may hold new helpers while the current work and Stop remain available; see [resource limits](../product/architecture.md#architecture).
+
+Creative comparisons reuse the work log row, labelled as independent draft comparisons in every language. Draft bodies never appear in the row detail; the bounded result names scores, model identities, shown order, short reason previews and a durable receipt. Failure remains a failed tool result. There is no new panel, control or motion.

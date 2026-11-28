@@ -1,0 +1,256 @@
+{
+  "schema": 1,
+  "informationalOnly": true,
+  "qualificationPassed": false,
+  "realMissionExecuted": false,
+  "decision": "R117",
+  "stopReason": "reason.budget.cap",
+  "capRaised": false,
+  "privateEvidence": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014",
+  "models": [
+    {
+      "role": "lead",
+      "model": "gpt-6-luna",
+      "contextEnvelope": 1050000,
+      "boundMicros": 306000,
+      "capMicros": 300000,
+      "source": "computedBound",
+      "measured": false,
+      "inputContextKnownBeforeDispatch": false,
+      "outputMaximumTokens": 128000,
+      "fitsRoleCap": false
+    },
+    {
+      "role": "writer",
+      "model": "claude-haiku-5-5",
+      "contextEnvelope": 1000000,
+      "boundMicros": 820000,
+      "capMicros": 600000,
+      "source": "computedBound",
+      "measured": false,
+      "inputContextKnownBeforeDispatch": false,
+      "outputMaximumTokens": 128000,
+      "fitsRoleCap": false
+    },
+    {
+      "role": "reviewer",
+      "model": "gpt-6-luna",
+      "contextEnvelope": 1050000,
+      "boundMicros": 306000,
+      "capMicros": 400000,
+      "source": "computedBound",
+      "measured": false,
+      "inputContextKnownBeforeDispatch": false,
+      "outputMaximumTokens": 128000,
+      "fitsRoleCap": true
+    }
+  ],
+  "missionCapMicros": 2000000,
+  "oneLeadWriterReviewerBoundMicros": 1432000,
+  "concurrentBoundWithUnspentBufferMicros": 2132000,
+  "stopScope": "The total alone can cover one round; the unchanged authorized Lead/Writer subtotals reject admission.",
+  "installed": [
+    {
+      "vendor": "claude",
+      "version": "2.1.296 (Claude Code)",
+      "files": [
+        {
+          "path": "E:\\Apps\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe",
+          "sha256": "76de74f7694a5bdc03378a5f837c9e132827bf004c98c276bc4e9094ff06769a"
+        }
+      ],
+      "billing": "subscription",
+      "paidFallback": null
+    },
+    {
+      "vendor": "codex",
+      "version": "codex-cli 0.162.1",
+      "files": [
+        {
+          "path": "C:\\Users\\Erick\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe",
+          "sha256": "dd13bdb162a184fa04039488b234a8258ef9b76f84e926c505d5742b19249a6a"
+        }
+      ],
+      "billing": "subscription",
+      "paidFallback": false
+    }
+  ],
+  "generatedSchemas": [
+    {
+      "name": "v2/ThreadStartParams.json",
+      "sha256": "e9c6d3cc18d049bfbc0249add3808fb8e5a27e1a0b5a423767aafbc3859a9428",
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "baseInstructions",
+        "config",
+        "cwd",
+        "developerInstructions",
+        "ephemeral",
+        "model",
+        "modelProvider",
+        "personality",
+        "sandbox",
+        "serviceName",
+        "serviceTier",
+        "sessionStartSource",
+        "threadSource"
+      ]
+    },
+    {
+      "name": "v2/TurnStartParams.json",
+      "sha256": "583aff13e7a2da43fbb0150e0edc3c73171f374f0aa745dddba256166988a005",
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "clientUserMessageId",
+        "cwd",
+        "disabledPluginIds",
+        "effort",
+        "input",
+        "model",
+        "outputSchema",
+        "parentTurnId",
+        "personality",
+        "rootTurnId",
+        "sandboxPolicy",
+        "serviceTier",
+        "serviceTierForTurn",
+        "summary",
+        "threadId",
+        "toolOutput",
+        "turnTrigger"
+      ]
+    },
+    {
+      "name": "PermissionsRequestApprovalResponse.json",
+      "sha256": "23f3f24e9dbf35db3e0b85703f0d934da5a1cff3cbb611fba8bcd41f3b4a04b0",
+      "properties": [
+        "permissions",
+        "scope",
+        "strictAutoReview"
+      ]
+    },
+    {
+      "name": "McpServerElicitationRequestResponse.json",
+      "sha256": "792a012fdfe53ac211575a6c37ffbd492be848d15cb313d1bb4b534ade1f54ac",
+      "properties": [
+        "_meta",
+        "action",
+        "content"
+      ]
+    }
+  ],
+  "claudeInterrupt": {
+    "turns": 1,
+    "settledCounters": false,
+    "computedBoundMicros": 820000,
+    "actualSettledCostUsd": null,
+    "partialStreamCostUsd": 0.000197,
+    "stopToResultMs": 7,
+    "killWaitMs": 17,
+    "afterStopTextDeltas": 0,
+    "inheritedTools": 0,
+    "inheritedMcpServers": 0,
+    "userPlugins": 0,
+    "hooks": null,
+    "markerSha256Before": "fdb474e2be83d3270e2813bd3a3ccdc83ff30d426dd23a98b7bf8ce840cdad2d",
+    "markerSha256After": "fdb474e2be83d3270e2813bd3a3ccdc83ff30d426dd23a98b7bf8ce840cdad2d"
+  },
+  "newCodexModelTurns": 0,
+  "historicalSettledSubtotalUsd": 0.0129953,
+  "historicalUnknownTurns": 5,
+  "realRunCostUsd": null,
+  "realRunRamMb": null,
+  "liveProbePeakRamMb": null,
+  "validation": {
+    "commands": [
+      {
+        "command": "npm run lint",
+        "started": "2026-10-14T12:54:14.616Z",
+        "exit": 0,
+        "seconds": 0.377,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-coordinator-final\\proof-01.log"
+      },
+      {
+        "command": "npm run typecheck",
+        "started": "2026-10-14T12:54:14.994Z",
+        "exit": 0,
+        "seconds": 0.843,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-coordinator-final\\proof-02.log"
+      },
+      {
+        "command": "npm run build",
+        "started": "2026-10-14T12:54:15.838Z",
+        "exit": 0,
+        "seconds": 1.636,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-coordinator-final\\proof-03.log"
+      },
+      {
+        "command": "cargo fmt --all --check",
+        "started": "2026-10-14T12:54:17.476Z",
+        "exit": 0,
+        "seconds": 1.57,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-coordinator-final\\proof-04.log"
+      },
+      {
+        "command": "cargo clippy --workspace --all-targets -- -D warnings",
+        "started": "2026-10-14T12:54:19.048Z",
+        "exit": 0,
+        "seconds": 11.717,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-coordinator-final\\proof-05.log"
+      },
+      {
+        "command": "cargo clippy -p faber --features test-hooks -- -D warnings",
+        "started": "2026-10-14T12:54:30.765Z",
+        "exit": 0,
+        "seconds": 6.23,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-coordinator-final\\proof-06.log"
+      },
+      {
+        "command": "cargo t --all",
+        "started": "2026-10-14T12:56:11.677Z",
+        "exit": 0,
+        "seconds": 1203.267,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-coordinator-final\\proof-07.log"
+      }
+    ],
+    "passed": 1389,
+    "failed": 0,
+    "notRun": 0,
+    "skipped": 0,
+    "ramLines": [
+      "pass  screen  with no CLI running, Faber stays within its memory budget (13.5 s)  [idle on the new conversation with the dust (full motion): 114 MB]",
+      "pass  screen  with reduced motion on, the dust stays off and Faber stays within its memory budget (13.0 s)  [idle on the new conversation with the dust (reduced motion): 112 MB]",
+      "pass  screen  after the six looks were applied in turn, Faber stays within its memory budget (9.0 s)  [after the six looks: 228 MB]",
+      "pass  screen  projects screen: checkpoint, decisions, task evidence, six looks, widths and memory (33.4 s)  [temporary repos only; no remote; owner index, ref and dirty files unchanged, 200 tasks, 6 looks x 5 widths, 18 px text, reduced motion; Projects peak 219.2 MB]",
+      "pass  screen  projects: warm CLI guard memory is measured (4.1 s)  [warm guard 1.1 MB; whole app tree 142.6 MB]",
+      "pass  screen  projects: engine jobs end grandchildren on stop, drop and owner crash; stale PID records cannot kill a peer (1.5 s)  [stop: 4 owned processes gone, drop: 4 owned processes gone, crash: 4 owned processes gone]"
+    ]
+  },
+  "ownerAudit": {
+    "before": "r117-owner-before.json",
+    "after": "r117-owner-after-validation.json",
+    "unchanged": false,
+    "stableInstallUnchanged": true,
+    "changed": [
+      "files:docs/design.md",
+      "metadata:index"
+    ],
+    "addedTracked": [
+      ".claude/skills/faber-ui/SKILL.md",
+      ".claude/skills/second-opinion/SKILL.md"
+    ],
+    "skippedProtectedPaths": [
+      ".claude/skills/faber-ui/SKILL.md",
+      ".claude/skills/second-opinion/SKILL.md"
+    ],
+    "ownerHead": "913fdf9ae89c2807b10bf4103fb5deed60fb4d8d",
+    "attribution": "Unknown; the changed owner checkout contains a separate commit. No owner file was restored or modified by this task.",
+    "scope": "Rehash only the original 291 nonprotected tracked paths and original metadata/install files. New protected paths are names only and never opened; untracked/build outputs excluded."
+  },
+  "ci": {
+    "state": "pendingAtCommit",
+    "evidence": "delivery-r117.json after exact pushed-head CI completes"
+  }
+}

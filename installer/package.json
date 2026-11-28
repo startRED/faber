@@ -1,0 +1,8 @@
+{
+  "name": "faber-installer",
+  "private": true,
+  "description": "Build-time only: packs the Electron app and its installers (scripts/electron-dist.mjs). Never shipped.",
+  "devDependencies": {
+    "electron-builder": "26.18.0"
+  }
+}

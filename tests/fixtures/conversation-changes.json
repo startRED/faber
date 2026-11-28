@@ -1,0 +1,25 @@
+{
+  "conversation": {
+    "id": "changed-project", "title": "Update the greeting", "area": "project", "projectId": "p1",
+    "createdAt": 1792000000000, "updatedAt": 1792000004000, "sessions": {}, "queued": [],
+    "messages": [
+      { "id": "q1", "role": "user", "text": "Update the greeting and document it.", "at": 1792000000000 },
+      {
+        "id": "r1", "role": "assistant", "text": "Updated the greeting and its documentation.",
+        "at": 1792000001000, "status": "done", "vendor": "claude",
+        "tools": [
+          { "id": "edit1", "name": "Edit", "input": { "file_path": "src/greeting.ts", "old_string": "export const greeting = 'Hello';", "new_string": "export const greeting = 'Welcome';" }, "ok": true },
+          { "id": "edit2", "name": "Write", "input": { "file_path": "docs/greeting.md", "content": "# Greeting\nThe greeting welcomes you.\n" }, "ok": true }
+        ]
+      }
+    ]
+  },
+  "changes": [
+    { "path": "src/greeting.ts", "added": 1, "removed": 1, "binary": false, "status": "modified" },
+    { "path": "docs/greeting.md", "added": 2, "removed": 0, "binary": false, "status": "added" }
+  ],
+  "patches": {
+    "src/greeting.ts": "diff --git a/src/greeting.ts b/src/greeting.ts\n--- a/src/greeting.ts\n+++ b/src/greeting.ts\n@@ -1 +1 @@\n-export const greeting = 'Hello';\n+export const greeting = 'Welcome';\n",
+    "docs/greeting.md": "diff --git a/docs/greeting.md b/docs/greeting.md\nnew file mode 100644\n--- /dev/null\n+++ b/docs/greeting.md\n@@ -0,0 +1,2 @@\n+# Greeting\n+The greeting welcomes you.\n"
+  }
+}

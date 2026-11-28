@@ -1,0 +1,5 @@
+audiobox-aesthetics==0.0.4
+torch==2.6.0+cu124
+torchaudio==2.6.0+cu124
+numpy==1.26.4
+setuptools==80.9.0

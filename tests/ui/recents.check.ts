@@ -1,0 +1,308 @@
+import { createComponent, createSignal } from 'solid-js';
+import { render } from 'solid-js/web';
+import themes from '../../src-tauri/src/themes.json';
+import { App } from '../../ui/App.tsx';
+import { api, type AppState, type FolderView, type RecentsView, type Summary } from '../../ui/api.ts';
+import { ContextMenuHost } from '../../ui/ContextMenu.tsx';
+import { installContextMenu } from '../../ui/contextmenu.ts';
+import { lang, t, useLanguage } from '../../ui/i18n.ts';
+import { shortPath } from '../../ui/Recents.tsx';
+import { Sidebar } from '../../ui/Sidebar.tsx';
+import { check, deepEqual, equal, ok } from './check.ts';
+
+const settle = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Removes a row the one way there is: its menu, opened as the menu key does, chosen and then confirmed. */
+const removeVia = async (row: HTMLElement) => {
+  (document.activeElement && row.contains(document.activeElement) ? document.activeElement : row).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await settle();
+  document.querySelector<HTMLButtonElement>('.cmenu:not(.leaving) [role="menuitem"]')!.click();
+  await settle(560);
+  document.querySelector<HTMLButtonElement>('.cmenu:not(.leaving) [role="menuitem"]')!.click();
+  await settle();
+};
+
+const folder = (name: string, reason?: string): FolderView => ({ path: `X:/work/${name}`, name, parent: 'X:/work', reason });
+
+check('recents: a damaged conversation stays in the sidebar with show and confirmed copy removal, including failure and retry', async () => {
+  const original = { ...api };
+  const language = lang();
+  useLanguage('en');
+  const root = document.createElement('div');
+  root.style.width = '288px';
+  document.body.append(root);
+  const [rows, setRows] = createSignal<Summary[]>([{ id: 'broken', title: 'broken', area: 'chat', updatedAt: Date.now(), reason: 'reason.conversation_damaged' }]);
+  const calls: string[] = [];
+  const errors: unknown[] = [];
+  let fail = true;
+  api.showDamagedConversation = async (id) => { calls.push(`show ${id}`); };
+  api.removeDamagedConversation = async (id) => {
+    calls.push(`remove ${id}`);
+    if (fail) throw 'error.store.write';
+    setRows([]);
+  };
+  const dispose = render(() => createComponent(Sidebar, {
+    get conversations() { return rows(); }, projects: [], vendors: [], version: '0', place: { area: 'chat' }, running: [], quotas: {}, now: Date.now(),
+    onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: () => {}, onAddProject: () => {}, onOpen: () => { throw new Error('a damaged row cannot open'); },
+    onRemove: () => { throw new Error('the original cannot be removed'); }, onSettings: () => {}, onError: (err) => errors.push(err),
+  }), root);
+  try {
+    await settle();
+    const row = () => root.querySelector<HTMLElement>('[data-conversation-id="broken"]');
+    ok(row()?.textContent?.includes('This conversation could not be read.'));
+    const buttons = row()!.querySelectorAll('button');
+    deepEqual([...buttons].map((b) => b.textContent), ['Show the file', 'Remove']);
+    buttons[0].focus();
+    equal(document.activeElement, buttons[0]);
+    buttons[0].click();
+    await settle();
+    deepEqual(calls, ['show broken']);
+    buttons[1].click();
+    equal(buttons[1].textContent, 'Remove the damaged copy?');
+    buttons[1].click();
+    deepEqual(calls, ['show broken'], 'a double click never confirms removal');
+    await settle(560);
+    buttons[1].click();
+    await settle();
+    deepEqual(errors, ['error.store.write']);
+    ok(row(), 'a failed removal keeps the row');
+    equal(buttons[1].textContent, 'Remove');
+    fail = false;
+    buttons[1].click();
+    buttons[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    equal(buttons[1].textContent, 'Remove', 'Escape cancels confirmation');
+    buttons[1].click();
+    await settle(560);
+    buttons[1].click();
+    await settle();
+    equal(row(), null);
+    deepEqual(calls, ['show broken', 'remove broken', 'remove broken']);
+  } finally {
+    dispose(); root.remove(); Object.assign(api, original); useLanguage(language);
+  }
+});
+
+check('recents: a long parent path keeps the drive and the last two folders, and short ones stay whole', () => {
+  equal(shortPath('E:\\Documentos\\ProjetosIA\\faber'), 'E:\\…\\ProjetosIA\\faber');
+  equal(shortPath('/home/erick/work/clients/faber'), '/…/clients/faber');
+  equal(shortPath('E:\\work\\faber'), 'E:\\work\\faber');
+  equal(shortPath('X:/work'), 'X:/work');
+});
+
+check('recents: a recent folder opens as a project in one click, a saved environment starts in one click, and the menu forgets', async () => {
+  const stored = localStorage.getItem('faber.place');
+  const language = lang();
+  const original = { ...api };
+  const fresh = (): RecentsView => ({
+    folders: [folder('alpha'), folder('beta'), folder('gamma', 'reason.recents.gone'), folder('delta'), folder('epsilon')],
+    environments: [{ id: 'env-1', name: 'Work set', folders: [folder('alpha'), folder('beta')] }],
+  });
+  let view = fresh();
+  let failRemoval = false;
+  const calls: unknown[][] = [];
+  api.recents = async () => ({ folders: [...view.folders], environments: [...view.environments] });
+  api.setClock = async () => {};
+  api.openFolders = async (paths) => {
+    calls.push(['open', paths]);
+    return [{ id: 'p-open', name: 'alpha', path: paths[0] }];
+  };
+  api.startEnvironment = async (id) => {
+    calls.push(['start', id]);
+    return [{ id: 'p-env', name: 'alpha', path: 'X:/work/alpha' }];
+  };
+  api.saveEnvironment = async (name, folders) => {
+    calls.push(['save', name, folders]);
+  };
+  // The removals really remove, so the screen shows the list as it is afterwards.
+  api.forgetRecent = async (path) => {
+    calls.push(['forget', path]);
+    if (failRemoval) throw 'error.recents.saveFailed';
+    view = { ...view, folders: view.folders.filter((f) => f.path !== path) };
+  };
+  api.forgetEnvironment = async (id) => {
+    calls.push(['forgetEnvironment', id]);
+    if (failRemoval) throw 'error.recents.saveFailed';
+    view = { ...view, environments: view.environments.filter((e) => e.id !== id) };
+  };
+  const effects = { ambient: false, texture: false, glow: false };
+  const initial: AppState = {
+    vendors: ['claude'], models: [], quotas: [], projects: [], conversations: [], version: '0.0.0', running: { revision: 0, items: [] },
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+    look: {
+      vars: themes.css.base, scheme: 'dark', motion: 'none', effects, checks: [], notices: [],
+      appearance: { base: 'sala', ground: 'sala', accent: '#f3f0e8', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects },
+    },
+  };
+  const mount = async (area: 'project' | 'chat' = 'project', place: object = { area }) => {
+    view = fresh();
+    failRemoval = false;
+    localStorage.setItem('faber.place', JSON.stringify(place));
+    const root = document.createElement('div');
+    root.style.cssText = 'position:fixed;inset:0';
+    root.dataset.motion = 'none';
+    for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+    document.body.append(root);
+    installContextMenu();
+    const dispose = render(() => [createComponent(App, { initial, inbox: { take: () => {} } }), createComponent(ContextMenuHost, {})], root);
+    await settle();
+    return { root, done: () => { dispose(); root.remove(); } };
+  };
+  try {
+    useLanguage('en');
+    // One click on a recent folder opens it.
+    let screen = await mount();
+    try {
+      const rows = [...screen.root.querySelectorAll<HTMLElement>('.recents section:first-child .rec')];
+      equal(rows.length, 5);
+      deepEqual(rows.map((r) => r.querySelector('.n')?.textContent), ['alpha', 'beta', 'gamma', 'delta', 'epsilon']);
+      equal(rows[0].querySelector('.d')?.textContent, 'X:/work');
+      const gone = rows[2].querySelector<HTMLButtonElement>('.rec-main')!;
+      equal(gone.getAttribute('aria-disabled'), 'true', 'a folder that is gone cannot be picked');
+      const before = calls.length;
+      gone.click();
+      equal(calls.length, before, 'clicking it does nothing');
+      equal(rows[2].querySelector('.d')?.textContent, t('reason.recents.gone'));
+      equal(rows[2].querySelector('.rec-sel'), null);
+      rows[0].querySelector<HTMLButtonElement>('.rec-main')!.click();
+      await settle();
+      deepEqual(calls.at(-1), ['open', ['X:/work/alpha']]);
+      equal(JSON.parse(localStorage.getItem('faber.place')!).projectId, 'p-open');
+    } finally {
+      screen.done();
+    }
+    // Select two folders, name them and save; then start the saved environment.
+    calls.length = 0;
+    screen = await mount();
+    try {
+      const rows = [...screen.root.querySelectorAll<HTMLElement>('.recents section:first-child .rec')];
+      rows[0].querySelector<HTMLButtonElement>('.rec-sel')!.click();
+      rows[3].querySelector<HTMLButtonElement>('.rec-sel')!.click();
+      await settle();
+      const name = screen.root.querySelector<HTMLInputElement>('.env-tray input')!;
+      name.value = 'Pair';
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+      await settle();
+      screen.root.querySelector<HTMLFormElement>('.env-tray')!.requestSubmit();
+      await settle();
+      deepEqual(calls.at(-1), ['save', 'Pair', ['X:/work/alpha', 'X:/work/delta']]);
+      equal(screen.root.querySelector('.env-tray'), null, 'the tray closes after saving');
+      const env = screen.root.querySelector<HTMLButtonElement>('section[aria-labelledby="env-title"] .rec-main')!;
+      equal(env.querySelector('.n')?.textContent, 'Work set');
+      env.click();
+      await settle();
+      deepEqual(calls.at(-1), ['start', 'env-1']);
+      equal(JSON.parse(localStorage.getItem('faber.place')!).projectId, 'p-env');
+    } finally {
+      screen.done();
+    }
+    // Removal is the row's menu only (no × on the rows), reached by the menu key from the keyboard too, also on a folder that
+    // is gone; it asks once more, and focus stays in the list.
+    calls.length = 0;
+    screen = await mount();
+    try {
+      equal(screen.root.querySelectorAll('.recents .rec-x, .recents .rec [aria-label*="Remove"]').length, 0, 'no remove button on the rows');
+      const mains = () => [...screen.root.querySelectorAll<HTMLButtonElement>('.recents section:first-child .rec-main')];
+      equal(mains().length, 5);
+      ok(mains().every((b) => !b.disabled), 'every row keeps its focus, a gone folder too');
+      const names = () => [...screen.root.querySelectorAll('.recents section:first-child .rec .n')].map((n) => n.textContent);
+      const focused = () => (document.activeElement as HTMLElement | null)?.closest('.rec')?.querySelector('.n')?.textContent ?? (document.activeElement as HTMLElement | null)?.className;
+      mains()[2]!.focus();
+      await removeVia(mains()[2]!.closest<HTMLElement>('.rec')!);
+      deepEqual(calls.at(-1), ['forget', 'X:/work/gamma']);
+      deepEqual(names(), ['alpha', 'beta', 'delta', 'epsilon'], 'the entry is gone from the list');
+      equal(focused(), 'delta', 'focus lands on the entry that took the removed one’s place');
+      mains()[3]!.focus();
+      await removeVia(mains()[3]!.closest<HTMLElement>('.rec')!);
+      deepEqual(names(), ['alpha', 'beta', 'delta']);
+      equal(focused(), 'delta', 'removing the last entry moves focus to the new last one');
+      await removeVia(screen.root.querySelector<HTMLElement>('section[aria-labelledby="env-title"] .rec')!);
+      deepEqual(calls.at(-1), ['forgetEnvironment', 'env-1']);
+      equal(screen.root.querySelector('section[aria-labelledby="env-title"]'), null, 'the environment is gone');
+      equal(document.activeElement, screen.root.querySelector('.recents'), 'with no entry left in its list, focus stays in the block');
+    } finally {
+      screen.done();
+    }
+    // The right-click menu has one line and forgets the folder; closing it with Escape gives focus back.
+    // The menu shows in the first menu host on the page, which may belong to another check: it is looked up in the document.
+    calls.length = 0;
+    screen = await mount();
+    try {
+      const opener = screen.root.querySelector<HTMLButtonElement>('.recents .rec-main')!;
+      opener.focus();
+      screen.root.querySelector<HTMLElement>('.recents .rec')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      await settle();
+      equal(document.querySelector('.cmenu:not(.leaving) [role="menuitem"]'), document.activeElement, 'the menu takes focus');
+      dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      await settle();
+      equal(document.activeElement, opener, 'Escape puts focus back where the menu came from');
+    } finally {
+      screen.done();
+    }
+    // In Settings, Escape closes only the menu and gives focus back; a second Escape closes Settings. A failed removal is said.
+    calls.length = 0;
+    screen = await mount('chat');
+    try {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: ',', ctrlKey: true, bubbles: true }));
+      await settle();
+      const opener = screen.root.querySelector<HTMLButtonElement>('.recents .rec-main')!;
+      ok(opener, 'Settings lists the recent folders');
+      opener.focus();
+      // Focusing a button in the scrolling panel scrolls it a frame later, and any scroll closes a menu: let that settle first.
+      await settle();
+      screen.root.querySelector<HTMLElement>('.recents .rec')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      await settle();
+      (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await settle();
+      equal(document.querySelector('.cmenu:not(.leaving)'), null, 'Escape closes the menu');
+      ok(screen.root.querySelector('.recents'), 'Settings is still open');
+      equal(document.activeElement, opener, 'focus is back where the menu opened');
+      failRemoval = true;
+      await removeVia(opener.closest<HTMLElement>('.rec')!);
+      ok(screen.root.querySelector('.toast')?.textContent?.includes(t('error.recents.saveFailed')), 'the failed removal is shown');
+      (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await settle();
+      equal(screen.root.querySelector('.recents'), null, 'a second Escape closes Settings');
+    } finally {
+      screen.done();
+    }
+    // The right-click menu has one line, asks once more (C009) and then forgets the folder.
+    calls.length = 0;
+    screen = await mount();
+    try {
+      const row = screen.root.querySelector<HTMLElement>('.recents .rec')!;
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 80 }));
+      await settle();
+      const items = document.querySelectorAll<HTMLButtonElement>('.cmenu:not(.leaving) [role="menuitem"]');
+      equal(items.length, 1);
+      equal(items[0].textContent, t('recents.forget'));
+      dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      await settle();
+      equal(document.querySelector('.cmenu:not(.leaving)'), null, 'Escape closes the menu');
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 80 }));
+      await settle();
+      document.querySelector<HTMLButtonElement>('.cmenu:not(.leaving) [role="menuitem"]')!.click();
+      await settle();
+      equal(document.querySelector('.cmenu:not(.leaving) [role="menuitem"]')?.textContent, t('menu.removeConfirm'), 'the first choice only asks');
+      equal(calls.length, 0);
+      await settle(560);
+      document.querySelector<HTMLButtonElement>('.cmenu:not(.leaving) [role="menuitem"]')!.click();
+      await settle();
+      deepEqual(calls.at(-1), ['forget', 'X:/work/alpha']);
+      equal(document.querySelector('.cmenu:not(.leaving)'), null);
+    } finally {
+      screen.done();
+    }
+    // A conversation whose project left Faber opens the one "Open a project" screen, never a second one of its own.
+    api.open = async (id) => ({ id, title: 'Old', area: 'project', projectId: 'gone', sessions: {}, createdAt: 0, updatedAt: 0, messages: [] });
+    screen = await mount('project', { area: 'project', projectId: 'gone', id: 'c-old' });
+    try {
+      ok(screen.root.querySelector('.projects-stage h1')?.textContent === t('empty.openProjectTitle'), 'the Projects area shows it');
+    } finally {
+      screen.done();
+    }
+  } finally {
+    Object.assign(api, original);
+    useLanguage(language);
+    if (stored === null) localStorage.removeItem('faber.place');
+    else localStorage.setItem('faber.place', stored);
+  }
+});

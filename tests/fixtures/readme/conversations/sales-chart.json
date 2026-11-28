@@ -1,0 +1,42 @@
+{
+  "id": "c4a70004-0000-4000-8000-000000000001",
+  "title": "Draw this week's sales as a chart",
+  "area": "chat",
+  "sessions": {},
+  "createdAt": -22500000,
+  "updatedAt": -22440000,
+  "queued": [],
+  "messages": [
+    {
+      "id": "c4a70004-0000-4000-8000-0000000000a1",
+      "role": "user",
+      "text": "Draw this week's loaves as a chart I can show the team: Tuesday 96, Wednesday 104, Thursday 121, Friday 138, Saturday 187.",
+      "at": -22500000
+    },
+    {
+      "id": "c4a70004-0000-4000-8000-0000000000a2",
+      "role": "assistant",
+      "at": -22494000,
+      "took": 47000,
+      "finishedAt": -22447000,
+      "vendor": "claude",
+      "model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "reason": "reason.route.visual.medium",
+      "status": "done",
+      "costUsd": 0.07,
+      "inputTokens": 9100,
+      "outputTokens": 1320,
+      "acts": [
+        {
+          "kind": "route",
+          "actor": { "who": "faber" },
+          "what": "act.route.chose",
+          "why": "reason.route.visual.medium",
+          "params": { "model": "claude-sonnet-5-5", "effort": "medium" }
+        }
+      ],
+      "text": "Here is the week as a chart: 646 loaves, and Saturday sold almost twice Tuesday.\n\n```html\n<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Loaves sold this week</title>\n<style>\n  body { margin: 0; font: 15px/1.4 system-ui, sans-serif; background: #fbf6ee; color: #2b2118; }\n  main { padding: 16px 32px 12px; }\n  h1 { font-size: 21px; margin: 0 0 2px; }\n  p { margin: 0 0 10px; color: #7a6a58; }\n  .bars { display: flex; align-items: flex-end; gap: 22px; height: 128px; border-bottom: 1px solid #e3d6c3; }\n  .bar { flex: 1; text-align: center; }\n  .bar b { display: block; font-size: 15px; margin-bottom: 4px; }\n  .bar i { display: block; border-radius: 7px 7px 0 0; background: #dfae52; }\n  .bar.best i { background: #b5541c; }\n  .days { display: flex; gap: 22px; padding-top: 7px; color: #7a6a58; font-size: 13px; }\n  .days span { flex: 1; text-align: center; }\n</style>\n</head>\n<body>\n<main>\n  <h1>Loaves sold this week</h1>\n  <p>646 in all. Saturday sold almost twice Tuesday.</p>\n  <div class=\"bars\">\n    <div class=\"bar\"><b>96</b><i style=\"height: 51px\"></i></div>\n    <div class=\"bar\"><b>104</b><i style=\"height: 56px\"></i></div>\n    <div class=\"bar\"><b>121</b><i style=\"height: 65px\"></i></div>\n    <div class=\"bar\"><b>138</b><i style=\"height: 74px\"></i></div>\n    <div class=\"bar best\"><b>187</b><i style=\"height: 100px\"></i></div>\n  </div>\n  <div class=\"days\"><span>Tuesday</span><span>Wednesday</span><span>Thursday</span><span>Friday</span><span>Saturday</span></div>\n</main>\n</body>\n</html>\n```\n\nIf Saturday keeps growing like this, it is worth a second bake at 10 a.m."
+    }
+  ]
+}

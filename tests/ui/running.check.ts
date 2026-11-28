@@ -1,0 +1,287 @@
+import { createComponent } from 'solid-js';
+import { render } from 'solid-js/web';
+import { Running } from '../../ui/Running.tsx';
+import type { QuotaReading, RunningItem, Summary } from '../../ui/api.ts';
+import { widthClass } from '../../ui/layout.ts';
+import { answerOutcome, askKey, blocksOf, createAutoOpen, createRunningStore, doneCards, elapsed, newest, openPlace, pickUp, placeOfRunning, QUIET_MS, waitingKeys, warmLeft } from '../../ui/running.ts';
+import { greetingParts } from '../../ui/greeting.ts';
+import { groupChats, lineReading, otherReadings, seedQuotas, showsChats, tailOf, tightest, withQuota } from '../../ui/sidebar.ts';
+import { check, deepEqual, equal, ok } from './check.ts';
+
+const item = (over: Partial<RunningItem> = {}): RunningItem => ({
+  conversationId: 'c1',
+  turnId: 'm1',
+  title: 'A',
+  area: 'chat',
+  state: 'working',
+  since: 0,
+  permissions: [],
+  ...over,
+});
+const ask = (requestId: string) => ({ requestId, tool: 'Bash', input: {} });
+
+check('layout: the width decides where the column and the sidebar sit', () => {
+  equal(widthClass(1440), 'wide');
+  equal(widthClass(1100), 'wide');
+  equal(widthClass(1099), 'mid');
+  equal(widthClass(900), 'mid');
+  equal(widthClass(899), 'narrow');
+  equal(widthClass(720), 'narrow');
+});
+
+check('running: a list never goes back to an older one, in whatever order they arrive', () => {
+  const store = createRunningStore();
+  store.offer({ revision: 5, items: [item()] });
+  store.offer({ revision: 4, items: [] });
+  equal(store.list().revision, 5);
+  equal(store.list().items.length, 1);
+  store.offer({ revision: 5, items: [] });
+  equal(store.list().items.length, 1, 'the same revision keeps the list already held');
+  store.offer({ revision: 6, items: [] });
+  equal(store.list().items.length, 0);
+  equal(newest({ revision: 1, items: [] }, { revision: 2, items: [item()] }).revision, 2);
+});
+
+check('running: the first list from the engine is taken, even revision 0', () => {
+  const store = createRunningStore();
+  store.offer({ revision: 0, items: [item()] });
+  equal(store.list().items.length, 1);
+});
+
+check('running: one block per project and one for Chat, in the engine order', () => {
+  const blocks = blocksOf([
+    item({ conversationId: 'a', area: 'project', projectId: 'p2', state: 'needsYou' }),
+    item({ conversationId: 'b', area: 'project', projectId: 'p1' }),
+    item({ conversationId: 'c', area: 'project', projectId: 'p2' }),
+    item({ conversationId: 'd' }),
+  ]);
+  deepEqual(blocks.map((b) => [b.key, b.items.length, b.needs]), [['p2', 2, 1], ['p1', 1, 0], ['chat', 1, 0]]);
+});
+
+check('running: a run that ended while nobody looked is a done card in its project block until it is opened or runs again', () => {
+  const ended = (at: number, kind: 'done' | 'needsYou' | 'failed' = 'done') => ({ at, kind, workMs: 60_000 });
+  const conv = (id: string, over: Partial<Summary> = {}): Summary => ({ id, title: id, area: 'project', projectId: 'p1', updatedAt: 0, ...over });
+  const all = [
+    conv('old', { ended: ended(1) }),
+    conv('new', { ended: ended(2, 'failed'), projectId: 'p2' }),
+    conv('quiet'),
+    conv('away', { ended: ended(3), archived: true }),
+    conv('again', { ended: ended(4) }),
+    conv('open', { ended: ended(5) }),
+  ];
+  const running = [item({ conversationId: 'again', area: 'project', projectId: 'p1' })];
+  const cards = doneCards(all, running, 'open');
+  deepEqual(cards.map((c) => c.id), ['new', 'old'], 'newest end first; not one at work again, put away, or on screen');
+  deepEqual(doneCards(all, [{ ...running[0]!, settled: true }]).map((c) => c.id), ['open', 'again', 'new', 'old'], 'a reply only closing has ended');
+  const blocks = blocksOf(running, cards);
+  deepEqual(blocks.map((b) => [b.key, b.items.length, b.done.map((c) => c.id)]), [['p1', 1, ['old']], ['p2', 0, ['new']]]);
+});
+
+check('running: a question is named by conversation, turn and request together', () => {
+  const a = item({ conversationId: 'c1', turnId: 'm1', permissions: [ask('0')] });
+  const b = item({ conversationId: 'c2', turnId: 'm1', permissions: [ask('0')] });
+  deepEqual(waitingKeys([a, b]), ['c1:m1:0', 'c2:m1:0']);
+  equal(askKey(a, '7'), 'c1:m1:7');
+});
+
+check('auto-open: opens once for each question, even if the user closes the column', () => {
+  const open = createAutoOpen();
+  deepEqual(open.check([], 0), { open: false });
+  deepEqual(open.check(['k1'], 0), { open: true });
+  deepEqual(open.check(['k1'], 10), { open: false }, 'the same question does not open it again');
+  deepEqual(open.check(['k1', 'k2'], 20), { open: true }, 'a new question does');
+});
+
+check('auto-open: waits until the user has stopped typing for 1.5 s', () => {
+  const open = createAutoOpen();
+  open.typed(1000);
+  deepEqual(open.check(['k1'], 1200), { open: false, retryIn: QUIET_MS - 200 });
+  open.typed(2000);
+  deepEqual(open.check(['k1'], 2500), { open: false, retryIn: QUIET_MS - 500 });
+  deepEqual(open.check(['k1'], 2000 + QUIET_MS), { open: true });
+});
+
+check('auto-open: a question the user has seen, by opening or closing the column, never opens it again', () => {
+  const open = createAutoOpen();
+  open.typed(1000);
+  deepEqual(open.check(['k1'], 1200), { open: false, retryIn: QUIET_MS - 200 });
+  open.seen(['k1']);
+  deepEqual(open.check(['k1'], 1000 + QUIET_MS), { open: false }, 'closed during the wait: the pending check finds nothing new');
+  deepEqual(open.check(['k1', 'k2'], 5000), { open: true }, 'a question that came later is new');
+});
+
+check('auto-open: a question that waits when Faber starts opens the column too', () => {
+  const open = createAutoOpen();
+  deepEqual(open.check(waitingKeys([item({ permissions: [ask('3')] })]), Date.now()), { open: true });
+});
+
+check('places: opening a conversation sets area, project and id together', () => {
+  const from = { area: 'project' as const, projectId: 'p1' };
+  deepEqual(openPlace(from, { id: 'x', area: 'chat' }), { area: 'chat', projectId: 'p1', id: 'x' });
+  deepEqual(openPlace({ area: 'chat' }, { id: 'y', area: 'project', projectId: 'p9' }), { area: 'project', projectId: 'p9', id: 'y' });
+  deepEqual(placeOfRunning({ area: 'chat' }, item({ conversationId: 'z', area: 'project', projectId: 'p2' })), { area: 'project', projectId: 'p2', id: 'z' });
+});
+
+check('answers: a stale question is dropped quietly; any other error is shown', () => {
+  equal(answerOutcome('error.permission.stale'), 'stale');
+  deepEqual(answerOutcome('error.notDelivered'), { problem: 'error.notDelivered' });
+});
+
+check('elapsed: seconds, minutes, then hours', () => {
+  deepEqual(elapsed(0, 5_000), { key: 'time.seconds', n: 5 });
+  deepEqual(elapsed(0, 59_999), { key: 'time.seconds', n: 59 });
+  deepEqual(elapsed(0, 60_000), { key: 'time.minutes', n: 1 });
+  deepEqual(elapsed(0, 3_600_000), { key: 'time.hours', n: 1 });
+  deepEqual(elapsed(10_000, 0), { key: 'time.seconds', n: 0 }, 'a clock that runs behind never shows a negative time');
+});
+
+check('sidebar: chats are grouped by the user\'s own days', () => {
+  const now = new Date(2026, 9, 11, 15, 0).getTime();
+  const at = (days: number, hour = 12) => new Date(2026, 9, 11 - days, hour).getTime();
+  const groups = groupChats(
+    [
+      { id: 'a', updatedAt: at(0, 0) },
+      { id: 'b', updatedAt: at(1, 23) },
+      { id: 'c', updatedAt: at(6, 0) },
+      { id: 'd', updatedAt: at(7, 23) },
+    ],
+    now,
+  );
+  deepEqual(groups.map((g) => [g.group, g.chats.map((c) => c.id)]), [['today', ['a']], ['week', ['b', 'c']], ['earlier', ['d']]]);
+  deepEqual(groupChats([], now), []);
+});
+
+check('quota: the tightest window of the vendor counts, and an old reading counts for nothing', () => {
+  const now = 1_000_000;
+  const reading = (window: string, used: number, resetsAt: number, vendor: QuotaReading['vendor'] = 'claude'): QuotaReading => ({ vendor, window, used, resetsAt });
+  let quotas = seedQuotas([reading('five_hour', 0.2, 2000), reading('seven_day', 0.6, 5000), reading('five_hour', 0.9, 2000, 'codex')]);
+  equal(tightest(quotas, 'claude', now)?.window, 'seven_day');
+  equal(tightest(quotas, 'codex', now)?.used, 0.9);
+  quotas = withQuota(quotas, reading('seven_day', 0.7, 900));
+  equal(tightest(quotas, 'claude', now)?.window, 'five_hour', 'the 7-day reading has passed its reset time');
+  quotas = withQuota(quotas, reading('five_hour', 0.1, 0));
+  equal(tightest(quotas, 'claude', now)?.window, 'five_hour', 'a reading with no reset time stands');
+  equal(tightest({}, 'claude', now), undefined);
+});
+
+check('sidebar: a project row says how many questions wait and whether anything runs', () => {
+  const items = [item({ area: 'project', projectId: 'p1', state: 'needsYou' }), item({ conversationId: 'c2', area: 'project', projectId: 'p1' }), item({ conversationId: 'c3' })];
+  deepEqual(tailOf(items, 'p1'), { needs: 1, running: true });
+  deepEqual(tailOf(items, 'p2'), { needs: 0, running: false });
+  ok(!tailOf([], 'p1').running);
+});
+
+check('sidebar: a project shows its conversations when it is opened or when the search found some in it', () => {
+  ok(showsChats(true, false, 0), 'opened by the user');
+  ok(showsChats(false, true, 2), 'opened by a search that found conversations in it');
+  ok(!showsChats(false, true, 0), 'a search with nothing in it opens nothing');
+  ok(!showsChats(false, false, 3), 'a closed project stays closed while nobody searches');
+});
+
+check('new conversation: a conversation that waits is offered however old it is', () => {
+  const all = Array.from({ length: 30 }, (_, n) => ({ id: `c${n}` }));
+  const waiting = [item({ conversationId: 'c25', state: 'needsYou' })];
+  deepEqual(pickUp(all, waiting).map((c) => c.id), ['c25', 'c0', 'c1', 'c2'], 'the waiting one first, then the latest');
+  deepEqual(pickUp(all, []).map((c) => c.id), ['c0', 'c1', 'c2', 'c3']);
+  deepEqual(pickUp(all, [item({ conversationId: 'c25' })]).map((c) => c.id), ['c0', 'c1', 'c2', 'c3'], 'working is not waiting');
+  deepEqual(pickUp(all.slice(0, 2), waiting), [{ id: 'c0' }, { id: 'c1' }]);
+});
+
+check('new conversation: the greeting sets the name apart, and without one the last word', () => {
+  deepEqual(greetingParts('Por onde começamos, Erick?', 'Erick'), ['Por onde começamos,', 'Erick?']);
+  deepEqual(greetingParts('Par où commençons-nous, Léa ?', 'Léa'), ['Par où commençons-nous,', 'Léa ?']);
+  deepEqual(greetingParts('Por onde começamos?'), ['Por onde', 'começamos?']);
+  deepEqual(greetingParts('Hello'), ['Hello', '']);
+});
+
+check('cache warmth: shown while the lifetime lasts, hidden when unknown or cold', () => {
+  equal(warmLeft(undefined, 1_000), undefined, 'unknown (Codex, an older CLI, a turn that wrote nothing)');
+  equal(warmLeft(61_000, 1_000), 60_000);
+  equal(warmLeft(1_000, 1_000), undefined, 'cold at the very moment');
+  equal(warmLeft(500, 1_000), undefined, 'expired');
+  equal(warmLeft(1_000 + 3_600_000, 1_000 + 3_599_999), 1);
+});
+
+check('running: a parked request needs the person and counts like a question', () => {
+  const parked = [{ toolUseId: 'toolu_1', tool: 'Bash', kind: 'command' as const, label: '', at: 1 }];
+  const row = item({ state: 'needsYou', parked });
+  equal(blocksOf([row])[0]!.needs, 1);
+  equal(row.permissions.length, 0, 'there is no card to answer');
+});
+
+check('quota R177: the sidebar line shows the weekly window, the five-hour one moves to the tooltip, and an old weekly reading is unknown', () => {
+  const now = 1_000_000;
+  const reading = (window: string, used: number, resetsAt: number, vendor: QuotaReading['vendor'] = 'claude'): QuotaReading => ({ vendor, window, used, resetsAt });
+  let quotas = seedQuotas([reading('five_hour', 0.9, 2000), reading('seven_day', 0.3, 5000), reading('five_hour', 0.4, 2000, 'codex')]);
+  equal(lineReading(quotas, 'claude', now)?.window, 'seven_day', 'weekly even when the five-hour window is fuller');
+  deepEqual(otherReadings(quotas, 'claude', now, lineReading(quotas, 'claude', now)).map((q) => q.window), ['five_hour']);
+  equal(lineReading(quotas, 'codex', now)?.window, 'five_hour', 'a vendor with no weekly window shows the one it has');
+  quotas = withQuota(quotas, reading('seven_day', 0.3, 900));
+  equal(lineReading(quotas, 'claude', now), undefined, 'a weekly reading past its reset is not replaced by the five-hour one');
+  equal(lineReading({}, 'claude', now), undefined);
+});
+
+check('running: ended states keep their words and distinct shared drawings', () => {
+  const root = document.createElement('div'); document.body.append(root);
+  const done: Summary[] = ['done', 'unconcluded', 'interrupted', 'failed'].map((kind, index) => ({
+    id: String(index), title: kind, area: 'chat', updatedAt: 0,
+    ended: { at: index + 1, kind: kind as NonNullable<Summary['ended']>['kind'], workMs: 0 },
+  }));
+  const dispose = render(() => createComponent(Running, { items: [item()], done, projects: [], onOpen: () => {}, onOpenDone: () => {}, onDismiss: () => {}, onClose: () => {}, modal: false, ref: () => {} }), root);
+  try {
+    for (const state of ['working', 'concluded', 'ended', 'interrupted', 'failed']) {
+      ok(root.querySelector('.st-' + state + '[aria-hidden="true"]'), state);
+    }
+    ok(root.querySelector('.ri.done .verb')?.textContent, 'the state words stay visible');
+  } finally { dispose(); root.remove(); }
+});
+
+check('follow-ups: the done card offers five ready tasks, counts the rest and removes a sent offer', async () => {
+  const { createSignal } = await import('solid-js');
+  const { t, useLanguage, lang } = await import('../../ui/i18n.ts');
+  const before = lang();
+  useLanguage('de');
+  const tasks = Array.from({ length: 7 }, (_, i) => ({ title: `Export ${i}`, file: `.faber/tasks/00${i}-export.md`, ready: i !== 6, sent: false }));
+  const [all, setAll] = createSignal<Summary[]>([{ id: 'c1', title: 'Project work', area: 'project', projectId: 'p1', updatedAt: 2, followUps: tasks }]);
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;left:0;top:0;width:720px';
+  root.dataset.motion = 'none';
+  document.body.append(root);
+  const sent: string[] = [];
+  let reject = false;
+  const dispose = render(() => createComponent(Running, {
+    items: [], get done() { return doneCards(all(), [], 'c1'); }, projects: [], onOpen: () => {}, onClose: () => {}, modal: false, ref: () => {},
+    onFollowUp: async (_c, file, dismiss) => {
+      if (reject) throw new Error('error.memory.changed');
+      sent.push(`${dismiss}:${file}`);
+      setAll((rows) => rows.map((c) => ({ ...c, followUps: c.followUps?.filter((t) => t.file !== file) })));
+    },
+  }), root);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  try {
+    await settle();
+    equal(root.querySelectorAll('[data-testid="follow-up"]').length, 5);
+    ok(root.textContent!.includes(t('run.followUpMore', { n: 1 })));
+    const button = root.querySelector<HTMLButtonElement>('[data-testid="follow-up"] button')!;
+    button.focus();
+    equal(document.activeElement, button, 'a native button is keyboard reachable');
+    equal(button.textContent, t('run.followUp'));
+    reject = true;
+    button.click();
+    await settle();
+    equal(sent.length, 0, 'a refused send keeps the offer');
+    equal(root.querySelectorAll('[data-testid="follow-up"]').length, 5);
+    ok(root.querySelector('[role="status"]'), 'a refusal is visible and retryable');
+    reject = false;
+    button.click();
+    await settle();
+    deepEqual(sent, ['false:.faber/tasks/000-export.md']);
+    ok(!root.querySelector('.ri.done')!.textContent!.includes('Export 0'), 'sending removes the offer');
+    root.querySelectorAll<HTMLButtonElement>('[data-testid="follow-up"] button')[1]!.click();
+    await settle();
+    equal(sent[1], 'true:.faber/tasks/001-export.md');
+    ok(!root.querySelector('.ri.done')!.textContent!.includes('Export 1'), 'dismissal removes its offer');
+    const row = root.querySelector<HTMLElement>('.ri.done')!;
+    ok(row.scrollWidth <= row.clientWidth + 1, 'the done card fits the narrow window in German');
+  } finally { dispose(); root.remove(); useLanguage(before); }
+});

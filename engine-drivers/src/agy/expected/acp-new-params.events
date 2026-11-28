@@ -1,0 +1,10 @@
+Started { session_id: "00000000-0000-4000-8000-000000000118", model: "gemini-4-neon-high" }
+Started { session_id: "00000000-0000-4000-8000-000000000119", model: "gemini-4-neon-high" }
+Started { session_id: "00000000-0000-4000-8000-000000000120", model: "gemini-4-neon-high" }
+Context { used: Some(0), window: Some(1048576) }
+Started { session_id: "00000000-0000-4000-8000-000000000121", model: "gemini-4-neon-high" }
+Context { used: Some(0), window: Some(1048576) }
+Started { session_id: "00000000-0000-4000-8000-000000000122", model: "gemini-4-neon-high" }
+Context { used: Some(0), window: Some(1048576) }
+Context { used: Some(0), window: Some(1048576) }
+Context { used: Some(0), window: Some(1048576) }

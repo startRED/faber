@@ -1,0 +1,169 @@
+{
+ "id": "conv-run",
+ "messages": [
+  {
+   "id": "u0",
+   "role": "user",
+   "text": "Build the settings page, then the rest of the list",
+   "at": 1792000000000
+  },
+  {
+   "id": "a0",
+   "role": "assistant",
+   "text": "Started on the settings page.",
+   "at": 1792000001000,
+   "finishedAt": 1792000600000,
+   "status": "done",
+   "vendor": "claude",
+   "model": "claude-sonnet-5-5"
+  },
+  {
+   "id": "w1",
+   "role": "user",
+   "text": "Keep going on your own.",
+   "at": 1792001200000,
+   "wake": {
+    "why": "wake.keepGoing"
+   }
+  },
+  {
+   "id": "a1",
+   "role": "assistant",
+   "text": "The settings page saves now.",
+   "at": 1792001201000,
+   "finishedAt": 1792002100000,
+   "status": "done",
+   "vendor": "claude",
+   "model": "claude-sonnet-5-5"
+  },
+  {
+   "id": "w2",
+   "role": "user",
+   "text": "Keep going on your own.",
+   "at": 1792002400000,
+   "wake": {
+    "why": "wake.keepGoing"
+   }
+  },
+  {
+   "id": "a2",
+   "role": "assistant",
+   "text": "",
+   "at": 1792002401000,
+   "finishedAt": 1792003300000,
+   "status": "done",
+   "vendor": "claude",
+   "model": "claude-sonnet-5-5"
+  },
+  {
+   "id": "w3",
+   "role": "user",
+   "text": "Keep going on your own.",
+   "at": 1792003600000,
+   "wake": {
+    "why": "wake.checksFixing"
+   }
+  },
+  {
+   "id": "a3",
+   "role": "assistant",
+   "text": "The failing check is fixed.",
+   "at": 1792003601000,
+   "finishedAt": 1792004500000,
+   "status": "done",
+   "vendor": "claude",
+   "model": "claude-sonnet-5-5",
+   "autoAnswers": [
+    {
+     "question": "Which database for the cache?",
+     "answer": "SQLite",
+     "others": [
+      "Postgres",
+      "None"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "w4",
+   "role": "user",
+   "text": "Keep going on your own.",
+   "at": 1792004800000,
+   "wake": {
+    "why": "wake.keepGoing"
+   }
+  },
+  {
+   "id": "a4",
+   "role": "assistant",
+   "text": "The list page loads.",
+   "at": 1792004801000,
+   "finishedAt": 1792005700000,
+   "status": "done",
+   "vendor": "claude",
+   "model": "claude-sonnet-5-5"
+  },
+  {
+   "id": "w5",
+   "role": "user",
+   "text": "Keep going on your own.",
+   "at": 1792006000000,
+   "wake": {
+    "why": "wake.keepGoing"
+   }
+  },
+  {
+   "id": "a5",
+   "role": "assistant",
+   "text": "First I read the page.\n\nThen I fixed the redirect.\n\nThen I checked the form.\n\nAll the pages work.",
+   "at": 1792006001000,
+   "finishedAt": 1792006900000,
+   "status": "done",
+   "vendor": "claude",
+   "model": "claude-sonnet-5-5",
+   "activityEnd": 78,
+   "tools": [
+    {
+     "id": "t1",
+     "name": "Bash",
+     "input": {
+      "command": "npm test"
+     },
+     "ok": true
+    }
+   ],
+   "wrapUp": {
+    "recap": "Every page of the list works. Not seen on a phone yet.",
+    "ask": "Check it on a phone?",
+    "actions": [
+     "Yes",
+     "Later"
+    ],
+    "answered": "Yes"
+   },
+   "away": {
+    "minutes": 130,
+    "turns": 5,
+    "switches": 0,
+    "answered": 2
+   }
+  }
+ ],
+ "plan": {
+  "at": 1,
+  "steps": [
+   {
+    "text": "Settings page",
+    "state": "done"
+   },
+   {
+    "text": "List page",
+    "state": "done"
+   },
+   {
+    "text": "Phone check",
+    "state": "active"
+   }
+  ]
+ }
+}

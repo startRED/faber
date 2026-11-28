@@ -1,0 +1,747 @@
+//! S1 acceptance proofs. No real CLI, shell, git process, or credential file is used.
+//!
+//! Proposed boundary: Engine::account_status(vendor, timeout) returns a serializable
+//! status; Engine::login_command(vendor) describes the official interactive login;
+//! Engine::replace_clis replaces the live registry. Cli::find_in accepts a simulated
+//! environment and filesystem so find_cli can delegate to the same detection logic.
+//! Test-only fallback traits keep absent APIs compilable in RED. Inherent production
+//! methods take precedence automatically; the fallbacks implement no new behavior.
+//!
+//! Official command references (checked 2026-10-10):
+//! https://code.claude.com/docs/en/cli-reference
+//! https://developers.openai.com/codex/cli/reference/
+//! Native installation location: https://code.claude.com/docs/en/setup
+
+use crate::support;
+
+use faber_engine::cli::{self, Cli};
+use faber_engine::model::{Area, Role, Settings, Status, Vendor};
+use faber_engine::proc::{Proc, Spawner};
+use faber_engine::router::Choice;
+use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest, TerminalCommand, WarmRequest};
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
+use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
+use tokio::sync::mpsc::UnboundedReceiver;
+
+#[allow(dead_code)] // Production inherent methods supersede these RED-only guards.
+trait MissingAccountApi {
+    async fn account_status(&self, vendor: Vendor, timeout: Duration) -> Value;
+    fn login_command(&self, vendor: Vendor) -> Option<TerminalCommand>;
+    fn replace_clis(&self, clis: BTreeMap<Vendor, Cli>);
+}
+
+impl MissingAccountApi for Engine {
+    async fn account_status(&self, _vendor: Vendor, _timeout: Duration) -> Value {
+        Value::Null // Missing status is asserted before interpreting it.
+    }
+
+    fn login_command(&self, _vendor: Vendor) -> Option<TerminalCommand> {
+        None
+    }
+
+    fn replace_clis(&self, _clis: BTreeMap<Vendor, Cli>) {
+        // The unchanged engine must fail the observable vendor-list assertion.
+    }
+}
+
+#[allow(dead_code)]
+trait MissingDiscoveryApi {
+    fn find_in(
+        name: &str,
+        path: &str,
+        windows: bool,
+        env: &dyn Fn(&str) -> Option<String>,
+        exists: &dyn Fn(&str) -> bool,
+        read: &dyn Fn(&str) -> String,
+    ) -> Option<Cli>;
+}
+
+impl MissingDiscoveryApi for Cli {
+    fn find_in(
+        name: &str,
+        path: &str,
+        windows: bool,
+        _env: &dyn Fn(&str) -> Option<String>,
+        exists: &dyn Fn(&str) -> bool,
+        read: &dyn Fn(&str) -> String,
+    ) -> Option<Cli> {
+        cli::resolve_cli(name, path, windows, exists, read)
+    }
+}
+
+fn engine(dir: &crate::support::DataFolder, clis: BTreeMap<Vendor, Cli>, spawn: Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let opts = EngineOptions {
+        data_dir: dir.path().into(),
+        #[cfg(windows)]
+        chat_dir: dir.chat_path().into(),
+        clis,
+        spawn,
+        windows: true,
+        claude_env_billed: false,
+        max_warm: 3,
+        idle: Duration::from_secs(120),
+        runtime: tokio::runtime::Handle::current(),
+        ask: None,
+    };
+    (Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))).unwrap(), rx)
+}
+
+fn native_cli() -> Cli {
+    Cli { command: "C:\\Official tools\\account.exe".into(), prefix: vec![] }
+}
+
+type Calls = Arc<Mutex<Vec<(String, Vec<String>)>>>;
+
+struct PendingReader;
+
+struct FailedStatusReader(bool);
+
+impl AsyncRead for FailedStatusReader {
+    fn poll_read(mut self: Pin<&mut Self>, _cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        if self.0 {
+            Poll::Ready(Err(std::io::Error::other("status stream failed")))
+        } else {
+            self.0 = true;
+            buf.put_slice(b"Logged in using ChatGPT\n");
+            Poll::Ready(Ok(()))
+        }
+    }
+}
+
+impl AsyncRead for PendingReader {
+    fn poll_read(self: Pin<&mut Self>, _cx: &mut Context<'_>, _buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Pending
+    }
+}
+
+struct ObservedOutput {
+    inner: Box<dyn AsyncRead + Send + Unpin>,
+    dropped: Arc<AtomicBool>,
+}
+
+impl AsyncRead for ObservedOutput {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(self.inner.as_mut()).poll_read(cx, buf)
+    }
+}
+
+impl Drop for ObservedOutput {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::SeqCst);
+    }
+}
+
+// Independent stdout/stderr streams exercise both vendors' real output channels.
+// A pending reader models a CLI that never exits, without starting any processes.
+fn status_spawner(stdout: &'static str, stderr: &'static str, hangs: bool) -> (Spawner, Calls) {
+    let calls: Calls = Arc::default();
+    let recorded = calls.clone();
+    let spawn: Spawner = Arc::new(move |bin, args, _cwd| {
+        recorded.lock().unwrap().push((bin.into(), args.to_vec()));
+        if hangs {
+            return Ok(Proc {
+                stdin: Box::new(tokio::io::sink()),
+                stdout: Box::new(PendingReader),
+                stderr: None,
+                child: None,
+                contained: None,
+            });
+        }
+        let (mut out, stdout_reader) = tokio::io::duplex(4096);
+        let (mut err, stderr_reader) = tokio::io::duplex(4096);
+        tokio::spawn(async move {
+            let _ = out.write_all(stdout.as_bytes()).await;
+            let _ = err.write_all(stderr.as_bytes()).await;
+        });
+        Ok(Proc {
+            stdin: Box::new(tokio::io::sink()),
+            stdout: Box::new(stdout_reader),
+            stderr: Some(Box::new(stderr_reader)),
+            child: None,
+            contained: None,
+        })
+    });
+    (spawn, calls)
+}
+
+fn status_args(vendor: Vendor) -> Vec<String> {
+    match vendor {
+        Vendor::Gemini => unreachable!("the tests run Claude and Codex"),
+        Vendor::Claude => vec!["auth".into(), "status".into()],
+        Vendor::Codex => vec!["login".into(), "status".into()],
+    }
+}
+
+#[tokio::test]
+async fn c1_1_signed_in_uses_only_official_status_arguments_through_the_spawner() {
+    for (vendor, stdout, stderr, login_args) in [
+        (Vendor::Claude, "{\"loggedIn\":true,\"authMethod\":\"claude.ai\",\"apiProvider\":\"firstParty\"}\n", "", vec!["auth", "login"]),
+        (Vendor::Codex, "", "Logged in using ChatGPT\n", vec!["login"]),
+    ] {
+        let dir = crate::support::DataFolder::new();
+        let (spawn, calls) = status_spawner(stdout, stderr, false);
+        // Prefix arguments are executable launch details, not a shell command.
+        let cli = Cli { command: "C:\\Official tools\\node.exe".into(), prefix: vec!["C:\\Official tools\\entry.js".into()] };
+        let (engine, mut events) = engine(&dir, BTreeMap::from([(vendor, cli.clone())]), spawn);
+        let status = serde_json::to_value(engine.account_status(vendor, Duration::from_millis(100)).await).unwrap();
+        assert!(!status.is_null(), "C1.1: Engine::account_status is missing");
+        assert_eq!(status, json!("signedIn"));
+        let mut expected_args = cli.prefix.clone();
+        expected_args.extend(status_args(vendor));
+        assert_eq!(*calls.lock().unwrap(), vec![(cli.command.clone(), expected_args)]);
+        let login = engine.login_command(vendor);
+        assert!(login.is_some(), "the official login command must be available");
+        let login = login.unwrap();
+        assert_eq!(login.command, cli.command);
+        assert_eq!(login.args, cli.prefix.into_iter().chain(login_args.into_iter().map(String::from)).collect::<Vec<_>>());
+        assert!(events.try_recv().is_err(), "account output must not reach application events");
+        assert!(engine.state().conversations.is_empty());
+        assert_eq!(std::fs::read_dir(dir.path().join("conversations")).unwrap().count(), 0);
+        assert!(!dir.path().join("settings.json").exists(), "checking an account must not persist output");
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn c1_2_signed_out_and_unresponsive_accounts_finish_within_the_timeout() {
+    for (vendor, stdout, stderr) in [
+        (Vendor::Claude, "{\"loggedIn\":false,\"authMethod\":\"none\",\"apiProvider\":\"firstParty\"}\n", ""),
+        (Vendor::Codex, "", "Not logged in\n"),
+    ] {
+        for (hangs, expected) in [(false, "signedOut"), (true, "unknown")] {
+            let dir = crate::support::DataFolder::new();
+            let (spawn, calls) = status_spawner(if hangs { "" } else { stdout }, if hangs { "" } else { stderr }, hangs);
+            let (engine, _) = engine(&dir, BTreeMap::from([(vendor, native_cli())]), spawn);
+            let began = Instant::now();
+            let result = tokio::time::timeout(Duration::from_millis(500), engine.account_status(vendor, Duration::from_millis(40))).await;
+            assert!(result.is_ok(), "C1.2: account check ignored its 40 ms timeout");
+            let status = serde_json::to_value(result.unwrap()).unwrap();
+            assert!(!status.is_null(), "C1.2: Engine::account_status is missing");
+            assert_eq!(status, json!(expected));
+            assert!(began.elapsed() < Duration::from_millis(500));
+            assert_eq!(*calls.lock().unwrap(), vec![(native_cli().command, status_args(vendor))]);
+            engine.shutdown();
+        }
+    }
+}
+
+#[tokio::test]
+async fn account_status_reads_a_complete_json_object_without_mixing_stderr_into_it() {
+    for (stdout, expected) in [
+        ("{\n  \"loggedIn\": true,\n  \"authMethod\": \"claude.ai\",\n  \"apiProvider\": \"firstParty\"\n}\n", "signedIn"),
+        ("{\n  \"loggedIn\": false,\n  \"authMethod\": \"none\",\n  \"apiProvider\": \"firstParty\"\n}\n", "signedOut"),
+    ] {
+        let dir = crate::support::DataFolder::new();
+        let (spawn, _) = status_spawner(stdout, "Diagnostic on stderr\n", false);
+        let (engine, _) = engine(&dir, BTreeMap::from([(Vendor::Claude, native_cli())]), spawn);
+        assert_eq!(serde_json::to_value(engine.account_status(Vendor::Claude, Duration::from_millis(100)).await).unwrap(), json!(expected));
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn account_status_rejects_failed_or_oversized_output() {
+    for failed in [true, false] {
+        let dir = crate::support::DataFolder::new();
+        let spawn: Spawner = Arc::new(move |_, _, _| {
+            let stdout: Box<dyn AsyncRead + Send + Unpin> = if failed {
+                Box::new(FailedStatusReader(false))
+            } else {
+                Box::new(std::io::Cursor::new("Logged in using ChatGPT\n".repeat(5000).into_bytes()))
+            };
+            Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout, stderr: None, child: None, contained: None })
+        });
+        let (engine, _) = engine(&dir, BTreeMap::from([(Vendor::Codex, native_cli())]), spawn);
+        assert_eq!(serde_json::to_value(engine.account_status(Vendor::Codex, Duration::from_millis(100)).await).unwrap(), json!("unknown"));
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn replacing_an_active_shared_server_retires_it_as_soon_as_its_answer_finishes() {
+    let dir = crate::support::DataFolder::new();
+    let mut entries: Vec<_> = support::fixture("codex", "chat").into_iter().take_while(|e| !(e.input && e.msg["id"] == 4)).collect();
+    // Closing a thread asks the existing driver to interrupt its last known turn.
+    entries.push(support::Entry {
+        input: true,
+        msg: json!({
+            "id": 4, "method": "turn/interrupt", "params": {
+                "threadId": "01a12513-0e42-7b63-9a21-c8698f522c12", "turnId": "01a12513-0ee8-7061-88de-3e38fd266879"
+            }
+        }),
+    });
+    let replay = support::fake(entries);
+    let dropped = Arc::new(AtomicBool::new(false));
+    let spawn: Spawner = {
+        let replay = replay.spawn.clone();
+        let observed = dropped.clone();
+        Arc::new(move |bin, args, cwd| {
+            let mut proc = replay(bin, args, cwd)?;
+            proc.stdout = Box::new(ObservedOutput { inner: proc.stdout, dropped: observed.clone() });
+            Ok(proc)
+        })
+    };
+    let (engine, mut events) = engine(&dir, BTreeMap::from([(Vendor::Codex, native_cli())]), spawn);
+    engine
+        .send(SendRequest {
+            conversation_id: None,
+            area: Area::Chat,
+            project_id: None,
+            text: "In one sentence: why is the sky blue?".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "codex".into(), model: None, effort: None },
+        })
+        .unwrap();
+    // The current-thread runtime has not polled the replay yet: the turn is in flight.
+    engine.replace_clis(BTreeMap::new());
+    assert!(engine.state().vendors.is_empty());
+    let reply = tokio::time::timeout(crate::support::DEADLINE, async {
+        while let Some(event) = events.recv().await {
+            if let AppEvent::Message { message, .. } = event
+                && message.role == Role::Assistant
+                && message.status == Some(Status::Done)
+            {
+                return message;
+            }
+        }
+        panic!("the active answer ended before completion");
+    })
+    .await
+    .expect("the active answer must finish on the old process");
+    assert_eq!(
+        reply.text,
+        "The sky appears blue because air molecules scatter shorter blue wavelengths of sunlight more than longer red wavelengths."
+    );
+    let retired = tokio::time::timeout(Duration::from_millis(500), async {
+        while !dropped.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    engine.shutdown();
+    assert!(retired.is_ok(), "the old shared process remained alive after its last answer finished");
+    assert!(replay.mismatches.lock().unwrap().is_empty());
+}
+
+#[test]
+fn c1_3_default_installations_outside_path_resolve_to_a_program_without_a_shell() {
+    let env = |key: &str| match key {
+        "USERPROFILE" => Some("C:\\Users\\Example User".into()),
+        "APPDATA" => Some("C:\\Users\\Example User\\AppData\\Roaming".into()),
+        "HOME" => Some("/home/example".into()),
+        _ => None,
+    };
+    let cases = [
+        ("claude", true, "C:\\Users\\Example User\\.local\\bin\\claude.exe", "C:\\Users\\Example User\\.local\\bin\\claude.exe", vec![]),
+        ("claude", false, "/home/example/.local/bin/claude", "/home/example/.local/bin/claude", vec![]),
+        (
+            "codex",
+            true,
+            "C:\\Users\\Example User\\AppData\\Roaming\\npm\\codex.cmd",
+            "C:\\Users\\Example User\\AppData\\Roaming\\npm\\node.exe",
+            vec!["C:\\Users\\Example User\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js"],
+        ),
+    ];
+    for (name, windows, installed, command, prefix) in cases {
+        let exists = |p: &str| p == installed || p == command || prefix.contains(&p);
+        let read = |p: &str| {
+            assert_eq!(p, installed, "only the npm executable shim may be read");
+            "\"%dp0%\\node.exe\" \"%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js\" %*".into()
+        };
+        let found = Cli::find_in(name, "", windows, &env, &exists, &read);
+        assert!(found.is_some(), "C1.3: {name} in its default installation directory was not found outside PATH");
+        assert_eq!(found.unwrap(), Cli { command: command.into(), prefix: prefix.into_iter().map(String::from).collect() });
+    }
+}
+
+#[tokio::test]
+async fn c1_4_replacing_clis_updates_state_warm_and_send_without_recreating_the_engine() {
+    let dir = crate::support::DataFolder::new();
+    let replay = support::fake(support::fixture("claude", "chat"));
+    let codex = support::fake(support::fixture("codex", "chat"));
+    let old_dropped = Arc::new(AtomicBool::new(false));
+    let calls: Calls = Arc::default();
+    let spawn: Spawner = {
+        let claude_spawn = replay.spawn.clone();
+        let codex_spawn = codex.spawn.clone();
+        let observed = old_dropped.clone();
+        let recorded = calls.clone();
+        Arc::new(move |bin, args, cwd| {
+            recorded.lock().unwrap().push((bin.into(), args.to_vec()));
+            if bin.ends_with("codex.exe") {
+                let mut proc = codex_spawn(bin, args, cwd)?;
+                if bin == "old-codex.exe" {
+                    proc.stdout = Box::new(ObservedOutput { inner: proc.stdout, dropped: observed.clone() });
+                }
+                Ok(proc)
+            } else {
+                claude_spawn(bin, args, cwd)
+            }
+        })
+    };
+    let (engine, mut events) = engine(&dir, BTreeMap::new(), spawn);
+    assert!(engine.state().vendors.is_empty());
+    engine.replace_clis(BTreeMap::from([(Vendor::Claude, native_cli())]));
+    assert_eq!(engine.state().vendors, vec![Vendor::Claude], "C1.4: the existing engine still exposes the old CLI registry");
+    let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
+    engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice.clone() });
+    assert_eq!(replay.args.lock().unwrap().len(), 1, "warm must use the new registry");
+    let sent = engine.send(SendRequest {
+        conversation_id: None,
+        area: Area::Chat,
+        project_id: None,
+        text: "In one sentence: why is the sky blue?".into(),
+        images: vec![],
+        files: vec![],
+        choice,
+    });
+    assert!(sent.is_ok(), "send must use the replacement subscription: {sent:?}");
+    let reply = tokio::time::timeout(crate::support::DEADLINE, async {
+        while let Some(event) = events.recv().await {
+            if let AppEvent::Message { message, .. } = event
+                && message.role == Role::Assistant
+                && message.status == Some(Status::Done)
+            {
+                return Some(message);
+            }
+        }
+        None
+    })
+    .await;
+    assert!(reply.is_ok(), "the recording did not finish");
+    let reply = reply.unwrap().expect("engine stopped before replying");
+    assert!(reply.text.contains("Rayleigh"));
+    assert_eq!(reply.vendor, Some(Vendor::Claude));
+    assert_eq!(replay.args.lock().unwrap().len(), 1, "send must reuse the warmed process");
+    assert!(replay.mismatches.lock().unwrap().is_empty());
+
+    // Replacing an already warmed shared server must retire its old process too.
+    engine.replace_clis(BTreeMap::from([(Vendor::Codex, Cli { command: "old-codex.exe".into(), prefix: vec![] })]));
+    let warm = || WarmRequest {
+        conversation_id: None,
+        area: Area::Chat,
+        project_id: None,
+        choice: Choice { vendor: "codex".into(), model: None, effort: None },
+    };
+    engine.warm(warm());
+    assert!(!old_dropped.load(Ordering::SeqCst));
+    engine.replace_clis(BTreeMap::from([(Vendor::Codex, Cli { command: "new-codex.exe".into(), prefix: vec![] })]));
+    let retired = tokio::time::timeout(Duration::from_millis(500), async {
+        while !old_dropped.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert!(retired.is_ok(), "the old shared process stayed alive after replacing the registry");
+    engine.warm(warm());
+    let programs: Vec<String> = calls.lock().unwrap().iter().map(|(bin, _)| bin.clone()).collect();
+    assert_eq!(programs, vec![native_cli().command, "old-codex.exe".into(), "new-codex.exe".into()]);
+    assert_eq!(engine.state().vendors, vec![Vendor::Codex]);
+    engine.replace_clis(BTreeMap::new());
+    assert!(engine.state().vendors.is_empty());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn c1_5_saving_another_setting_preserves_skipped_setup_on_disk_and_in_app_state() {
+    let dir = crate::support::DataFolder::new();
+    let settings_path = dir.path().join("settings.json");
+    std::fs::write(&settings_path, json!({"setup":"skipped", "language":"en"}).to_string()).unwrap();
+    let (engine, _) = engine(&dir, BTreeMap::new(), Arc::new(|_, _, _| panic!("saving settings must not launch a CLI")));
+    let patch: Settings = serde_json::from_value(json!({"userHooks":true})).unwrap();
+    let saved = serde_json::to_value(engine.save_settings(patch).unwrap()).unwrap();
+    assert_eq!(saved["setup"], "skipped", "C1.5: save_settings discarded the existing setup decision");
+    assert_eq!(saved["language"], "en");
+    assert_eq!(saved["userHooks"], true);
+    let disk: Value = serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
+    assert_eq!(disk["setup"], "skipped");
+    assert_eq!(serde_json::to_value(engine.state().settings).unwrap()["setup"], "skipped");
+    engine.shutdown();
+}
+
+/// Antigravity's installer puts `agy.exe` in `%LOCALAPPDATA%\agy\bin`, which an app started from the desktop may not have on
+/// its PATH.
+#[test]
+fn antigravity_is_found_in_its_installer_folder_outside_path() {
+    let env = |key: &str| (key == "LOCALAPPDATA").then(|| r"C:\Users\Example User\AppData\Local".to_string());
+    let installed = r"C:\Users\Example User\AppData\Local\agy\bin\agy.exe";
+    let found = Cli::find_in("agy", "", true, &env, &|p| p == installed, &|_| panic!("a native program is never read"));
+    assert_eq!(found, Some(Cli { command: installed.into(), prefix: vec![] }));
+    assert_eq!(Cli::find_in("agy", "", true, &|_| None, &|p| p == installed, &|_| String::new()), None);
+}
+
+/// Plays an Antigravity account recording (`tests/fixtures/agy/acct-*.jsonl`): what the server printed goes out, and what
+/// Faber writes is kept. With `open`, the output stays open after the recording, like a server that never answers.
+fn acp_spawner(name: &str, open: bool) -> (Spawner, Calls, Arc<Mutex<Vec<u8>>>) {
+    let path = format!("{}/../tests/fixtures/agy/{name}.jsonl", env!("CARGO_MANIFEST_DIR"));
+    let printed: String = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{path}: {e}"))
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .filter(|v| v["dir"] == "stdout")
+        .map(|v| format!("{}\n", v["msg"].as_str().unwrap()))
+        .collect();
+    let calls: Calls = Arc::default();
+    let written: Arc<Mutex<Vec<u8>>> = Arc::default();
+    let (recorded, kept) = (calls.clone(), written.clone());
+    let spawn: Spawner = Arc::new(move |bin, args, _cwd| {
+        recorded.lock().unwrap().push((bin.into(), args.to_vec()));
+        let (mut out, stdout) = tokio::io::duplex(64 * 1024);
+        let (stdin, mut input) = tokio::io::duplex(64 * 1024);
+        let printed = printed.clone();
+        tokio::spawn(async move {
+            let _ = out.write_all(printed.as_bytes()).await;
+            if open {
+                std::future::pending::<()>().await;
+            }
+        });
+        let kept = kept.clone();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            while let Ok(n @ 1..) = tokio::io::AsyncReadExt::read(&mut input, &mut buf).await {
+                kept.lock().unwrap().extend_from_slice(&buf[..n]);
+            }
+        });
+        Ok(Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None })
+    });
+    (spawn, calls, written)
+}
+
+#[tokio::test]
+async fn antigravity_sign_in_state_is_the_verdict_of_a_new_session_and_nothing_else_is_asked() {
+    let cli = Cli { command: r"C:\Users\Example User\AppData\Local\agy\bin\agy.exe".into(), prefix: vec![] };
+    let scratch = std::path::Path::new(r"C:\Faber data\agy-check");
+    for (recording, open, expected) in [
+        ("acct-signed-in", false, json!("signedIn")),
+        ("acct-signed-out", false, json!("signedOut")),
+        ("acct-garbage", false, json!("unknown")),
+        ("acct-no-answer", true, json!("unknown")),
+    ] {
+        let (spawn, calls, written) = acp_spawner(recording, open);
+        let began = Instant::now();
+        let status = tokio::time::timeout(
+            Duration::from_secs(5),
+            faber_engine::account::check(Vendor::Gemini, &cli, &spawn, scratch, Duration::from_millis(300)),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{recording}: the check ignored its timeout"));
+        assert_eq!(serde_json::to_value(status).unwrap(), expected, "{recording}");
+        assert!(began.elapsed() < Duration::from_secs(2), "{recording}");
+        assert_eq!(*calls.lock().unwrap(), vec![(cli.command.clone(), vec!["acp".to_string()])], "{recording}");
+        // What was written may still sit in the pipe to the recording's reader.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let sent: Vec<Value> =
+            String::from_utf8(written.lock().unwrap().clone()).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let methods: Vec<&str> = sent.iter().map(|m| m["method"].as_str().unwrap()).collect();
+        let expected_methods: &[&str] = if recording == "acct-garbage" { &["initialize"] } else { &["initialize", "session/new"] };
+        assert_eq!(methods, expected_methods, "{recording}: only the handshake and a session are ever asked for");
+        if let Some(session) = sent.get(1) {
+            assert_eq!(session["params"], json!({ "cwd": scratch.to_string_lossy(), "mcpServers": [] }), "{recording}");
+        }
+    }
+    assert_eq!(faber_engine::account::login_args(Vendor::Gemini), &["acp", "--login"]);
+}
+
+/// The answer to `session/new` in an Antigravity account recording.
+fn recorded_session(name: &str) -> Value {
+    let path = format!("{}/../tests/fixtures/agy/{name}.jsonl", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{path}: {e}"))
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .filter(|v| v["dir"] == "stdout")
+        .map(|v| serde_json::from_str::<Value>(v["msg"].as_str().unwrap()).unwrap())
+        .find(|m| m["id"] == 2)
+        .unwrap_or_else(|| panic!("{name}: no answer to session/new"))
+}
+
+/// An engine with no CLI, on a clock the test moves (Unix seconds): nothing here may start a process.
+fn antigravity_engine(dir: &crate::support::DataFolder, start: f64) -> (Engine, Arc<Mutex<f64>>) {
+    let (engine, _rx) = engine(dir, BTreeMap::new(), Arc::new(|_, _, _| panic!("Antigravity's limits start no process")));
+    let clock = Arc::new(Mutex::new(start));
+    let read = clock.clone();
+    engine.set_time_source(Arc::new(move || *read.lock().unwrap()));
+    (engine, clock)
+}
+
+fn antigravity_usage(engine: &Engine) -> Option<faber_engine::usage::VendorUsage> {
+    engine.quota_view().1.into_iter().find(|u| u.vendor == Vendor::Gemini)
+}
+
+#[tokio::test]
+async fn antigravity_reads_separate_model_group_limits_without_a_model_turn() {
+    let dir = support::DataFolder::new();
+    let now = 2_000_000_000;
+    let reset = chrono::DateTime::from_timestamp(now + 3600, 0).unwrap().to_rfc3339();
+    let reply = json!({
+        "status": "SUCCESS", "conversation_id": "", "num_turns": 0,
+        "usage": {"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0},
+        "command": {"name":"usage","data":{"groups":[
+            {"buckets":[{"id":"gemini-5h","window":"5h","remaining_fraction":0.42,"reset_time":reset}]},
+            {"buckets":[{"id":"3p-5h","window":"5h","remaining_fraction":0.81,"reset_time":reset}]}
+        ]}}
+    })
+    .to_string();
+    let spawn: Spawner = Arc::new(move |_, args, _| {
+        let out = match args {
+            [version] if version == "--version" => "1.5.14\n",
+            [p, usage, ..] if p == "-p" && usage == "/usage" => &reply,
+            _ => return Err(std::io::Error::other("only the version and quota commands are expected")),
+        };
+        let (input, _discard) = tokio::io::duplex(1);
+        Ok(Proc {
+            stdin: Box::new(input),
+            stdout: Box::new(std::io::Cursor::new(out.as_bytes().to_vec())),
+            stderr: None,
+            child: None,
+            contained: None,
+        })
+    });
+    let (engine, _) = engine(&dir, BTreeMap::from([(Vendor::Gemini, Cli { command: "agy".into(), prefix: vec![] })]), spawn);
+    engine.set_time_source(Arc::new(move || now as f64));
+    engine.note_antigravity_account(
+        faber_engine::account::AccountStatus::SignedIn,
+        Some(faber_engine::signals::antigravity_plan(&recorded_session("acct-signed-in")["result"])),
+    );
+    engine.set_utc_offset(0);
+    engine.watch_accounts();
+    support::until("Antigravity never published its model quotas", || engine.quota_view().0.len() == 2).await;
+    let readings = engine.ledger().gemini.zero_turn_readings;
+    assert_eq!(readings["five_hour_agy_gemini"].used, 0.58);
+    assert_eq!(readings["five_hour_agy_3p"].used, 0.19);
+    assert_eq!(readings["five_hour_agy_gemini"].resets_at, (now + 3600) as f64);
+    assert_eq!(antigravity_usage(&engine).unwrap().windows.len(), 2);
+    engine.note_antigravity_account(faber_engine::account::AccountStatus::SignedOut, None);
+    assert!(engine.quota_view().0.is_empty());
+    assert!(engine.ledger().gemini.zero_turn_readings.is_empty());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn antigravity_recorded_tier_confirms_subscription_billing_and_an_unknown_tier_does_not() {
+    let cli = Cli { command: r"C:\Users\Example User\AppData\Local\agy\bin\agy.exe".into(), prefix: vec![] };
+    let (spawn, calls, _) = acp_spawner("acct-signed-in", false);
+    let (status, plan, models) = faber_engine::account::antigravity_account(
+        &cli,
+        &spawn,
+        std::path::Path::new(r"C:\Faber data\agy-check"),
+        Duration::from_millis(300),
+    )
+    .await;
+    let models = models.expect("the same sign-in check supplies the model list");
+    assert_eq!(models.len(), 23);
+    assert!(models.iter().any(|m| m.id == "claude-opus-5-5-low" && m.label == "Claude Opus 5.5 (Low)"));
+    assert!(models.iter().any(|m| m.id == "gemini-4-neon-high" && m.is_default));
+    assert_eq!(calls.lock().unwrap().len(), 1, "the plan comes with the sign-in check: no second process");
+    let dir = crate::support::DataFolder::new();
+    let (engine, _clock) = antigravity_engine(&dir, 2_000_000_000.0);
+    assert!(antigravity_usage(&engine).is_none(), "no limits are shown before the account check found it");
+    engine.note_antigravity_account(status, plan);
+    let ledger = engine.ledger();
+    assert_eq!(ledger.gemini.billing, faber_engine::budget::Billing::Subscription);
+    assert_eq!(ledger.gemini.plan.as_deref(), Some("Google AI Pro"));
+    let u = antigravity_usage(&engine).expect("a connected Antigravity has its limits shown");
+    assert_eq!((u.plan.as_deref(), u.state, u.billing_unknown, u.windows.len()), (Some("Google AI Pro"), "unknown", false, 0));
+    assert!(!engine.vendors().contains(&Vendor::Gemini), "nothing lists or starts it yet (R531)");
+
+    // A tier Faber does not know (the free plan, an API key, a new one) or no tier at all stays unconfirmed: Auto keeps away.
+    let mut session = recorded_session("acct-signed-in")["result"].clone();
+    session["_meta"]["antigravity"]["tier"] = json!({ "name": "Free", "id": "free-tier" });
+    let unknown = faber_engine::signals::antigravity_plan(&session);
+    assert_eq!(unknown.billing, Some(faber_engine::budget::Billing::Unknown));
+    engine.note_antigravity_account(faber_engine::account::AccountStatus::SignedIn, Some(unknown));
+    assert_eq!(engine.ledger().gemini.billing, faber_engine::budget::Billing::Unknown);
+    let u = antigravity_usage(&engine).unwrap();
+    assert!(u.billing_unknown && u.plan.as_deref() == Some("Free"), "{u:?}");
+    session["_meta"]["antigravity"]["tier"] = json!({ "id": "g1-pro-tier" });
+    engine
+        .note_antigravity_account(faber_engine::account::AccountStatus::SignedIn, Some(faber_engine::signals::antigravity_plan(&session)));
+    assert_eq!(antigravity_usage(&engine).unwrap().plan, None, "a tier with no name keeps no plan from an earlier one");
+    session["_meta"]["antigravity"].as_object_mut().unwrap().remove("tier");
+    assert_eq!(faber_engine::signals::antigravity_plan(&session).billing, Some(faber_engine::budget::Billing::Unknown));
+
+    engine.note_antigravity_account(faber_engine::account::AccountStatus::SignedOut, None);
+    assert!(antigravity_usage(&engine).is_none(), "signed out, it is no longer connected");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn antigravity_quota_answer_says_no_reading_with_faber_own_spend() {
+    let now = 2_000_000_000.0;
+    let day = (now / 86_400.0_f64).floor() as i64;
+    let dir = crate::support::DataFolder::new();
+    std::fs::write(dir.path().join("budget.json"), json!({ "gemini": { "own_spend": { day.to_string(): 1.25 } } }).to_string()).unwrap();
+    let (engine, _clock) = antigravity_engine(&dir, now);
+    engine.note_antigravity_account(
+        faber_engine::account::AccountStatus::SignedIn,
+        Some(faber_engine::signals::antigravity_plan(&recorded_session("acct-signed-in")["result"])),
+    );
+    let text = faber_engine::toolbox::quota(&engine.quota_view().1, now);
+    assert!(
+        text.contains(
+            "Antigravity (subscription, plan Google AI Pro): no confirmed reading.\n  unknown: no reading yet.\n  Faber's own spend on it today: US$1.25 at API prices."
+        ),
+        "{text}"
+    );
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn antigravity_out_of_quota_is_out_until_the_reset_or_the_back_off_and_comes_back_after() {
+    let start = 2_000_000_000.0;
+    let dir = crate::support::DataFolder::new();
+    let (engine, clock) = antigravity_engine(&dir, start);
+    engine.note_antigravity_account(
+        faber_engine::account::AccountStatus::SignedIn,
+        Some(faber_engine::signals::antigravity_plan(&recorded_session("acct-signed-in")["result"])),
+    );
+    let at = |t: f64| {
+        *clock.lock().unwrap() = t;
+        antigravity_usage(&engine).unwrap().state
+    };
+    assert_eq!(at(start), "unknown", "connected with no reading: usable, never 'out' by a number it does not have");
+    engine.note_antigravity_out(Some(start + 600.0));
+    assert_eq!(at(start + 599.0), "out");
+    assert_eq!(at(start + 601.0), "unknown", "back once the reset the error named has passed");
+
+    let t = start + 1_000.0;
+    *clock.lock().unwrap() = t;
+    engine.note_antigravity_out(None);
+    assert_eq!(at(t + faber_engine::budget::AGY_BACKOFF - 1.0), "out", "no reset named: out for the back-off");
+    assert_eq!(at(t + faber_engine::budget::AGY_BACKOFF + 1.0), "unknown");
+
+    let t = start + 10_000.0;
+    *clock.lock().unwrap() = t;
+    engine.note_antigravity_out(Some(t - 5.0));
+    assert_eq!(at(t + 60.0), "out", "a reset already past is no reset: the back-off holds");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn antigravity_pace_is_neutral_without_a_reading() {
+    let now = 2_000_000_000.0;
+    let dir = crate::support::DataFolder::new();
+    let (engine, _clock) = antigravity_engine(&dir, now);
+    engine.note_antigravity_account(
+        faber_engine::account::AccountStatus::SignedIn,
+        Some(faber_engine::signals::antigravity_plan(&recorded_session("acct-signed-in")["result"])),
+    );
+    let ledger = engine.ledger();
+    let (snap, shape) = (ledger.gemini.snap(now), ledger.gemini.shape());
+    assert!(snap.windows.is_empty());
+    // The weight of an AI with room: neither preferred (below 1) nor avoided (above 1) by a reading it does not have.
+    assert_eq!(snap.vendor_m(&shape, 0, now), 1.0);
+    assert_eq!(snap.profile_m(Some("gemini"), &shape, 0, now), 1.0);
+    assert_eq!(snap.state(&shape, 0, now), faber_engine::budget::State::Normal);
+    assert!(snap.usable(None, now) && !snap.exhausted(now));
+    assert!(faber_engine::budget::gate(&snap, None, faber_engine::budget::Purpose::UserTurn { by_hand: false }, false, now).is_ok());
+    engine.shutdown();
+}

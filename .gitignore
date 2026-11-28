@@ -1,0 +1,34 @@
+node_modules/
+dist/
+dist-test/
+out/
+release/
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.*
+test-results/
+target/
+src-tauri/gen/
+.ade/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
+# Impeccable keeps its detector config in git; its hook cache is local.
+/.impeccable/hook.cache.json
+
+# A lane's claim of the areas and files it changes (docs/dev/workflow.md#lane-claims).
+/.faber-lane
+
+# What one PC adds to the checks Faber runs (RUSTUP_HOME, CARGO_HOME, PATH; R190), and their logs.
+/.faber/*.local.json
+.faber/verify/
+.faber/verify.local.json
+
+# The direction check's report and proposed tasks: local drafts until someone picks one (docs/dev/workflow.md#direction-check).
+/docs/tasks/proposed/
+
+/src-tauri/binaries/

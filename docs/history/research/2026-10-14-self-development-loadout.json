@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "informationalOnly": true,
+  "measuredAtUtc": "2026-10-14T04:56:03Z",
+  "baseline": "d1379f1",
+  "qualificationPassed": false,
+  "state": "stopped",
+  "stopRule": 1,
+  "failure": "session loadout differs from the empty role loadout",
+  "modelTurns": 0,
+  "modelApiEquivalentUsd": 0,
+  "expectedMcpServers": [],
+  "reportedMcpServers": [
+    { "name": "Roblox_Studio", "toolCount": 0 },
+    { "name": "node_repl", "toolCount": 4 },
+    { "name": "rea", "toolCount": 170 },
+    { "name": "ytlab", "toolCount": 120 }
+  ],
+  "reportedHookCount": 0,
+  "reportedPluginLoadout": null,
+  "nativeBoundaryResults": null,
+  "markerReadAttempted": false,
+  "killWaitMs": 20,
+  "measuredOvershootTokens": null,
+  "measuredStopReserveMicros": null,
+  "realMissionCostUsd": null,
+  "realMissionPeakRamMb": null,
+  "executables": [
+    { "vendor": "claude", "version": "2.1.296", "sha256": "76de74f7694a5bdc03378a5f837c9e132827bf004c98c276bc4e9094ff06769a", "billing": "subscription", "paidFallback": null },
+    { "vendor": "codex", "version": "0.162.1", "sha256": "dd13bdb162a184fa04039488b234a8258ef9b76f84e926c505d5742b19249a6a", "billing": "subscription", "paidFallback": false }
+  ],
+  "executedHelperSha256": "732b8fd77f53cb813f06c5a5d68a58683cff4552cc9ecb02b1dee6ccfafe044f",
+  "privateEvidence": "C:/Users/Erick/AppData/Local/Faber/t13-r112-20261014-qualification"
+}

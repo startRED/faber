@@ -1,0 +1,1410 @@
+import { invoke, listen } from './shell.ts';
+
+// The shapes the engine sends (engine-core/src/model.rs).
+export interface HookPreview { file: string; event: string; command: string; length: number; unreadable: boolean }
+
+export type Vendor = 'claude' | 'codex' | 'gemini';
+
+/**
+ * The shell's view of the update. The first three phases belong to the install at open: looking, downloading (with a whole
+ * `percent` when the size is known, else the `mb` so far) and installing. `ready` is one kept for a restart.
+ */
+/** A conversation's tabs in Faber's browser: where each one is, which one is in front and which one the agent drives. */
+export interface SiteTab { id: string; url: string; title?: string }
+/** A conversation's tabs in Faber's browser (`engine-core/src/browser/tabs.rs`); `closed` waits for "Reopen closed tab". */
+/** One page of an answer's before and after pictures (`engine/src/engine/pictures.rs`): null for a picture not kept. */
+export interface AnswerPage {
+  page: number;
+  before: string | null;
+  after: string | null;
+}
+
+/** One room of a project (task 206): a screen or a major part, read from the project map (`engine/src/engine/rooms.rs`). */
+export interface Room {
+  /** From its file or folder; empty for the home screen. */
+  name: string;
+  kind: 'screen' | 'part';
+  /** The file or folder it covers, relative to the project. */
+  at: string;
+  /** Files in it recent answers changed, newest first. */
+  recent: string[];
+  /** The newest answer that changed it, and that answer's place in the conversation. */
+  changedBy?: { message: string; answer: string; index: number };
+  /** The newest before and after picture of an answer that changed it. */
+  picture?: { answer: string; page: AnswerPage };
+  /** The newest answer changed it. */
+  touched: boolean;
+}
+
+export interface SiteTabs {
+  tabs: SiteTab[];
+  front?: string;
+  agent?: string;
+  closed?: SiteTab[];
+}
+/** What the person does to the tabs. */
+/** What pick mode answered: what the person picked on the page, or that it is still waiting, or that it ended. */
+export type SitePick = {
+  picked?: { role: string; name: string; text: string; selector: string; page: string };
+  picture?: string | null;
+  waiting?: boolean;
+  ended?: boolean;
+};
+
+export type SiteTabStep = 'new' | 'reopen' | 'bring' | 'close' | 'closeOthers';
+
+export interface UpdateStatus {
+  phase: 'none' | 'checking' | 'downloading' | 'installing' | 'ready';
+  percent?: number;
+  mb?: number;
+}
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh';
+/** The level a model starts at; the engine keeps the same default (`Effort` in engine-core/src/router.rs). */
+export const DEFAULT_EFFORT: Effort = 'medium';
+export type Area = 'chat' | 'project';
+export type Status = 'streaming' | 'done' | 'stopped' | 'error';
+/** Message hits use UTF-16 offsets, matching JavaScript string slices. */
+export interface MessageHit {
+  conversationId: string;
+  area: Area;
+  title: string;
+  messageIndex: number;
+  snippet: string;
+  highlights: { start: number; end: number }[];
+}
+export interface MessageSearch {
+  ready: boolean;
+  hits: MessageHit[];
+}
+export interface Image {
+  mediaType: string;
+  base64: string;
+}
+/** What a subagent wrote after its first `at` steps (R161 step 3). */
+export interface ChildWords {
+  at: number;
+  text: string;
+}
+/** A bounded page of the visible helper thread, loaded only while its reader is open. */
+export interface TranscriptEntry {
+  at: number;
+  kind: 'text' | 'tool' | 'result';
+  tool?: string;
+  text: string;
+}
+
+export interface ToolUse {
+  id: string;
+  name: string;
+  input: unknown;
+  ok?: boolean;
+  /** Where the reply's words stood when the agent's own call started, in UTF-16 units (`ui/timeline.ts`). */
+  at?: number;
+  /** No running CLI owns this unfinished agent call after restore or copy. */
+  interrupted?: boolean;
+  output?: string;
+  /** The agent call that started the subagent which ran this tool; absent for the agent's own tools. */
+  parent?: string;
+  /** Refused before it ran: not a failure of the work. */
+  declined?: boolean;
+  /** On a subagent's call while the reply runs: waiting for the person's answer, or a sign it seems stuck. */
+  sign?: "waiting" | "repeat" | "failing" | "silent";
+  /** On a subagent's call once it ended (R161 step 4). */
+  facts?: { edited?: string[]; checks: number; failed: number; unnamed?: string[] };
+  /** A command that runs the project's tests, lint or build, as the engine marks it when it starts. */
+  check?: boolean;
+  /** On a helper's call: what the person wrote to it while it worked (R161 step 5); `taken` is absent while on its way. */
+  told?: { id: string; text: string; taken?: boolean }[];
+  team?: HelperTeam;
+  /** On a call that starts one of the CLI's own subagents: the model (and effort) Faber set for its role. */
+  runsOn?: { model: string; effort?: string };
+  /** On a subagent's call: how many characters it wrote between its steps (R161 step 3). The words are read with `childWords` while its view is open. */
+  wordsChars?: number;
+  /** On a subagent's call: more of its words were left out than the engine keeps, so its view says later ones are not kept. */
+  wordsCut?: boolean;
+  transcript?: { pages: number; failed: boolean };
+  /** When the engine saw the call start, in Unix milliseconds; absent on older conversations. */
+  started?: number;
+  /** When the engine saw the call end, in Unix milliseconds; absent while it runs and on older conversations. */
+  ended?: number;
+  /** On an edit step: what it changed, as the engine read it when the step started; absent on older conversations. */
+  change?: Change;
+}
+/** Bounded exchanges on a helper call, retained by save and branch. IDs name calls, or lead/engine. */
+export interface TeamMessage {
+  id: string;
+  from: string;
+  to: string;
+  fromName: string;
+  toName: string;
+  kind: 'ask' | 'answer' | 'tell' | 'noAnswer';
+  text: string;
+  at: number;
+  question?: string;
+  state?: 'waiting' | 'answered' | 'lapsed';
+}
+export interface HelperTeam {
+  name: string;
+  job: string;
+  title: string;
+  files: string[];
+  state: 'running' | 'waitingLead' | 'ended';
+  messages: TeamMessage[];
+}
+/** A line an edit step added or removed. */
+export interface ChangedLine {
+  added: boolean;
+  text: string;
+}
+/** What an edit step changed, read from its own input with no model call (R161 step 9): how many lines it added and
+ * removed, and the changed lines themselves (from the engine, only the first 40). */
+export interface Change {
+  added: number;
+  removed: number;
+  lines: ChangedLine[];
+}
+/** A step of a streaming reply that has not changed since the screen last heard it: only its id. */
+export interface SameTool {
+  id: string;
+  same: true;
+}
+/** A reply as an update brings it (`host/src/feed.rs`): while it streams, its first `toolsFrom` steps are as the screen
+ * holds them, and after them a step that did not change is a `SameTool`; with `textFrom` (`thinkingFrom`) its text
+ * (thinking) is only what was added after that many UTF-16 units. `upsert` (`ui/opening.ts`) makes it whole again. */
+export type HeardMessage = Omit<Message, 'tools'> & { tools?: (ToolUse | SameTool)[]; toolsFrom?: number; textFrom?: number; thinkingFrom?: number };
+export interface Permission {
+  requestId: string;
+  tool: string;
+  input: unknown;
+}
+/** A request the CLI denied for want of anyone to answer it. */
+export interface Parked {
+  toolUseId: string;
+  tool: string;
+  /** "command", "file", "page" or "other": the request itself is never kept. */
+  kind: "command" | "file" | "page" | "other";
+  /** A file path, or the host of a page; empty otherwise. */
+  label: string;
+  /** For a command, what it would have done, in one of the engine's own words; absent when none fits. */
+  does?: 'delete' | 'history' | 'publish' | 'install' | 'network';
+  at: number;
+}
+export type FaberActor = { who: 'faber' } | { who: 'ai'; vendor: 'claude' | 'codex'; model?: string; role: 'router' | 'helper' };
+export interface FaberAct {
+  kind: 'route' | 'kit' | 'wake' | 'recovery' | 'helper' | 'reach';
+  actor: FaberActor;
+  what: string; why?: string; params?: Record<string, string>;
+  change?: 'composerModel' | 'keepGoing' | 'toolKit' | 'checks' | 'settings';
+  sent?: string;
+}
+export interface ReviewFinding { line: number; file: string; at?: number | null; what: string; should: string; evidence?: string; severity?: 'P0' | 'P1' | 'P2' | 'P3'; visible?: boolean; reviewers: string[] }
+/** What the agent must fix (engine `Row::blocks`): what a person would notice, and P0 or P1 problems; a row with no severity blocks. */
+export const findingBlocks = (f: ReviewFinding): boolean => !!f.visible || !f.severity || f.severity === 'P0' || f.severity === 'P1';
+export interface ReviewRound { call?: string; lines: [number, number, number, number, number]; total: number; reviewers: string[]; scores?: [string, [number, number, number, number, number]][]; omitted?: string[]; jesters: string[]; agreed: ReviewFinding[]; notes: ReviewFinding[] }
+export interface Message {
+  review?: { rounds: ReviewRound[]; stop?: string };
+  acts?: FaberAct[];
+  visualFileCount?: number;
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  at: number;
+  /** On a reply that ended well: how long it took from its start, in milliseconds; absent on older replies. */
+  took?: number;
+  textBreaks?: number[];
+  activityEnd?: number;
+  /** Where each piece of the thinking starts and falls among the words and the steps (`ui/timeline.ts`). */
+  thinkingMarks?: { from: number; at: number; steps: number }[];
+  images?: Image[];
+  attachments?: string[];
+  vendor?: Vendor;
+  model?: string;
+  reason?: string;
+  overloadRetry?: number;
+  effort?: Effort;
+  thinking?: string;
+  tools?: ToolUse[];
+  /** The catalog kit fixed when this reply's session started. */
+  toolKit?: { ids: string[]; jobs: string[]; suggested?: string; method: string; error?: string };
+  /** Successful commit tool ids, recognised and confirmed by the engine. */
+  commits?: string[];
+  /** The engine's latest-reply needs-you state, shared with the running row and done card. */
+  needsYou?: boolean;
+  permissions?: Permission[];
+  files?: { path: string; size: number }[];
+  status?: Status;
+  error?: string;
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  cacheWrite1hTokens?: number;
+  /** When the prompt cache of this reply goes cold, in milliseconds. Claude only; absent when unknown. */
+  cacheWarmUntil?: number;
+  /** Requests the CLI denied in this reply because nobody could answer them; they were not done. */
+  parked?: Parked[];
+  /** How many more were denied beyond the few kept. */
+  parkedMore?: number;
+  /** True once the person said they read the held-back requests: they no longer count as "needs you". */
+  parkedSeen?: boolean;
+  incomplete?: boolean;
+  pace?: { kind: 'step' | 'fast' | 'low' | 'learned' | 'limit'; vendor: Vendor };
+  /** The mode that really ran this reply, as an engine key, only when it is not the one chosen (`mode.fallback.auto`). */
+  mode?: string;
+  /** A note under the reply, as an engine key (`note.historyResent`). */
+  note?: string;
+  rewind?: RewindPoint;
+  waitUntil?: number;
+  movedFrom?: Vendor;
+  movedFromModel?: string;
+  /** The next rung up, offered when the turn's own tools show it stopped early. */
+  nudge?: { reason: string; vendor: Vendor; model: string; effort: Effort };
+  /** Code changed in this reply and nothing checked it: the offer to ask the same model to check its work, before any rung. */
+  selfCheck?: boolean;
+  /** A reply that went from red to green: the offer to look for the same mistake elsewhere (`engine-core/src/look.rs`). */
+  look?: { reason: string; places?: string[] };
+  /** The pull request this reply opened or pushed, followed until its checks pass or it closes. */
+  follow?: Follow;
+  /** A message Faber sent by itself, and why (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`): drawn as a quiet line, not as the person's words. */
+  /** `ids`: the other reports a merged `wake.childDone` carries (`wakeKey`). */
+  wake?: { why: string; pr?: number; checks?: string[]; ids?: string[] };
+  /** Faber was closed while this reply ran, so it was cut (set when the conversation loaded); "Continue" offers to go on. */
+  closed?: boolean;
+  /** On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key). */
+  halt?: string;
+  /** On the latest reply while its work goes on: the agent itself seems stuck (task 110). */
+  stall?: Stall;
+  /** On the newest reply of a conversation that went on by itself for half an hour or more: what it did while the person was away. */
+  away?: { minutes: number; turns: number; switches: number; answered: number };
+  /** Questions Faber answered with their first choice because nobody answered them while "keep going" was on. */
+  autoAnswers?: { question: string; answer: string; others?: string[] }[];
+  /** On a project reply that changed files: Faber's own run of the fast checks once it ended (R146). */
+  checks?: Checks;
+  /** On a reply: when its words, thinking or tools last changed, in milliseconds. "Updated 3 min ago" counts from it. */
+  movedAt?: number;
+  /** On a reply: when the agent said all it will say, in milliseconds. Set while the reply still streams, it is finished for the
+   * person while the CLI closes its turn. */
+  finishedAt?: number;
+  /** On a reply: what the agent said it is doing now, in a few words (task 017). */
+  now?: string;
+  /** On a reply: the closing box of the task it ended. */
+  wrapUp?: WrapUp;
+}
+/** One step of a project agent's [`Plan`] (engine `PlanStep`). */
+export interface PlanStep {
+  text: string;
+  state: 'pending' | 'active' | 'done';
+  evidence?: string;
+  conversation?: string;
+  member?: 'running' | 'waiting' | 'done' | 'failed' | 'stopped';
+}
+/** A project agent's plan for the request (engine `Plan`): it belongs to the conversation. */
+export interface Plan {
+  size?: 'small' | 'normal' | 'risky';
+  raisedBecause?: 'credentials' | 'data' | 'outside' | 'publish' | 'delete' | 'unknown';
+  steps: PlanStep[];
+  contract?: { size?: 'small' | 'normal' | 'risky'; extends?: string; newBecause?: string; proof?: string; target?: string };
+  at: number;
+  /** The conversation's estimate, put here by the engine for the screen; `economy` once the job went half over it (rule 7). */
+  estimate?: { cents: number; base: number; economy: boolean };
+}
+/** "3 of 7": a plan's steps done and in all. */
+export interface PlanCount {
+  done: number;
+  total: number;
+}
+/** What Faber noticed in a request's edits (engine `guard::Fact`). */
+export type GuardFact =
+  | { kind: 'skipped' | 'deleted' | 'stub'; file: string }
+  | { kind: 'weakened'; file: string; removed: number }
+  | { kind: 'outside'; files: string[]; count: number };
+/** Faber's reading of a done conclusion (engine `Proof`): receipts per requirement, and what it noticed in the edits. */
+export interface Proof {
+  confirmed: number;
+  total: number;
+  missing?: string[];
+  unchecked?: boolean;
+  failed?: boolean;
+  facts?: GuardFact[];
+  /** Faber let the conclusion through after asking for proof: it is not confirmed. */
+  labelled?: boolean;
+}
+/** The closing box of a task (engine `WrapUp`): a recap, and maybe one question with its replies, the recommendation first. */
+export interface WrapUp {
+  recap: string;
+  ask?: string;
+  actions?: string[];
+  /** True only for the outcome `done`. */
+  done?: boolean;
+  /** How the agent concluded; absent on a box written before conclusions had outcomes. */
+  outcome?: 'done' | 'blocked' | 'needsYou';
+  /** What the agent said it did, the result, what is not done and what it checked. */
+  summary?: {
+    did: string; result: string; notDone?: string; verified?: string;
+    /** Each thing asked, the receipt the agent named, and whether Faber confirmed it. */
+    requirements?: { asked: string; proof?: string; confirmed?: boolean }[];
+    assumed?: string; couldNotReach?: string;
+  };
+  /** What Faber itself saw behind a done conclusion that followed edits (engine `Proof`). */
+  proof?: Proof;
+  /** The reply Faber gave for the person while Keep going ran and nobody answered. */
+  answered?: string;
+}
+export type ChecksState = 'running' | 'passed' | 'failed' | 'needsYou';
+export interface Checks {
+  state: ChecksState;
+  passed: number;
+  /** The checks that failed, each with its first short failures. */
+  failed?: { command: string; lines?: string[] }[];
+}
+export type FollowState = 'pending' | 'failing' | 'conflict' | 'passing' | 'merged' | 'closed' | 'stopped';
+export interface Follow {
+  repo: string;
+  number: number;
+  url: string;
+  state: FollowState;
+  failed?: string[];
+  head?: string;
+  /** The checks failed while the quota was tight: the person was told instead of the agent. */
+  held?: boolean;
+  /** Why following ended early, as an engine key. */
+  problem?: string;
+  since: number;
+}
+export interface QueuedTurn {
+  id: string;
+  text: string;
+  images?: Image[];
+  attachments?: string[];
+  choice: Choice;
+  at: number;
+  /** Handed to the running turn and not yet taken in: it can no longer be removed. */
+  sending?: boolean;
+  wake?: Message['wake'];
+}
+/** One version of a message: the conversation that shows it and the message there (parity T7). */
+export interface VersionAt {
+  conversationId: string;
+  messageId: string;
+}
+/** The versions of one message of the open conversation, in the order they were written; `at` is this one. */
+export interface Versions {
+  messageId: string;
+  at: number;
+  list: VersionAt[];
+}
+/** Pages and drawings projected from the saved reply text; no second version history. */
+export interface VisualVersion {
+  messageId: string;
+  block: number;
+  start: number;
+  end: number;
+  kind: 'html' | 'svg' | 'mermaid';
+  source: string;
+  file?: string;
+}
+export interface VisualAnswer {
+  id: string;
+  name?: string;
+  kind: 'html' | 'svg' | 'mermaid';
+  versions: VisualVersion[];
+}
+export type PieceData =
+  | { type: 'number'; title: string; items: { label: string; value: string }[] }
+  | { type: 'table'; title: string; columns: string[]; rows: string[][] }
+  | { type: 'chart'; title: string; items: { label: string; value: number }[] }
+  | { type: 'calculation'; title: string; label: string; min: number; max: number; step: number; value: number; expression: string }
+  | { type: 'checklist' | 'steps'; title: string; items: string[] }
+  | { type: 'tabs' | 'timeline'; title: string; items: { label: string; text: string }[] }
+  | { type: 'form'; title: string; options: string[] }
+  | { type: 'notice'; title: string; text: string };
+export type PieceValue = number | boolean[] | null;
+export interface VisualPiece {
+  messageId: string;
+  block: number;
+  start: number;
+  end: number;
+  data: PieceData;
+  value: PieceValue;
+}
+export interface WaitingOn {
+  ids?: string[];
+  note?: string;
+  since?: number;
+  until?: number;
+  problem?: string;
+}
+
+export interface Conversation {
+  waitingOn?: WaitingOn;
+  temporary?: boolean;
+  id: string;
+  title: string;
+  choice?: Choice;
+  area: Area;
+  projectId?: string;
+  workingFolder?: string;
+  projectStartPending?: boolean;
+  /** A project conversation's own copy (a git worktree on its own branch), made at its first message. */
+  copy?: WorkCopy;
+  sessions: Partial<Record<Vendor, string>>;
+  allowAlways?: string[];
+  branchOf?: { conversationId: string; messageId: string };
+  createdAt: number;
+  updatedAt: number;
+  queued?: QueuedTurn[];
+  /** "Keep going" is on: Faber sends the next turn by itself. */
+  keepGoing?: { turns: number; failed: number };
+  /** How full its own agent's context is, once the CLI has said so (the topbar's meter). */
+  context?: ContextFill;
+  /** The agent's plan for the request. */
+  plan?: Plan;
+  /** When it was archived: it is off the sidebar and its composer gives way to a line that brings it back. */
+  archivedAt?: number;
+  /** When the person pinned it to the top of its sidebar list. */
+  pinnedAt?: number;
+  messages: Message[];
+  /** Messages before the loaded window; omitted when the entire history is loaded. */
+  earlier?: number;
+  rewindNotice?: string;
+  rewindSummary?: string;
+}
+
+export type RunAppView =
+  | { phase: 'idle' | 'starting' | 'stopping' }
+  | { phase: 'confirm'; command: string; scripts: [string, string][]; seen: string }
+  | { phase: 'running'; url: string }
+  | { phase: 'notice'; reason: string; output: string }
+  | { phase: 'stopFailed'; output: string };
+/** The tokens a conversation's own agent holds, and the window they are counted against. */
+export interface ContextFill {
+  used: number;
+  window: number;
+}
+/** One part of what fills the context, as the CLI counts it (`key`: a `ctx.part.*` key). */
+export interface ContextPart {
+  key: string;
+  tokens: number;
+}
+export interface Results {
+  delivered: { files: number; edits: number; checksRun: number; checksPassed: number; checksFailed: number; commits: number; prs: number; artifacts: number; answers: number; concluded: boolean };
+  cost: { turns: number; workMs: number; spanMs: number; usd: number; inputTokens: number; outputTokens: number; unpriced: number; byVendor: Partial<Record<Vendor, { turns: number; workMs: number; usd: number; outputTokens: number }>> };
+  lastDelivery?: number | null;
+  dry: { turns: number; byItself: number; since?: number | null; workMs: number; usd: number };
+}
+export interface Stuck { noticedAt: number; since: number; turns: number; usd: number; askedAt?: number | null; askTurns: number }
+export interface ProjectResultsView { total: Results; conversations: { id: string; title: string; results: Results }[] }
+
+export interface Summary {
+  followUps?: { title: string; file: string; ready: boolean; sent: boolean }[];
+  reason?: 'reason.conversation_damaged';
+  results?: Results;
+  stuck?: boolean;
+  id: string;
+  title: string;
+  area: Area;
+  projectId?: string;
+  updatedAt: number;
+  /** "Keep going" is on. */
+  keepGoing?: boolean;
+  archived?: boolean;
+  pinnedAt?: number;
+  /** The conversation whose agent started this one, which the sidebar shows it under. */
+  startedBy?: string;
+  waitingOn?: WaitingOn;
+  childState?: 'working' | 'waiting' | 'stopped' | 'done' | 'failed';
+  childChoice?: Choice;
+  childLine?: string;
+  /** Its last run ended and nobody has opened it since: the running column's done card and the sidebar's dot. */
+  ended?: Ended;
+  /** Where the conversation stands now (engine `State`): the sidebar and the running list read the same word. */
+  state?: RunStateName;
+  /** How far the agent's plan has come. */
+  plan?: PlanCount;
+}
+/**
+ * The one set of states a conversation is in: working, waiting for the person, concluded (the AI concluded it), unconcluded
+ * (a turn ended and the AI never concluded), stuck (spends time with no new result), failed, stopped (by the person) and
+ * interrupted (Faber closed or crashed mid-turn).
+ */
+export type RunStateName = 'working' | 'waiting' | 'concluded' | 'unconcluded' | 'stuck' | 'failed' | 'stopped' | 'interrupted';
+/** How a run ended that nobody saw end (engine `Ended`). */
+export interface Ended {
+  at: number;
+  kind: 'done' | 'needsYou' | 'failed' | 'unconcluded' | 'interrupted';
+  /** From its first turn to its end, in milliseconds. */
+  workMs: number;
+  /** The closing recap and unfinished plan steps, or the last line the agent wrote. */
+  line?: string;
+}
+export interface WorkCopy {
+  path: string;
+  branch: string;
+}
+
+/** A session the person started with a CLI in a terminal, as that CLI lists it (parity F5). */
+export interface CliSession {
+  vendor: Vendor;
+  id: string;
+  title: string;
+  model?: string;
+  updatedAt: number;
+}
+
+export interface Project {
+  state?: 'present' | 'missing' | 'disconnected';
+  id: string;
+  name: string;
+  path: string;
+  /** Each new conversation works in a separate copy (Settings > Projects). The engine always sends it, default filled. */
+  separateCopies?: boolean;
+}
+
+export interface ChatGroup {
+  id: string;
+  name: string;
+  instructions: string;
+  files: { id: string; name: string; size: number; mime?: string }[];
+  conversationIds: string[];
+}
+
+/** The checks Faber runs on a project's work (R137): the commands, where they were declared, and whether the owner confirmed them. */
+export interface ProofView {
+  commands: string[];
+  declared: string[];
+  source: 'agents' | 'claude' | 'detected' | 'none';
+  confirmed: boolean;
+  changed: boolean;
+  /** What installs the dependencies first, found from the lock files; shown with the checks, not confirmed separately. */
+  setup?: string[];
+}
+
+/** One standing goal as the screen shows it (engine-projects/src/project/goals.rs). */
+export interface GoalRow {
+  id: string;
+  words: string;
+  /** Empty for a crash goal. */
+  check: string;
+  /** A crash goal: it watches the installed Faber's crash record instead of a check. */
+  crashes?: boolean;
+  state: 'holding' | 'checking' | 'fixing' | 'needsYou' | 'paused';
+  /** A `reason.goal.*` key: why the goal needs the person. */
+  reason?: string;
+  /** Unix seconds of the last answer of its check. */
+  lastRun?: number;
+  conversation?: string;
+}
+/** A project's standing goals, the switch for starting fixes by itself and the day's limit. */
+export interface GoalsView {
+  auto: boolean;
+  /** The person saw the limit when they first turned the switch on. */
+  capSeen: boolean;
+  capUsd: number;
+  spentUsd: number;
+  /** The project's confirmed checks a goal can use; none while the list is not confirmed. */
+  checks: string[];
+  /** A crash goal can be added: this is Faber's own project. */
+  canWatchCrashes: boolean;
+  goals: GoalRow[];
+}
+
+// The shapes the look engine sends and takes (src-tauri/src/look.rs). The screen never computes a colour.
+export type Motion = 'full' | 'reduced' | 'none';
+export interface Effects {
+  ambient: boolean;
+  texture: boolean;
+  glow: boolean;
+}
+/** The user's choices behind a look. Only `base` is required; the rest falls back to the base's own value. */
+export interface Appearance {
+  base: string;
+  ground?: string;
+  accent?: string;
+  textFont?: string;
+  headingFont?: string;
+  textSize?: number;
+  density?: number;
+  corners?: number;
+  motion?: Motion;
+  effects?: Effects;
+  colors?: Record<string, string>;
+}
+export interface Check {
+  a: string;
+  b: string;
+  ratio: number;
+  min: number;
+  pass: boolean;
+}
+export interface Look {
+  /** CSS custom properties, without the leading dashes. */
+  vars: Record<string, string>;
+  scheme: 'dark' | 'light';
+  motion: Motion;
+  effects: Effects;
+  checks: Check[];
+  /** Translation keys, such as `look.accentAdjusted`. */
+  notices: string[];
+  /** The choices with every field filled in from the base, so a control can show what is on. */
+  /** Every choice filled in; a look with a heading of its own (Cobalt) has no `headingFont` until one is chosen. */
+  appearance: Required<Omit<Appearance, 'colors' | 'headingFont'>> & { headingFont?: string; colors?: Record<string, string> };
+}
+/** A refusal from the look engine: a translation key and the field or pairs it is about. */
+export interface Failure {
+  key: string;
+  detail?: string;
+}
+export type ThemeFile = Appearance & { name: string };
+
+/** The answer to "Do you already use AI?". No answer counts as a beginner. */
+export type Experience = 'beginner' | 'experienced';
+/** How a CLI may act in Chat (R140). `dontAsk` is Full access and the default when nothing is saved. */
+export type PermissionMode = 'ask' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk';
+/** The modes in the order they are listed, strictest first; full access is the default. */
+export const PERMISSION_MODES: PermissionMode[] = ['ask', 'acceptEdits', 'plan', 'auto', 'dontAsk'];
+export type WebSearch = 'off' | 'cached' | 'live';
+export type ReasoningSummary = 'default' | 'auto' | 'concise' | 'detailed' | 'none';
+export type ReplyStyle = 'default' | 'short' | 'explained' | 'own';
+export interface Settings {
+  defaultModel?: Choice;
+  blockedHosts?: string[];
+  extensionsDeveloperMode?: boolean;
+  appearance?: Appearance;
+  userHooks?: boolean;
+  permissions?: PermissionMode;
+  /** Missing means live. */
+  webSearch?: WebSearch;
+  /** Codex only; missing means the model's own. */
+  reasoningSummary?: ReasoningSummary;
+  replyStyle?: ReplyStyle;
+  replyStyleText?: string;
+  notifications?: boolean;
+  notificationSound?: boolean;
+  language?: string;
+  setup?: 'done' | 'skipped';
+  experience?: Experience;
+  /** False once the first run asked for the tutorial; true once it ended or was skipped. */
+  tutorialDone?: boolean;
+  /** How the person asked to be called (at most 40 characters); the engine keeps it trimmed and none when cleared. A save with
+   * an empty text clears it. */
+  userName?: string;
+  keepAwake?: boolean;
+  resumeInterrupted?: boolean;
+  /** A piece that ended twice with nothing changed moves to the stronger model by itself (off by default). */
+  strongerWhenStuck?: boolean;
+  autostart?: boolean;
+  /** Receive previews: update checks read the preview channel. Off by default; turning it off never downgrades. */
+  previews?: boolean;
+  /** Full trust for Faber's own setup: the project agent installs from the catalog without a card. Off by default; only Settings writes it. */
+  faberTrust?: boolean;
+  /** The key: the AI may see other windows (off by default). Only the person changes it, on the screen. */
+  seeOtherWindows?: boolean;
+  /** Executable names the AI never sees, lower case; the shell sends the default list when none is saved. */
+  programsOutOfReach?: string[];
+}
+export interface ModelInfo {
+  id: string;
+  label: string;
+  description?: string;
+  isDefault: boolean;
+}
+/** One conversation that is answering now or waits for the user: a row of the running list (engine-core/src/model.rs). */
+export interface RunningItem {
+  conversationId: string;
+  /** The id of the turn's reply message. With the request id it names a question: request ids alone repeat. */
+  turnId: string;
+  /** Empty while the conversation has none. */
+  title: string;
+  area: Area;
+  projectId?: string;
+  /** None while Auto is still choosing the model. */
+  vendor?: Vendor;
+  model?: string;
+  state: 'working' | 'needsYou';
+  /** The `at` of the turn's reply message, in milliseconds. */
+  since: number;
+  permissions: Permission[];
+  parked?: Parked[];
+  /** How many more were denied beyond the few kept. */
+  parkedMore?: number;
+  /** The subagent calls of the reply that seem stuck: each needs the person like a question. */
+  stuck?: string[];
+  /** The agent itself seems stuck: it needs the person like a stuck subagent. */
+  stall?: Stall;
+  waitUntil?: number;
+  /** A followed pull request whose checks failed while the quota was tight: its number and commit. */
+  held?: [number, string];
+  /** "Keep going" is on: it runs on its own. */
+  keepGoing?: boolean;
+  /** "Keep going" waits to send the next turn, for a reason of its own (a quota wait is `waitUntil`), until `until` (seconds). */
+  keepWait?: { why: 'retry' | 'rest' | 'command' | 'busy' | 'start' | 'question' | 'account'; until: number };
+  /** The agent said it waits for the conversations it started (`ids`) or for a reason of its own (`note`): its turn ended, yet
+   * the work is not over. `since` is in milliseconds. */
+  waitingOn?: WaitingOn;
+  /** How far a conversation that goes on by itself has come: turns of work, when it began (ms, 0 unknown), the last line it wrote. */
+  keepProgress?: { turns: number; since: number; last?: string };
+  /** The agent finished and only the CLI's turn is closing, with nothing else running: the screen leaves the row out. */
+  settled?: boolean;
+  /** How far the agent's plan has come. */
+  plan?: PlanCount;
+  /** What the agent said it is doing now, on the reply under way. */
+  now?: string;
+}
+/** The running list in the engine's order, with a revision that grows by one with every list the engine sends. */
+export interface RunningList {
+  revision: number;
+  items: RunningItem[];
+}
+/** The latest reading of one quota window of one vendor. `resetsAt` is in seconds, and 0 when the CLI did not say. */
+export interface QuotaReading {
+  vendor: Vendor;
+  window: string;
+  used: number;
+  resetsAt: number;
+}
+/** `used` is the reading as the vendor gave it; `readAt` is when (seconds). `uncounted` is the share Faber's own recent work adds that the reading does not hold yet, present only where a measured conversion exists. */
+export interface WindowUsage { name: string; used: number; elapsed: number; expected: number; resetsAt: number; readAt: number; uncounted?: number | null }
+export interface VendorUsage {
+  vendor: Vendor; plan?: string | null; state: 'ok' | 'spare' | 'fast' | 'low' | 'out' | 'unknown';
+  learning: boolean; relearning: boolean; outsideShare?: number | null; foreignUse: boolean;
+  overageOn: boolean; billedPerUse: boolean; billingUnknown: boolean; askForPlan: boolean; paidPossible: boolean;
+  ownSpendUsd: number; spendDays?: [number, number, number][]; unmetered: number; counting: boolean; windows: WindowUsage[];
+}
+export interface AppState {
+  storageChoice?: StorageChoice;
+  gitReason?: 'reason.git_missing';
+  uncleanExit?: { at: number; started?: number; panic: boolean; panicOnly?: boolean };
+  conversations: Summary[];
+  projects: Project[];
+  // Absent in an older engine's state: no groups.
+  groups?: ChatGroup[];
+  vendors: Vendor[];
+  settings: Settings;
+  look: Look;
+  models: ModelInfo[];
+  antigravityModels?: ModelInfo[];
+  running: RunningList;
+  background?: BackgroundList;
+  quotas: QuotaReading[];
+  usage?: VendorUsage[];
+  version: string;
+}
+
+export interface StorageChoice {
+  folder: string;
+  custom: boolean;
+  locked: boolean;
+  notice: 'reason.storage.default' | 'reason.storage.unreadable' | null;
+  ask: boolean;
+}
+/** Kept only in memory; the engine caps each conversation at 32 commands and each output at 20 lines / 8 KB. */
+export interface BackgroundCommand {
+  id: string;
+  conversationId: string;
+  vendor: Vendor;
+  command: string;
+  started: number;
+  output: string;
+  state: 'running' | 'done' | 'stopped' | 'failed';
+  stoppable: boolean;
+}
+export interface BackgroundList { revision: number; items: BackgroundCommand[] }
+export interface SavedSettings {
+  settings: Settings;
+  look: Look;
+}
+/** Byte counts are partial when the scan hits its limit, and null where a read failed. */
+export interface StorageUsage {
+  totalBytes: number | null;
+  freeBytes: number | null;
+  byKind: {
+    copies: number | null;
+    reports: number | null;
+    tools: number | null;
+    rewind: number | null;
+    helperTranscripts: number | null;
+    conversations: number | null;
+    rest: number | null;
+  };
+  copiesByProject: Record<string, number | null>;
+  unassignedCopyBytes: number | null;
+  partial: boolean;
+}
+export interface Choice {
+  vendor: Vendor | 'auto';
+  model?: string;
+  effort?: Effort;
+}
+export interface Attachment {
+  name: string;
+  base64: string;
+}
+export type AccountStatus = 'signedIn' | 'signedOut' | 'unknown';
+/** One skill of Faber's catalog (src-tauri/src/tools.rs). */
+export interface ToolRow {
+  runtime?: { kind: 'python' | 'file'; source: string; sha256: string; size: number; weights_license: string; capability: string; min_vram_mb?: number; command: string } | null;
+  uvAvailable?: boolean;
+  runtimeAvailable?: boolean;
+  runtimeFits?: boolean;
+  runtimeDownloadSize?: number;
+  removedEnabled?: boolean | null;
+  hasCopy?: boolean;
+  id: string;
+  cliName?: string | null;
+  job: string;
+  tier?: 'recommended' | 'more';
+  license: string;
+  repo: string;
+  home: string;
+  installed: boolean;
+  /** An engine key when a present catalog item must be installed again. */
+  status?: string | null;
+  enabled?: boolean;
+  version?: string;
+  nodeAvailable?: boolean;
+  pluginParts?: { id: string; kind: 'skill' | 'command' | 'agent' | 'server' }[];
+  claudePluginsAvailable?: boolean;
+  requiresNode?: boolean;
+  /** A tool server (an npm package Node runs) rather than a skill. */
+  server: boolean;
+  /** Who installed the copy Faber holds, from the install log: the agent in `conv`, or the person (no `conv`). Absent: unknown. */
+  installedBy?: { conv?: string; fullAccess: boolean };
+}
+
+/** One unchecked public directory hit: data only, which Faber cannot install. */
+export interface OpenHit { id: string; source: string; installs: number; server: boolean }
+
+export interface ToolInventoryList {
+  vendor: Vendor;
+  rows: { name: string; kind: 'skill' | 'plugin' | 'server'; source: 'catalog' | 'user' | 'project'; location: string; linked?: boolean; enabled?: boolean; catalogId?: string; status?: string | null }[];
+  issues: { source: 'user' | 'project'; kind: 'skill' | 'plugin'; reason: 'unavailable' | 'unreadable' | 'limited' | 'unsupported' }[];
+}
+
+export interface McpServerRow {
+  name: string;
+  source: 'catalog' | 'project' | 'user';
+  status?: string;
+  enabled?: boolean;
+}
+export interface McpServerList {
+  vendor: Vendor;
+  readAt?: number;
+  rows: McpServerRow[];
+}
+
+export interface CheckResult {
+  vendor: Vendor;
+  installed: boolean;
+  account: AccountStatus;
+  canInstall: boolean;
+}
+export interface SetupProgressEvent {
+  type: 'setup';
+  vendor: Vendor;
+  step: string;
+  error?: string;
+  detail?: string;
+}
+/** An entry of a working folder offered by `@` in the composer (parity T4): its path from the folder, `/` between parts. */
+export interface Mention {
+  path: string;
+  dir: boolean;
+}
+/** A command or skill reported by an agent, offered by `/` without starting a process. */
+export interface Command {
+  vendor: Vendor;
+  name: string;
+  skill: boolean;
+  note?: string | null;
+}
+/** Git's current changes in a conversation's working copy, against its starting branch. */
+export interface FileChange {
+  path: string;
+  added: number;
+  removed: number;
+  binary: boolean;
+  countsKnown?: boolean;
+  tooLarge?: boolean;
+  status: 'modified' | 'added' | 'deleted';
+}
+export interface ChangeList {
+  files: FileChange[];
+  incomplete: boolean;
+  next?: string;
+}
+/** One file, read only when opened; oversized patches keep their counts in FileChange. */
+export interface ChangePatch {
+  text: string;
+  tooLarge: boolean;
+  binary: boolean;
+  error?: string | null;
+}
+/** A file a reply names, read only around its line (parity P2): at most 4,000 lines, the first of them numbered `first`. */
+export interface FileView {
+  path: string;
+  line?: number;
+  end?: number;
+  first: number;
+  text: string;
+  total: number;
+  tooLarge: boolean;
+  binary: boolean;
+  error?: string | null;
+}
+
+/** Private turn history; step A exposes the contract without adding any screen. */
+export interface RewindCoverage {
+  saved: number;
+  skipped: number;
+  unavailable: boolean;
+  incomplete: boolean;
+}
+/** A single turn's saved before/after versions; at most 50 file names per page. */
+export interface AnswerChanges {
+  files: FileChange[];
+  total: number;
+  coverage: RewindCoverage;
+  sealed: boolean;
+  shared: boolean;
+}
+/** One saved file's unified diff, loaded only while open; at most 200 lines / 128 KiB. */
+export interface AnswerChangePatch {
+  lines: string[];
+  total: number;
+  binary: boolean;
+  tooLarge: boolean;
+  notice?: 'answerChanges.properties' | 'answerChanges.emptyAdded' | 'answerChanges.emptyDeleted';
+}
+export interface RewindCursor {
+  entry: string | null;
+  turn: string | null;
+}
+export interface RewindPoint {
+  id: string;
+  messageId: string;
+  turnId: string;
+  at: number;
+  coverage: RewindCoverage;
+  sealed: boolean;
+  cursor: RewindCursor;
+}
+export interface RewindRequest {
+  conversationId: string;
+  messageId: string;
+  mode: 'files' | 'conversation' | 'both';
+  savedVersions: string[];
+}
+export interface RewindRedoRequest {
+  conversationId: string;
+  id: string;
+  savedVersions: string[];
+}
+export interface RewindRedoInfo {
+  id: string;
+  messageId: string;
+  mode: RewindRequest['mode'];
+  expiresAt: number;
+  recovery?: boolean;
+}
+export interface RewindPreview {
+  files: { path: string; action: 'replace' | 'recreate' | 'remove'; conflict: boolean; unavailable: boolean }[];
+  replacements: number;
+  recreations: number;
+  removals: number;
+  conflicts: number;
+  messages: number;
+  coverage: RewindCoverage;
+  running: { conversationId: string; writers: string[]; unknown: boolean }[];
+  recovery: boolean;
+  redoExpiresAt: number | null;
+  notice: string;
+}
+export interface RewindResult {
+  id: string;
+  restored: string[];
+  kept: string[];
+  failed: string[];
+  partial: boolean;
+  recovery: boolean;
+  notice: string | null;
+}
+/** A turn of the side chat of a conversation (R250): the engine keeps its newest 50 with the conversation. */
+export interface Aside {
+  id: string;
+  question: string;
+  answer: string;
+  vendor: Vendor;
+  model?: string | null;
+  state: 'running' | 'done' | 'stopped' | 'failed';
+  /** A translation key when it failed. */
+  error?: string | null;
+}
+export interface AgentAsk { id: string; conversation: string; label: 'organize' | 'wake' | 'settings' | 'tools' | 'projects' | 'environments' | 'rewind' | 'panel'; state: 'pending' | 'allowed' | 'denied' | 'expired'; }
+
+export type AppEvent =
+  | { type: 'lagged' }
+  | { type: 'asks'; asks: AgentAsk[] }
+  /** An agent's `show_panel`: a Settings section or the Catalog to open. */
+  | { type: 'showPanel'; panel: string }
+  | { type: 'catalog' }
+  | ({ type: 'background' } & BackgroundList)
+  | { type: 'commands'; conversationId: string; vendor: Vendor }
+  | { type: 'message'; conversationId: string; message: HeardMessage }
+  | { type: 'asides'; conversationId: string; asides: Aside[] }
+  | { type: 'queue'; conversationId: string; queued: QueuedTurn[] }
+  | ({ type: 'quota' } & QuotaReading)
+  | ({ type: 'running' } & RunningList)
+  | { type: 'usage'; vendors: VendorUsage[] }
+  | { type: 'settings'; settings: Settings }
+  | { type: 'list' }
+  | { type: 'context'; conversationId: string; context?: ContextFill }
+  | { type: 'contextParts'; conversationId: string; parts: ContextPart[] }
+  | { type: 'plan'; conversationId: string; plan?: Plan }
+  | { type: 'halted'; conversationId: string; title: string; why: string; vendor?: Vendor }
+  /** A conversation could not be written to disk and no command was waiting to say so; `key` is an `error.chat.*` key (or `error.store.read` or `error.store.corrupt`). */
+  | { type: 'saveFailed'; key: string }
+  | SetupProgressEvent;
+
+export interface SendRequest {
+  conversationId?: string;
+  area: Area;
+  projectId?: string;
+  text: string;
+  images: Image[];
+  files: Attachment[];
+  choice: Choice;
+}
+
+/** A text in two forms: `one` for a count of 1, `other` for any other count. */
+export interface Plural {
+  one: string;
+  other: string;
+}
+/** The words the shell shows by itself. Counts are `{n}` and the conversation is `{title}`; the shell fills them. */
+/** Why "keep going" stops by itself: the last part of the engine's `reason.keepGoing.*` keys. */
+export const STOPS = ['done', 'silent', 'asked', 'failed', 'cap', 'pace', 'quota', 'billed', 'goal', 'stage', 'decision'] as const;
+
+/** A sign that the agent's own work seems stuck: a step with no news (`quiet`), a long compaction, or the same step again
+ * and again. `minutes` without news for the first two. It never stops anything by itself. */
+export interface Stall {
+  kind: 'quiet' | 'compacting' | 'repeat' | 'failing';
+  minutes?: number;
+}
+
+export interface ShellTexts {
+  open: string;
+  quit: string;
+  running: Plural;
+  needsYou: Plural;
+  notify: string;
+  notifyMany: string;
+  quitAsk: string;
+  quitKeep: string;
+  closedNote: string;
+  /** When "keep going" stops by itself, by reason, with `{title}` and `{ai}`. */
+  stopped: Record<string, string>;
+}
+
+/** A recent folder as the engine judged it just now: `reason` is a translation key when it cannot be picked. */
+export interface FolderView {
+  path: string;
+  name: string;
+  parent: string;
+  reason?: string | null;
+}
+export interface EnvironmentView {
+  id: string;
+  name: string;
+  folders: FolderView[];
+}
+export interface RecentsView {
+  folders: FolderView[];
+  environments: EnvironmentView[];
+}
+
+// Names this load of the screen to the shell's browser pane: a request of any other load (a screen that went away) is ignored.
+const LOAD = crypto.getRandomValues(new Uint32Array(1))[0];
+
+// Typed calls into the engine (the commands registered in src-tauri/src/main.rs and src-tauri/src/setup.rs).
+export interface MemoryEntry {
+  start: number;
+  end: number;
+  line: number;
+  text: string;
+  /** Decision lists: the text without its author mark, the author, and whether the person kept an AI decision. */
+  body?: string;
+  author?: 'ai' | 'person';
+  reviewed?: boolean;
+  stale?: boolean;
+}
+export interface MemoryFile {
+  path: string;
+  source: 'claude' | 'codex' | 'faber';
+  revision: string;
+  tooLarge: boolean;
+  overLimit?: [number, number] | null;
+  entries: MemoryEntry[];
+}
+export interface MemoryList {
+  files: MemoryFile[];
+  incomplete: boolean;
+}
+export interface MemoryEdit {
+  path: string;
+  revision: string;
+  start: number;
+  end: number;
+  text: string | null;
+  /** Marks an AI decision as kept; `text` is then ignored. */
+  keep?: boolean;
+  /** Separate person consent to exceed a taste or lesson file's target. */
+  overTarget?: boolean;
+}
+
+/** A Firefox profile Faber's browser can bring sign-ins from; 'default' names the one Firefox made itself. */
+export type CookieProfile = { id: string; name: string; lastUsed: boolean };
+/** A site with cookies in that profile: the screen gets names and counts, never a cookie. */
+export type CookieSite = { name: string; cookies: number; kind: 'money' | 'email' | 'signin' | null };
+
+export const api = {
+  state: () => invoke<AppState>('state'),
+  results: (id: string) => invoke<Results | null>('results', { id }),
+  projectResults: (projectId: string) => invoke<ProjectResultsView>('project_results', { projectId }),
+  asks: () => invoke<AgentAsk[]>('asks'),
+  answerAsk: (id: string, allow: boolean) => invoke<boolean>('answer_ask', { id, allow }),
+  createChatGroup: (name: string) => invoke<ChatGroup>('create_chat_group', { name }),
+  saveChatGroup: (id: string, name?: string, instructions?: string) => invoke<ChatGroup>('save_chat_group', { id, name, instructions }),
+  addChatGroupFiles: (id: string, files: Attachment[]) => invoke<ChatGroup>('add_chat_group_files', { id, files }),
+  removeChatGroupFile: (id: string, fileId: string) => invoke<ChatGroup>('remove_chat_group_file', { id, fileId }),
+  removeChatGroup: (id: string) => invoke<void>('remove_chat_group', { id }),
+  moveChatToGroup: (conversationId: string, groupId?: string) => invoke<void>('move_chat_to_group', { conversationId, groupId }),
+  newGroupChat: (groupId: string) => invoke<Conversation>('new_group_chat', { groupId }),
+  backgroundCommands: () => invoke<BackgroundList>('background_commands'),
+  stopBackground: (id: string) => invoke<void>('stop_background', { id }),
+  open: (id: string) => invoke<Conversation | null>('open', { id }),
+  startTemporaryChat: () => invoke<string>('start_temporary_chat'),
+  closeChat: (id: string) => invoke<void>('close_chat', { id }),
+  startCard: (id: string) => invoke<string | null>('start_card', { id }),
+  messagesBefore: (id: string, messageId: string) => invoke<Message[] | null>('messages_before', { id, messageId }),
+  send: (req: SendRequest) => invoke<string>('send', { req }),
+  branch: (req: { conversationId: string; messageId: string; text: string; choice: Choice }) => invoke<string>('branch', { req }),
+  cliSessions: (projectId: string) => invoke<CliSession[]>('cli_sessions', { projectId }),
+  pickUp: (projectId: string, session: CliSession) => invoke<string>('pick_up', { projectId, session }),
+  branchHere: (conversationId: string, messageId: string) => invoke<string>('branch_here', { conversationId, messageId }),
+  versions: (id: string) => invoke<Versions[]>('versions', { id }),
+  visualAnswers: (id: string, messageId?: string, block?: number) => invoke<VisualAnswer[]>('visual_answers', { id, messageId, block }),
+  visualPolicy: () => invoke<boolean>('visual_policy'),
+  visualOpen: () => invoke<string>('visual_open'),
+  visualPage: (id: string, revision: number, document: string) => invoke<{ url: string; live: boolean }>('visual_page', { id, revision, document }),
+  visualClose: (id: string) => invoke<void>('visual_close', { id }),
+  visualPieces: (id: string, messageId: string) => invoke<VisualPiece[]>('visual_pieces', { id, messageId }),
+  savePieceValue: (id: string, messageId: string, block: number, value: PieceValue) => invoke<void>('save_piece_value', { id, messageId, block, value }),
+  warm: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }) => invoke<void>('warm', { req }),
+  routeDraft: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }, text: string) =>
+    invoke<void>('route_draft', { req, text }),
+  /** Settings > Accounts and limits: Auto forgets what it learned from the answers redone or kept on this PC. */
+  forgetAutoLearned: () => invoke<void>('forget_auto_learned'),
+  interrupt: (id: string) => invoke<void>('interrupt', { id }),
+  keepGoing: (id: string, on: boolean) => invoke<void>('keep_going', { id, on }),
+  /** The person has the conversation open on a visible window: the done card and the dot of its last run go. */
+  seen: (id: string) => invoke<void>('seen', { id }),
+  followUp: (id: string, file: string, dismiss: boolean) => invoke<void>('follow_up', { id, file, dismiss }),
+  /** Archives a conversation, or brings an archived one back. */
+  archive: (id: string, on: boolean) => invoke<void>('archive', { id, on }),
+  pin: (id: string, on: boolean) => invoke<void>('pin', { id, on }),
+  moveToProject: (id: string, projectId: string) => invoke<Conversation>('move_to_project', { id, projectId }),
+  answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>
+    invoke<void>('answer', { id, turnId, requestId, allow, always }),
+  approvePlan: (id: string, turnId: string, requestId: string, mode?: PermissionMode) => invoke<void>('approve_plan', { id, turnId, requestId, mode: mode ?? null }),
+  /** The person read the requests held back in a reply: it leaves the "needs you" list. */
+  parkedSeen: (id: string, turnId: string) => invoke<void>('parked_seen', { id, turnId }),
+  continueClosed: (id: string, turnId: string) => invoke<void>('continue_closed', { id, turnId }),
+  /** The choices for a question the assistant asked: each question's text to the label picked (several joined by a comma). */
+  answerQuestion: (id: string, turnId: string, requestId: string, answers: Record<string, string>) =>
+    invoke<void>('answer_question', { id, turnId, requestId, answers }),
+  searchMessages: (query: string, area: Area) => invoke<MessageSearch>('search_messages', { query, area }),
+  promptHistory: (conversationId: string | undefined, area: Area, projectId?: string, signal?: AbortSignal) => {
+    if (signal?.aborted) return Promise.resolve([]);
+    const requestId = crypto.randomUUID();
+    const args = { requestId, conversationId, area, projectId };
+    const cancel = () => { void invoke<string[]>('prompt_history', { ...args, cancel: true }).catch(() => {}); };
+    signal?.addEventListener('abort', cancel, { once: true });
+    return invoke<string[]>('prompt_history', args).finally(() => signal?.removeEventListener('abort', cancel));
+  },
+  rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
+  exportConversation: (id: string, words: { you: string; auto: string; attachments: string; files: string }) => invoke<boolean>('export_conversation', { id, words }),
+  showDamagedConversation: (id: string) => invoke<void>('show_damaged_conversation', { id }),
+  removeDamagedConversation: (id: string) => invoke<void>('remove_damaged_conversation', { id }),
+  /** Pending rewind recovery always refuses deletion; `discard` only overrides `error.copy.unsaved`. */
+  remove: (id: string, discard = false) => invoke<void>('remove', { id, discard }),
+  removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
+  editQueued: (id: string, turnId: string, text: string) => invoke<void>('edit_queued', { id, turnId, text }),
+  sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
+  childWords: (id: string, callId: string) => invoke<ChildWords[]>('child_words', { id, callId }),
+  childTranscript: (id: string, callId: string, page: number) => invoke<TranscriptEntry[]>('child_transcript', { id, callId, page }),
+  tellHelper: (id: string, callId: string, text: string) => invoke<void>('tell_helper', { id, callId, text }),
+  /** `@` in the composer: the working folder's entries that match `query`, at most 50; a new chat has none. */
+  mentions: (id: string | undefined, projectId: string | undefined, query: string) => invoke<Mention[]>('mentions', { id, projectId, query }),
+  commands: (id?: string, vendor?: Vendor) => invoke<Command[]>('commands', { id, vendor }),
+  compactNow: (id: string) => invoke<void>('compact_now', { id }),
+  contextParts: (id: string) => invoke<boolean>('context_parts', { id }),
+  changes: (id: string, cursor?: string) => invoke<ChangeList>('changes', { id, cursor }),
+  rewindPoints: (id: string) => invoke<RewindPoint[]>('rewind_points', { id }),
+  answerChanges: (id: string, messageId: string, offset = 0) => invoke<AnswerChanges>('answer_changes', { id, messageId, offset }),
+  answerChangePatch: (id: string, messageId: string, path: string, offset = 0) => invoke<AnswerChangePatch>('answer_change_patch', { id, messageId, path, offset }),
+  rewindRedos: (id: string) => invoke<RewindRedoInfo[]>('rewind_redos', { id }),
+  rewindRedoPreview: (request: RewindRedoRequest) => invoke<RewindPreview>('rewind_redo_preview', { request }),
+  rewindRecover: (id: string) => invoke<void>('rewind_recover', { id }),
+  rewindPreview: (request: RewindRequest) => invoke<RewindPreview>('rewind_preview', { request }),
+  rewindRestore: (request: RewindRequest) => invoke<RewindResult>('rewind_restore', { request }),
+  rewindRedo: (request: RewindRedoRequest) => invoke<RewindResult>('rewind_redo', { request }),
+  changePatch: (id: string, path: string) => invoke<ChangePatch>('change_patch', { id, path }),
+  /** A quick question on the side (R250); refused with an `error.aside.*` key, `error.quotaOut` or `error.billedPerUse`. */
+  askAside: (id: string, question: string, model?: string) => invoke<string>('ask_aside', { id, question, model }),
+  stopAside: (asideId: string) => invoke<void>('stop_aside', { asideId }),
+  asides: (id: string) => invoke<Aside[]>('asides', { id }),
+  clearAsides: (id: string) => invoke<void>('clear_asides', { id }),
+  unfollowPr: (id: string) => invoke<void>('unfollow_pr', { id }),
+  removeProject: (id: string) => invoke<void>('remove_project', { id }),
+  showProject: (id: string) => invoke<void>('show_project', { id }),
+  addProject: () => invoke<Project | null>('add_project'),
+  repointProject: (id: string, path?: string) => invoke<Project | null>('repoint_project', { id, path: path ?? null }),
+  dismissUncleanExit: () => invoke<void>('dismiss_unclean_exit'),
+  problemReport: (language: string, crash: boolean) => invoke<{ version: string; environment: string; url: string }>('problem_report', { language, crash }),
+  openLogFolder: () => invoke<string>('open_log_folder'),
+  chatFolder: (id: string | undefined, scratch = false, path?: string) =>
+    invoke<Conversation | null>('chat_folder', { id: id ?? null, scratch, path: path ?? null }),
+  recents: () => invoke<RecentsView>('recents'),
+  openFolders: (paths: string[]) => invoke<Project[]>('open_folders', { paths }),
+  forgetRecent: (path: string) => invoke<void>('forget_recent', { path }),
+  saveEnvironment: (name: string, folders: string[]) => invoke<void>('save_environment', { name, folders }),
+  forgetEnvironment: (id: string) => invoke<void>('forget_environment', { id }),
+  startEnvironment: (id: string) => invoke<Project[]>('start_environment', { id }),
+  previewLook: (appearance: Appearance) => invoke<Look>('preview_look', { appearance }),
+  hookList: () => invoke<HookPreview[]>('hook_list'),
+  saveSettings: (patch: Settings) => invoke<SavedSettings>('save_settings', { patch }),
+  storageUsage: () => invoke<StorageUsage>('storage_usage'),
+  storageChoice: () => invoke<StorageChoice>('storage_choice'),
+  storageChoose: (reset: boolean) => invoke<StorageChoice | null>('storage_choose', { reset }),
+  saveTheme: (appearance: Appearance, name: string) => invoke<boolean>('save_theme', { appearance, name }),
+  openTheme: () => invoke<ThemeFile | null>('open_theme'),
+  saveFile: (id: string, path: string) => invoke<boolean>('save_file', { id, path }),
+  showFile: (id: string, path: string) => invoke<void>('show_file', { id, path }),
+  readImage: (id: string, path: string) => invoke<string | null>('read_image', { id, path }),
+  mediaEnter: (id: string) => invoke<string>('media_enter', { id }),
+  mediaGrant: (id: string, path: string) => invoke<string>('media_grant', { id, path }),
+  mediaGrantWeb: (id: string, url: string) => invoke<string>('media_grant_web', { id, url }),
+  mediaRelease: (lease: string, url: string) => invoke<void>('media_release', { lease, url }),
+  mediaLeave: (lease: string) => invoke<void>('media_leave', { lease }),
+  readFileAt: (id: string, path: string) => invoke<FileView>('read_file_at', { id, path }),
+  /** Faber's browser pane (R161 step 7): over a box of the screen, off it, a page the person opens, a call's picture. */
+  sitePlace: (boxId: number, x: number, y: number, width: number, height: number) => invoke<boolean>('site_place', { load: LOAD, boxId, x, y, width, height }),
+  /** The page's corners: the box's radius over the colour of the card around it, as red, green and blue. */
+  siteRound: (radius: number, color: [number, number, number]) => invoke<void>('site_round', { radius, color }),
+  sitePark: (boxId: number) => invoke<void>('site_park', { load: LOAD, boxId }),
+  /** The screen sizes the pane can draw at and the one in use (none: the pane's own); with `pick`, `size` becomes it. */
+  siteSize: (pick: boolean, size?: string | null) =>
+    invoke<{ now: string | null; sizes: { name: string; screen: 'pc' | 'mac' | 'tablet' | 'phone'; width: number; height: number }[] }>('site_size', { pick, size: size ?? null }),
+  siteOpen: (id: string, url: string) => invoke<boolean>('site_open', { id, url }),
+  siteExtensionMode: (enabled: boolean) => invoke<boolean>('site_extensions_mode', { enabled }),
+  siteExtensions: (id: string, action: 'list' | 'pick' | 'reload' | 'remove', folder?: string) =>
+    invoke<{ name: string; version: string; folder: string; failed?: boolean }[]>('site_extensions', { id, action, folder }),
+  /** Back, forward or reload in Faber's browser, on that conversation's page only. */
+  siteStep: (id: string, step: 'back' | 'forward' | 'reload') => invoke<boolean>('site_step', { id, step }),
+  /** A conversation's tabs in Faber's browser, kept in its file (`engine-core/src/browser/tabs.rs`); null when it never had a page. */
+  siteTabs: (id: string) => invoke<SiteTabs | null>('site_tabs', { id }),
+  siteTab: (id: string, step: SiteTabStep, tab?: string) => invoke<{ tabs: SiteTabs; tab: string | null } | null>('site_tab', { id, step, tab: tab ?? null }),
+  siteGo: (id: string, url: string) => invoke<boolean>('site_go', { id, url }),
+  siteClear: (id: string) => invoke<void>('site_clear', { id }),
+  siteHistory: (id: string) => invoke<[boolean, boolean]>('site_history', { id }),
+  /** Pick mode on that conversation's page in view: with `on`, waits a few seconds for the person's pick (its words are
+   * masked by the host, the picture is a JPEG); without, ends it. */
+  sitePick: (id: string, on: boolean) => invoke<SitePick>('site_pick', { id, on }),
+  onSiteTabs: (listener: (id: string) => void) => listen<string>('faber:site-tabs', (e) => listener(e.payload)),
+  onSiteBusy: (listener: (busy: { conversation: string; tab: string; busy: boolean }) => void) =>
+    listen<{ conversation: string; tab: string; busy: boolean }>('faber:site-busy', (e) => listener(e.payload)),
+  onSiteKey: (listener: (key: string) => void) => listen<string>('faber:site-key', (e) => listener(e.payload)),
+  onSiteLoading: (listener: (loading: boolean) => void) => listen<boolean>('faber:site-loading', (e) => listener(e.payload)),
+  sitePicture: (id: string, call: string) => invoke<string | null>('site_picture', { id, call }),
+  /** Each project answer of a conversation that pictured its pages before and after it ran, by message id, in one read;
+   * `sitePicture` shows each picture by its name. */
+  answerPictures: (id: string) => invoke<Record<string, AnswerPage[]>>('answer_pictures', { id }),
+  /** A project conversation's rooms, read once per open of the map and once per answer end. */
+  projectRooms: (id: string) => invoke<Room[]>('project_rooms', { id }),
+  cookieProfiles: () => invoke<CookieProfile[]>('cookie_profiles'),
+  cookieSites: (profile: string) => invoke<{ ticket: string; sites: CookieSite[] }>('cookie_sites', { profile }),
+  cookieImport: (id: string, ticket: string, sites: string[]) => invoke<number>('cookie_import', { id, ticket, sites }),
+  cookieHeld: (id: string) => invoke<string[]>('cookie_held', { id }),
+  cookieForget: (id: string) => invoke<void>('cookie_forget', { id }),
+  /** Where the page in Faber's browser is now, at every page it finishes loading. */
+  onSite: (listener: (url: string) => void) => listen<string>('faber:site', (e) => listener(e.payload)),
+  openTerminal: (id: string) => invoke<boolean>('open_terminal', { id }),
+  openLink: (url: string) => invoke<void>('open_link', { url }),
+  setShellTexts: (texts: ShellTexts) => invoke<void>('set_shell_texts', { texts }),
+  answerPlan: (vendor: Vendor, plan: string) => invoke<void>('answer_plan', { vendor, plan }),
+  approveCredits: (id: string, turnId: string, vendor: Vendor) => invoke<void>('approve_credits', { id, turnId, vendor }),
+  moveTurn: (id: string, turnId: string) => invoke<void>('move_turn', { id, turnId }),
+  waitTurn: (id: string, turnId: string) => invoke<void>('wait_turn', { id, turnId }),
+  setClock: (utcOffset: number) => invoke<void>('set_clock', { utcOffset }),
+  /** Tells the engine whether the window is open and focused: it reads the quota every 5 minutes while open, every 15 while hidden, and at once on focus. */
+  quotaAttention: (visible: boolean, focused: boolean) => invoke<void>('quota_attention', { visible, focused }),
+  setupCheck: (vendor: Vendor) => invoke<CheckResult>('setup_check', { vendor }),
+  setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
+  setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),
+  /** The catalog's skills (R247) and whether each is installed; installing downloads it from its own repository. */
+  toolsInventory: (projectId?: string) => invoke<ToolInventoryList[]>('tools_inventory', { projectId }),
+  toolsList: () => invoke<ToolRow[]>('tools_list'),
+  toolsInstall: (id: string) => invoke<void>('tools_install', { id }),
+  /** Public directories, only on the person's submitted search and with live web search on. */
+  toolsSearch: (query: string) => invoke<OpenHit[]>('tools_search', { query }),
+  toolsPrepareReplacement: (id: string) => invoke<{ plan: unknown; from: string; to: string; enabled: boolean }>('tools_prepare_replacement', { id }),
+  toolsReplace: (plan: unknown) => invoke<void>('tools_replace', { plan }),
+  toolsClearRemoved: () => invoke<void>('tools_clear_removed'),
+  /** The catalog tools the conversation's agent has now, each with its job group; read once when the context panel opens. */
+  toolsInUse: (id: string) => invoke<[string, string][]>('tools_in_use', { id }),
+  toolsRestore: (id: string) => invoke<void>('tools_restore', { id }),
+  toolsSetEnabled: (id: string, enabled: boolean) => invoke<void>('tools_set_enabled', { id, enabled }),
+  toolsRemove: (id: string) => invoke<void>('tools_remove', { id }),
+  mcpServers: (projectId: string) => invoke<McpServerList[]>('mcp_servers', { projectId }),
+  setMcpServer: (projectId: string, name: string, enabled: boolean) => invoke<void>('set_mcp_server', { projectId, name, enabled }),
+  updateStatus: () => invoke<UpdateStatus>('update_status'),
+  /** The first frame is painted: the shell may show the window (it stays hidden until then). */
+  screenReady: () => invoke<string | null>('screen_ready'),
+  onShowConversation: (listener: (id: string) => void) => listen<string>('faber:show-conversation', (e) => listener(e.payload)),
+  updateCheck: () => invoke<UpdateStatus>('update_check'),
+  updateRestart: () => invoke<void>('update_restart'),
+  inputSeen: () => invoke<void>('input_seen'),
+  /** Whether any field holds something typed or attached and not sent: no unattended update closes the window then. */
+  draftDirty: (dirty: boolean) => invoke<void>('draft_dirty', { dirty }),
+  /** Whether a game or another full-screen app is in front of the window (always no on a test build and off Windows). */
+  gameInFront: () => invoke<boolean>('game_in_front'),
+  onUpdate: (listener: (status: UpdateStatus) => void) => listen<UpdateStatus>('faber:update', (e) => listener(e.payload)),
+  notesSeen: () => invoke<number | null>('notes_seen').then((id) => id ?? undefined),
+  saveNotesSeen: (id: number) => invoke<void>('save_notes_seen', { id }),
+  projectCopies: (projectId: string, on: boolean) => invoke<void>('project_copies', { projectId, on }),
+  projectProof: (projectId: string) => invoke<ProofView>('project_proof', { projectId }),
+  runAppStart: (id: string) => invoke<RunAppView>('run_app_start', { id }),
+  runAppConfirm: (id: string, seen: string) => invoke<RunAppView>('run_app_confirm', { id, seen }),
+  runAppStatus: (id: string) => invoke<RunAppView>('run_app_status', { id }),
+  runAppStop: (id: string) => invoke<RunAppView>('run_app_stop', { id }),
+  projectGoals: (projectId: string) => invoke<GoalsView>('project_goals', { projectId }),
+  projectGoalsAuto: (projectId: string, on: boolean) => invoke<GoalsView>('project_goals_auto', { projectId, on }),
+  projectGoalAdd: (projectId: string, words: string, check: string) => invoke<GoalsView>('project_goal_add', { projectId, words, check }),
+  projectGoalAddCrashes: (projectId: string, words: string) => invoke<GoalsView>('project_goal_add_crashes', { projectId, words }),
+  projectGoalRemove: (projectId: string, goalId: string) => invoke<GoalsView>('project_goal_remove', { projectId, goalId }),
+  projectGoalResume: (projectId: string, goalId: string) => invoke<GoalsView>('project_goal_resume', { projectId, goalId }),
+  projectMemory: (projectId: string) => invoke<MemoryList>('project_memory', { projectId }),
+  editProjectMemory: (projectId: string, edit: MemoryEdit) => invoke<void>('edit_project_memory', { projectId, edit }),
+  projectProofConfirm: (projectId: string, commands: string[], setup: string[], declared: string[]) =>
+    invoke<ProofView>('project_proof_confirm', { projectId, commands, setup, declared }),
+  on: (listener: (event: AppEvent) => void) => listen<AppEvent>('faber:event', (e) => listener(e.payload)),
+};
+
+/** The engine reports user-facing errors as translation keys; Tauri wraps them as plain strings. The look engine
+ * rejects with a `Failure` instead, so its error can name the field or the pairs. */
+export const failureOf = (err: unknown): Failure => {
+  if (typeof err === 'object' && err !== null && 'key' in err && typeof err.key === 'string') return err as Failure;
+  return { key: typeof err === 'string' ? err : err instanceof Error ? err.message : String(err) };
+};
+export const errorText = (err: unknown) => failureOf(err).key;

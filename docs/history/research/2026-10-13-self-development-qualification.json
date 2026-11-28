@@ -1,0 +1,19 @@
+﻿{
+    "schema":  1,
+    "measuredAt":  "2026-10-13T23:32:45.8155094-03:00",
+    "state":  "stopped",
+    "reason":  "protected resolved path",
+    "evidence":  "qualification-preflight-error.log",
+    "evidenceSha256":  "D4EAFF292411AA7973F4AB6A952562227340B8BEF0B9CC0D07DA570C9E83AF95",
+    "qualificationPassed":  false,
+    "cliVersion":  null,
+    "binaryHash":  null,
+    "modelTurns":  0,
+    "cliProcessesStarted":  null,
+    "codex":  "full qualification not performed; failed diagnostic did not retain vendor identity",
+    "restrictions":  "unproven",
+    "sessionLoadout":  "unobserved",
+    "invocationBoundMicros":  null,
+    "stopRule":  "No verified live invocation bound; protected installed binary cannot be fingerprinted under the owner rule",
+    "diagnosticLimit":  "The initial worker error did not preserve completed no-model version/account observations. No vendor-specific completion or process count is inferred."
+}

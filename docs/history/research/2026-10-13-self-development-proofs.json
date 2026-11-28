@@ -1,0 +1,134 @@
+﻿{
+    "phase-a":  [
+                    {
+                        "command":  "npm run lint",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:16:26.1473483-03:00",
+                        "seconds":  0.46233959999999996
+                    },
+                    {
+                        "command":  "npm run typecheck",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:16:26.6742981-03:00",
+                        "seconds":  0.74229349999999994
+                    },
+                    {
+                        "command":  "npm run build",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:16:27.4231639-03:00",
+                        "seconds":  1.4775942
+                    },
+                    {
+                        "command":  "cargo fmt --all --check",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:16:28.9017582-03:00",
+                        "seconds":  1.6003414999999999
+                    },
+                    {
+                        "command":  "cargo clippy --workspace --all-targets -- -D warnings",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:16:30.5031026-03:00",
+                        "seconds":  1.3055675
+                    },
+                    {
+                        "command":  "cargo clippy -p faber --features test-hooks -- -D warnings",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:16:31.8096694-03:00",
+                        "seconds":  1.1365448
+                    },
+                    {
+                        "command":  "cargo t --all",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:16:32.9482508-03:00",
+                        "seconds":  1144.2037295
+                    }
+                ],
+    "phase-b":  [
+                    {
+                        "command":  "npm run lint",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:39:44.4551309-03:00",
+                        "seconds":  0.4629272
+                    },
+                    {
+                        "command":  "npm run typecheck",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:39:44.9807347-03:00",
+                        "seconds":  0.7605223
+                    },
+                    {
+                        "command":  "npm run build",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:39:45.7485869-03:00",
+                        "seconds":  1.4662264999999999
+                    },
+                    {
+                        "command":  "cargo fmt --all --check",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:39:47.2158497-03:00",
+                        "seconds":  1.5940393
+                    },
+                    {
+                        "command":  "cargo clippy --workspace --all-targets -- -D warnings",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:39:48.8108905-03:00",
+                        "seconds":  1.8548673999999998
+                    },
+                    {
+                        "command":  "cargo clippy -p faber --features test-hooks -- -D warnings",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:39:50.6667872-03:00",
+                        "seconds":  1.1517781999999999
+                    },
+                    {
+                        "command":  "cargo t --all",
+                        "exit":  0,
+                        "started":  "2026-10-13T23:39:51.8195666-03:00",
+                        "seconds":  1065.9454445
+                    }
+                ],
+    "phase-c":  [
+                    {
+                        "command":  "npm run lint",
+                        "exit":  0,
+                        "started":  "2026-10-14T00:04:56.8323753-03:00",
+                        "seconds":  0.422711
+                    },
+                    {
+                        "command":  "npm run typecheck",
+                        "exit":  0,
+                        "started":  "2026-10-14T00:04:57.2691221-03:00",
+                        "seconds":  0.7269726
+                    },
+                    {
+                        "command":  "npm run build",
+                        "exit":  0,
+                        "started":  "2026-10-14T00:04:58.0134198-03:00",
+                        "seconds":  1.4536807999999999
+                    },
+                    {
+                        "command":  "cargo fmt --all --check",
+                        "exit":  0,
+                        "started":  "2026-10-14T00:04:59.4681310-03:00",
+                        "seconds":  1.6011891999999999
+                    },
+                    {
+                        "command":  "cargo clippy --workspace --all-targets -- -D warnings",
+                        "exit":  0,
+                        "started":  "2026-10-14T00:05:01.0703235-03:00",
+                        "seconds":  1.5869961
+                    },
+                    {
+                        "command":  "cargo clippy -p faber --features test-hooks -- -D warnings",
+                        "exit":  0,
+                        "started":  "2026-10-14T00:05:02.6593165-03:00",
+                        "seconds":  1.1276723
+                    },
+                    {
+                        "command":  "cargo t --all",
+                        "exit":  0,
+                        "started":  "2026-10-14T00:05:03.7880205-03:00",
+                        "seconds":  1065.8690255
+                    }
+                ]
+}

@@ -1,0 +1,963 @@
+//! Native browser proof: real UI input, observed child bounds and separate child-page captures.
+
+use super::{Result, Scenario, ensure, no_cli, same, start_settings};
+use crate::app::Ctx;
+use crate::page::css;
+use base64::Engine as _;
+use serde_json::{Value, json};
+use std::io::{Read, Write};
+use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+pub const NAME: &str = "browser pane: native navigation and placement within the memory budget";
+pub const PREVIEW: &str = "browser pane: baseline-compatible native preview photographs";
+pub const INTERRUPT: &str = "browser pane: closing during a view-width transition keeps the page visible without reversing travel";
+const OPEN_FAILURE: &str = "browser pane: baseline-compatible opening failure photograph";
+const CONVERSATION: &str = "5f1c0000-0000-4000-8000-0000000000b1";
+const OTHER_CONVERSATION: &str = "5f1c0000-0000-4000-8000-0000000000b2";
+
+// Frames never wait for native getters; two staggered pipelines replace each answer without a frame-clock gap.
+const CLOSE_SAMPLER: &str = r#"window.__sampleBrowserClose=duration=>new Promise((resolve,reject)=>{
+  const samples=[],probes=[],end=performance.now()+duration;
+  let stopped=false,frameId;
+  const stop=()=>{stopped=true;cancelAnimationFrame(frameId);clearTimeout(timeout);};
+  const fail=error=>{stop();reject(error);};
+  const timeout=setTimeout(()=>fail(new Error('browser close probes timed out')),5000);
+  const place=kind=>{
+    const column=document.querySelector('.runcol');
+    return {kind,t:performance.now(),x:column?.getBoundingClientRect().x,viewport:innerWidth,dpr:devicePixelRatio,
+      opacity:column?Number(getComputedStyle(column).opacity):null,exiting:column?.dataset.exiting==='true'};
+  };
+  const probe=async()=>{
+    while(!stopped && performance.now()<end && document.querySelector('.runcol')){
+      const sample=place('probe');samples.push(sample);
+      const native=await window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false,quick:true});
+      const after=place('answer');samples.push(after);
+      sample.afterX=after.x;sample.answered=after.t;sample.shown=native.shown;sample.nativeX=native.x;
+    }
+  };
+  const frame=()=>{
+    if(stopped)return;
+    samples.push(place('frame'));
+    if(probes.length<2 && performance.now()<end)probes.push(probe().catch(fail));
+    if(performance.now()<end)frameId=requestAnimationFrame(frame);
+    else Promise.all(probes).then(()=>{stop();resolve(samples);},fail);
+  };
+  // The capture listener runs before the close handler; this first probe cannot satisfy the exiting bracket.
+  probes.push(probe().catch(fail));
+  frameId=requestAnimationFrame(frame);
+})"#;
+
+pub fn scenarios() -> Vec<Scenario> {
+    vec![
+        Scenario { name: NAME, run: browser_pane },
+        Scenario { name: PREVIEW, run: preview_photos },
+        Scenario { name: INTERRUPT, run: interrupt_width },
+        Scenario { name: OPEN_FAILURE, run: failure_photo },
+        Scenario { name: "control walk: native browser tabs switch, reopen, overflow and close", run: tabs },
+        Scenario { name: "browser pane: German opening failure photograph", run: german_failure },
+        Scenario { name: "browser pane: German native preview photograph", run: german_preview },
+    ]
+}
+
+fn interrupt_width(ctx: &mut Ctx) -> Result {
+    let (mut app, fixture) = open_browser(ctx)?;
+    let page = &mut app.page;
+    page.eval(CLOSE_SAMPLER)?;
+    super::system_motion(page, false)?;
+    enter(page, &fixture.url("/one"))?;
+    wait_page(page, &fixture, "one")?;
+    for width in [1920, 1280, 720] {
+        resize(page, width, 800)?;
+        // Bounded metadata can perturb timing; it diagnoses preparation, not motion performance.
+        // Proposal: the first post-click frame reads layout too; it may perturb the failure and is not a motion proof.
+        page.eval(
+            r#"(() => {
+          window.__widthFinish?.(false);
+          const shell=document.querySelector('.shell'),root=document.documentElement;
+          const diagnostic=window.__widthDiagnostic={limit:48,dropped:0,records:[],perturbsTiming:true};
+          const record=(phase,extra={})=>{
+            if(diagnostic.records.length>=diagnostic.limit){diagnostic.dropped++;return;}
+            diagnostic.records.push({phase,t:performance.now(),root:root.className,motion:root.dataset.motion,
+              reduced:matchMedia('(prefers-reduced-motion: reduce)').matches,shell:shell?.className,
+              aside:document.querySelector('.pane-aside')?.getAttribute('aria-pressed'),
+              browser:document.querySelector('.pane-site')?.getAttribute('aria-pressed'),
+              widthInput:shell?.style.getPropertyValue('--run-w'),...extra});
+          };
+          const transitions=['transitionrun','transitionstart','transitioncancel','transitionend'];
+          const transition=event=>{
+            if(['width','grid-template-columns'].includes(event.propertyName))
+              record(event.type,{property:event.propertyName,target:event.target?.className});
+          };
+          let postClickFrame=0,finished=false;
+          const click=event=>{
+            const subject=event.target?.closest?.('.pane-aside,.pane-site,.site-head button');
+            record('click',{trusted:event.isTrusted,subject:subject?.className ?? null});
+            if(!subject?.matches('.pane-site'))return;
+            cancelAnimationFrame(postClickFrame);
+            postClickFrame=requestAnimationFrame(()=>{
+              if(finished)return;
+              const column=document.querySelector('.runcol'),style=shell && getComputedStyle(shell);
+              const colStyle=column && getComputedStyle(column);
+              const animations=shell?.getAnimations({subtree:true})
+                .filter(a=>a instanceof CSSTransition && ['width','grid-template-columns'].includes(a.transitionProperty))
+                .slice(0,4).map(a=>({property:a.transitionProperty,state:a.playState,time:a.currentTime,
+                  progress:a.effect?.getComputedTiming().progress}));
+              record('browser-click-frame',{durationInput:root.style.getPropertyValue('--dur-ui'),
+                easingInput:root.style.getPropertyValue('--ease'),grid:style?.gridTemplateColumns,property:style?.transitionProperty,
+                duration:style?.transitionDuration,columnWidth:colStyle?.width,
+                columnProperty:colStyle?.transitionProperty,columnDuration:colStyle?.transitionDuration,animations});
+            });
+          };
+          for(const type of transitions)shell?.addEventListener(type,transition);
+          document.addEventListener('click',click,true);
+          window.__widthRecord=record;
+          window.__widthFinish=failure=>{
+            finished=true;
+            cancelAnimationFrame(postClickFrame);
+            if(failure){
+              if(diagnostic.records.length>=diagnostic.limit){diagnostic.records.pop();diagnostic.dropped++;}
+              record('failure');
+              const column=document.querySelector('.runcol'),style=shell && getComputedStyle(shell);
+              const colStyle=column && getComputedStyle(column);
+              diagnostic.final={grid:style?.gridTemplateColumns,property:style?.transitionProperty,duration:style?.transitionDuration,
+                columnWidth:colStyle?.width,columnProperty:colStyle?.transitionProperty,columnDuration:colStyle?.transitionDuration};
+            }
+            for(const type of transitions)shell?.removeEventListener(type,transition);
+            document.removeEventListener('click',click,true);
+            window.__widthStopClose?.();
+            delete window.__widthStopClose;
+            delete window.__widthRecord;
+            delete window.__widthFinish;
+            return diagnostic;
+          };
+          return new Promise(resolve=>setTimeout(()=>{record('after-resize');resolve();},300));
+        })()"#,
+        )?;
+        // The page shows while the 220 ms transition runs, and a busy PC can answer the probe only after it is over: the
+        // observer then says it missed, and the aside and the browser switch again, at most three times.
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            if attempt > 1 {
+                page.eval("new Promise(resolve=>setTimeout(resolve,300))")?;
+            }
+            if width < 900 {
+                // The overlay makes its header inert; use the person's actual pane-switching shortcuts.
+                for kind in ["keyDown", "keyUp"] {
+                    page.cdp.call(
+                        "Input.dispatchKeyEvent",
+                        json!({"type":kind,"key":";","code":"Semicolon","windowsVirtualKeyCode":186,"modifiers":2}),
+                    )?;
+                }
+            } else {
+                page.click(&css(".pane-aside"))?;
+            }
+            // Close through the real control in the observed frame; protocol round trips can outlast the 220 ms transition.
+            // Pointer closing is covered separately; this programmatic interruption leaves the product's clock unchanged.
+            page.eval(r#"(() => {
+          const shell=document.querySelector('.shell');
+          window.__widthRecord('after-aside');
+          // The layered shell settles the width in one step: what moves is the column's own entrance and the views' cross-fade.
+          const active=()=>(document.querySelector('.runcol')?.getAnimations({subtree:true})??[]).filter(a=>a.playState==='running' && a.effect.getComputedTiming().progress>0 && a.effect.getComputedTiming().progress<1).map(a=>({property:a.transitionProperty??a.animationName??'animate',time:a.currentTime}));
+          window.__interruptPreparation={events:[]};
+          window.__interruptClick=null;
+          window.__interruptMissed=false;
+          window.__interruptX=undefined;
+          let pending=false;
+          const observe=()=>{
+            window.__interruptPreparation.events.push({property:'view',t:performance.now()});
+            if(pending || window.__interruptClick)return;
+            pending=true;
+            const until=performance.now()+1000;
+            const close=async()=>{
+              const native=await window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false,quick:true});
+              window.__interruptPreparation.native={shown:native.shown,x:native.x,t:performance.now()};
+              const column=document.querySelector('.runcol');
+              const button=column?.querySelector('.site-head button[aria-label="Close the running list"]');
+              // The layered shell settles the column's width in one step: close once it has stopped moving sideways, while its entrance still runs.
+              const x=column?.getBoundingClientRect().x,steady=window.__interruptX!==undefined&&Math.abs(x-window.__interruptX)<0.5;
+              window.__interruptX=x;
+              const moving=active(),rect=button?.getBoundingClientRect();
+              window.__widthRecord?.('close-subject',{moving,shown:native.shown,nativeX:native.x,
+                connected:!!button?.isConnected,disabled:button?.disabled,inert:!!button?.closest('[inert]'),
+                buttonWidth:rect?.width,buttonHeight:rect?.height});
+              if(!steady || !native.shown || native.x<=-10000 || !moving.length || !button?.isConnected || button.disabled || button.closest('[inert]') || !rect?.width || !rect.height){
+                if(performance.now()<until)requestAnimationFrame(close);
+                else{watcher.disconnect();window.__interruptMissed=true;}
+                return;
+              }
+              watcher.disconnect();
+              button.addEventListener('click',event=>{
+                window.__interruptClick={active:active(),trusted:event.isTrusted,glide:shell.classList.contains('glide'),native:window.__interruptPreparation.native,x:column.getBoundingClientRect().x,t:performance.now()};
+                window.__interruptDone=window.__sampleBrowserClose(650);
+              },{once:true,capture:true});
+              button.click();
+            };
+            requestAnimationFrame(close);
+          };
+          const watcher=new MutationObserver(()=>{if(document.querySelector('.runcol')?.children.length)observe();});
+          watcher.observe(shell,{childList:true,subtree:true});
+          window.__widthStopClose=()=>watcher.disconnect();
+          window.__widthRecord('listener-installed');
+          window.__widthRecord('before-browser');
+        })()"#)?;
+            // The observer is armed; two frames prove the frame clock runs before the click it has to see.
+            let ticking = page.eval("new Promise(resolve=>{const late=setTimeout(()=>resolve(false),2000);requestAnimationFrame(()=>requestAnimationFrame(()=>{clearTimeout(late);resolve(true);}));})")?;
+            ensure(ticking == json!(true), || format!("no frame before the click at {width}px"))?;
+            if width < 900 {
+                page.press("Control+Shift+B")?;
+            } else {
+                page.click(&css(".pane-site"))?;
+            }
+            // A screen that draws no frame after the click can run no transition: say that, instead of waiting 15 s for one.
+            let framed = page.eval("new Promise(resolve=>{const late=setTimeout(()=>resolve(false),2000);requestAnimationFrame(()=>{clearTimeout(late);resolve(true);});})")?;
+            if framed != json!(true) {
+                let state = page
+                    .eval("({preparation:window.__interruptPreparation,viewport:innerWidth,widthDiagnostic:window.__widthFinish(true)})")
+                    .unwrap_or(Value::Null);
+                return Err(format!("no frame after the click at {width}px; observed preparation: {state}"));
+            }
+            let state = "({preparation:window.__interruptPreparation,click:window.__interruptClick,shell:document.querySelector('.shell')?.className,viewport:innerWidth,widthDiagnostic:window.__widthFinish(true)})";
+            if let Err(error) = page.wait_for(
+                "the browser to close in an observed intermediate width frame",
+                "!!window.__interruptClick || window.__interruptMissed",
+            ) {
+                return Err(format!("{error}; observed preparation: {}", page.eval(state).unwrap_or(Value::Null)));
+            }
+            if page.eval("!!window.__interruptClick")? == json!(true) {
+                break;
+            }
+            if attempt == 3 {
+                return Err(format!(
+                    "the page was never shown during a running width transition, {attempt} tries at {width}px; observed preparation: {}",
+                    page.eval(state).unwrap_or(Value::Null)
+                ));
+            }
+        }
+        page.wait_for("the interrupted pane to release its actual content", "!document.querySelector('.site-address')")?;
+        let clicked = page.eval("window.__interruptClick")?;
+        ensure(
+            clicked["trusted"] == false
+                && clicked["glide"] == true
+                && clicked["native"]["shown"] == true
+                && clicked["active"].as_array().is_some_and(|a| !a.is_empty()),
+            || format!("the programmatic close missed an actual width transition: {clicked}"),
+        )?;
+        let trace = page.eval("window.__interruptDone")?;
+        let preparation = page.eval("({...window.__interruptPreparation,widthDiagnostic:window.__widthFinish(false)})")?;
+        std::fs::create_dir_all(&ctx.paths.shots).map_err(|e| e.to_string())?;
+        std::fs::write(
+            ctx.paths.shots.join(format!("browser-interrupted-close-{width}.json")),
+            json!({"preparation":preparation,"click":clicked,"samples":trace}).to_string(),
+        )
+        .map_err(|e| e.to_string())?;
+        let samples = trace.as_array().ok_or("the interrupted close omitted its samples")?;
+        let departing: Vec<_> = samples
+            .iter()
+            .filter(|s| {
+                s["exiting"] == true
+                    && s["t"].as_f64().zip(clicked["t"].as_f64()).is_some_and(|(sample, click)| sample >= click)
+                    && s["x"].as_f64().is_some_and(|x| x + 24.0 < f64::from(width))
+            })
+            .collect();
+        ensure(departing.iter().filter(|s| s["kind"] == "frame").count() >= 2, || {
+            format!("fewer than two visible departing frames: {trace}")
+        })?;
+        ensure(samples.iter().filter_map(|s| s["opacity"].as_f64()).all(|opacity| opacity >= 0.99), || {
+            format!("the pane faded during its interrupted close: {trace}")
+        })?;
+        ensure(departing.iter().any(|s| s["afterX"].as_f64().is_some_and(|x| x + 24.0 < f64::from(width))), || {
+            format!("no native answer bracketed a visible departing column: {trace}")
+        })?;
+        ensure(
+            departing
+                .iter()
+                .filter(|s| s["afterX"].as_f64().is_some_and(|x| x + 24.0 < f64::from(width)))
+                .all(|s| s["shown"] == true && s["nativeX"].as_f64().is_some_and(|x| x > -10000.0)),
+            || format!("the native page disappeared while its moving column was visible: {trace}"),
+        )?;
+        // The width settles in one step, possibly just after the click: travel is judged from where the exit begins.
+        let mut previous = departing.first().and_then(|s| s["x"].as_f64()).ok_or("no departing frame carried the column's position")?;
+        for sample in &departing {
+            let x = sample["x"].as_f64().ok_or("departing column omitted its position")?;
+            ensure(x >= previous - 2.0, || format!("the exiting pane reversed from {previous:.1}px to {x:.1}px: {trace}"))?;
+            previous = x;
+        }
+        page.wait_for(
+            "the interrupted native page to park",
+            "window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(p=>!p.shown)",
+        )?;
+        std::fs::write(ctx.paths.target.join(format!("browser-interrupted-close-{width}.json")), trace.to_string())
+            .map_err(|e| e.to_string())?;
+        page.click(&css(".pane-site"))?;
+        wait_page(page, &fixture, "one")?;
+        ctx.notes.push(format!("programmatic close during an observed real view-width transition at {width}px (try {attempt}): {} observations; native page retained while visible, opaque exit, cleanup and reopening checked; no clock or motion-class changes", samples.len()));
+    }
+    ctx.close(app.id)
+}
+
+fn failure_photo(ctx: &mut Ctx) -> Result {
+    failure_in(ctx, "en", 1280)
+}
+
+fn tabs(ctx: &mut Ctx) -> Result {
+    let (mut app, fixture) = open_browser(ctx)?;
+    let page = &mut app.page;
+    enter(page, &fixture.url("/one"))?;
+    wait_page(page, &fixture, "one").map_err(|e| format!("initial tab: {e}"))?;
+    page.click(&css(".site-new"))?;
+    wait_tabs(page, 2)?;
+    enter(page, &fixture.url("/two"))?;
+    wait_page(page, &fixture, "two")?;
+    page.click(&css(".site-tab:first-child .site-tab-go"))?;
+    wait_page(page, &fixture, "one").map_err(|e| format!("click first tab: {e}"))?;
+    page.press_on(&css(".site-address"), "Control+Tab")?;
+    wait_page(page, &fixture, "two")?;
+    page.click(&css(".site-tab.front .site-tab-close"))?;
+    wait_tabs(page, 1)?;
+    wait_page(page, &fixture, "one").map_err(|e| format!("close second tab: {e}"))?;
+    page.press_on(&css(".site-address"), "Control+t")?;
+    wait_tabs(page, 2)?;
+    enter(page, &fixture.url("/two"))?;
+    wait_page(page, &fixture, "two")?;
+    page.press_on(&css(".site-address"), "Control+Shift+Tab")?;
+    wait_page(page, &fixture, "one").map_err(|e| format!("previous tab shortcut: {e}"))?;
+    page.press_on(&css(".site-address"), "Control+Tab")?;
+    wait_page(page, &fixture, "two")?;
+    page.right_click(&css(".site-tab.front .site-tab-go"))?;
+    let close_others = page.named("menuitem", "site.closeOthers")?;
+    page.click(&close_others)?;
+    wait_tabs(page, 1)?;
+    wait_page(page, &fixture, "two")?;
+    page.press_on(&css(".site-address"), "Control+t")?;
+    wait_tabs(page, 2)?;
+    enter(page, &fixture.url("/one"))?;
+    wait_page(page, &fixture, "one").map_err(|e| format!("navigate new tab: {e}"))?;
+    page.press_on(&css(".site-address"), "Control+w")?;
+    wait_tabs(page, 1)?;
+    wait_page(page, &fixture, "two")?;
+    page.press_on(&css(".site-address"), "Control+Shift+t")?;
+    wait_tabs(page, 2)?;
+    wait_page(page, &fixture, "one").map_err(|e| format!("restore closed tab: {e}"))?;
+    page.wait_visible(&css(".site-tab.front .site-tab-go"))?;
+    let at = page.eval("(() => { const r=document.querySelector('.site-tab.front .site-tab-go').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")?;
+    for kind in ["mousePressed", "mouseReleased"] {
+        page.cdp.call(
+            "Input.dispatchMouseEvent",
+            json!({"type":kind,"button":"middle","buttons":if kind=="mousePressed" {4}else{0},"clickCount":1,"x":at["x"],"y":at["y"]}),
+        )?;
+    }
+    wait_tabs(page, 1)?;
+    wait_page(page, &fixture, "two")?;
+    // The overflow menu uses retained titles; wait for this native page title before moving it into the background.
+    page.wait_visible(&css(".site-tab.front .site-tab-go").has_text("Native fixture two"))?;
+    for count in 2..=12 {
+        page.click(&css(".site-new"))?;
+        wait_tabs(page, count)?;
+        let response = fixture.request_count("/one") + 1;
+        enter(page, &fixture.url("/one"))?;
+        wait_page_load(page, &fixture, "one", response)?;
+    }
+    let all_tabs = page.named("button", "site.allTabs")?;
+    page.click(&all_tabs)?;
+    page.click(&css("[role=menuitem]").has_text("Native fixture two"))?;
+    wait_page(page, &fixture, "two")?;
+    ctx.shot(&mut app, "control-browser-tabs-overflow")?;
+    app.page.right_click(&css(".site-tab.front .site-tab-go"))?;
+    app.page.click(&close_others)?;
+    wait_tabs(&mut app.page, 1)?;
+    wait_page(&mut app.page, &fixture, "two")?;
+    app.page.click(&css(".site-tab.front .site-tab-close"))?;
+    app.page.wait_gone(&css(".site-address"))?;
+    app.page.wait_for(
+        "the last tab to release the native page",
+        "window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false,quick:true}).then(p=>p.shown===false && p.width == null)",
+    )?;
+    ensure(ctx.records()?.is_empty(), || "the browser-tab control walk started a CLI".into())?;
+    ctx.close(app.id)
+}
+
+fn wait_tabs(page: &mut crate::page::Page, count: usize) -> Result {
+    page.wait_for("the real browser tab count", &format!("document.querySelectorAll('.site-tab').length==={count}"))
+}
+
+fn german_failure(ctx: &mut Ctx) -> Result {
+    failure_in(ctx, "de", 720)
+}
+
+fn failure_in(ctx: &mut Ctx, language: &str, width: u32) -> Result {
+    let (mut app, fixture) = open_browser_in(ctx, language)?;
+    // A no-op native size change emits no resize event.
+    if app.page.eval(&format!("innerWidth==={width} && innerHeight===800"))? == json!(true) {
+        let initial_width = if width == 720 { 1280 } else { 720 };
+        app.page.eval(&format!("window.__TAURI_INTERNALS__.invoke('test_host_size',{{width:{initial_width},height:800}})"))?;
+        app.page.wait_for("the initial host size before opening a page", &format!("innerWidth==={initial_width} && innerHeight===800"))?;
+    }
+    // Observe this synthetic field across resizing without replacing the native bridge's read-only functions.
+    app.page.eval(
+        r#"(() => {
+        const trace = window.__browserRetryTrace = [];
+        const record = (entry) => { if (trace.length < 80) trace.push(entry); };
+        const fields = new WeakMap();
+        let nextField = 0;
+        const fieldState = field => {
+            if (!field) return {};
+            if (!fields.has(field)) fields.set(field, ++nextField);
+            return {field:fields.get(field), value:field.value, connected:field.isConnected,
+                focused:document.activeElement===field};
+        };
+        const current = () => fieldState(document.querySelector('.site-address'));
+        record({type:'start', width:innerWidth, ...current()});
+        window.addEventListener('resize', () => record({type:'resize', width:innerWidth, ...current()}));
+        for (const type of ['input', 'keydown', 'keyup', 'focusin', 'focusout']) {
+            document.addEventListener(type, e => {
+                if (!e.target?.matches?.('.site-address')) return;
+                record({type, key:e.key, trusted:e.isTrusted, ...fieldState(e.target)});
+            }, true);
+        }
+        return true;
+    })()"#,
+    )?;
+    // The address is typed before the resize: crossing the docking width draws the pane again, and the words must stay.
+    let url = fixture.url("/one");
+    app.page.fill(&css(".site-address"), &url)?;
+    app.page.eval("window.__typedField=document.querySelector('.site-address'); true")?;
+    app.page.eval(&format!("window.__TAURI_INTERNALS__.invoke('test_host_size',{{width:{width},height:800}})"))?;
+    // Native dimensions can change before resize remounts the column and its address field.
+    app.page
+        .wait_for(
+            "the host resize event and its new address field",
+            &format!(
+                "innerWidth==={width} && innerHeight===800 && window.__browserRetryTrace.some(e=>e.type==='resize' && e.width==={width})"
+            ),
+        )
+        .map_err(|error| format!("{error}; resize trace: {:?}", app.page.eval("window.__browserRetryTrace")))?;
+    settle_address(&mut app.page)?;
+    let kept = app.page.eval(
+        "(() => { const f=document.querySelector('.site-address'); return {value:f.value,focused:document.activeElement===f,replaced:window.__typedField!==f}; })()",
+    )?;
+    // Down to 720 px the column leaves its docked place, so the field is drawn again; a wider size may keep it.
+    ensure(width >= 900 || kept["replaced"] == true, || {
+        format!("the resize to {width}px did not draw the pane again, so nothing was proven: {kept}")
+    })?;
+    ensure(kept["value"] == json!(url) && kept["focused"] == true, || {
+        format!("the resize lost the typed address: {kept}; address trace: {:?}", app.page.eval("window.__browserRetryTrace"))
+    })?;
+    ctx.notes.push(format!("typed address across the resize to {width}px: {kept}"));
+    // A failed native open is injected at the command boundary, not presented as a real network failure.
+    app.page.eval("window.__TAURI_INTERNALS__.invoke('test_site_refuse_once')")?;
+    app.page.press_on(&css(".site-address"), "Enter")?;
+    let failed = app.page.text_of("site.openFailed")?;
+    app.page.wait_visible(&css("#running").role("alert", &failed).exact()).map_err(|error| {
+        format!(
+            "{error}; opening state: {:?}; address trace: {:?}",
+            app.page.eval("({address:document.querySelector('.site-address')?.value,alert:document.querySelector('#running [role=alert]')?.textContent})"),
+            app.page.eval("window.__browserRetryTrace")
+        )
+    })?;
+    app.page.eval("document.fonts.ready.then(()=>true)")?;
+    app.page.wait_for(
+        "the error composition to stop moving",
+        "(() => { document.body.getBoundingClientRect(); return document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity || a.playState!=='running'); })()",
+    )?;
+    ctx.shot(&mut app, &format!("browser-open-error-{language}-{width}"))?;
+    enter(&mut app.page, &fixture.url("/one"))?;
+    if let Err(error) = wait_page(&mut app.page, &fixture, "one") {
+        let state = app.page.eval("window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(native=>({native,address:document.querySelector('.site-address')?.value,alert:document.querySelector('#running [role=alert]')?.textContent,empty:!!document.querySelector('.site-empty')}))");
+        let trace = app.page.eval("window.__browserRetryTrace");
+        return Err(format!(
+            "{error}; retry state: {state:?}; address trace: {trace:?}; fixture requests: {:?}; {}",
+            fixture.diagnostics(),
+            ctx.stderr(app.id)
+        ));
+    }
+    app.page.wait_gone(&css("#running [role=alert]"))?;
+    ctx.notes.push(format!("synthetic browser retry address trace: {}", app.page.eval("window.__browserRetryTrace")?));
+    ctx.notes.push("one native open was deliberately refused; the same address retried successfully without a second refusal".into());
+    ctx.close(app.id)
+}
+
+fn open_browser(ctx: &mut Ctx) -> Result<(crate::app::Opened, Fixture)> {
+    open_browser_in(ctx, "en")
+}
+
+fn open_browser_in(ctx: &mut Ctx, language: &str) -> Result<(crate::app::Opened, Fixture)> {
+    start_settings(ctx, language)?;
+    super::shell::seed_project(ctx, "Browser proof")?;
+    super::shell::seed(ctx, CONVERSATION, "Browser proof", Some("demo"), 1_790_000_000_000)?;
+    super::shell::seed(ctx, OTHER_CONVERSATION, "Other fixture", Some("demo"), 1_790_000_000_100)?;
+    let fixture = Fixture::start()?;
+    let mut app = ctx.launch(no_cli())?;
+    let projects = app.page.named("button", "area.projects")?;
+    app.page.click(&projects)?;
+    app.page.click(&css(".prow .item").has_text("Browser proof"))?;
+    app.page.click(&css(".proj-chats .item").has_text("Browser proof"))?;
+    app.page.wait_visible(&css("article").has_text("Browser proof: the answer"))?;
+    app.page.click(&css(".pane-site"))?;
+    app.page.wait_visible(&css(".site-address"))?;
+    Ok((app, fixture))
+}
+
+// The same UI actions run on the version before the preview notice; no assertion depends on that notice.
+fn preview_photos(ctx: &mut Ctx) -> Result {
+    let (mut app, fixture) = open_browser(ctx)?;
+    enter(&mut app.page, &fixture.url("/one"))?;
+    wait_page(&mut app.page, &fixture, "one")?;
+    select_preview(&mut app.page)?;
+    for (width, height) in [(1280, 800), (720, 800), (1920, 1080)] {
+        resize(&mut app.page, width, height)?;
+        ctx.shot(&mut app, &format!("browser-preview-{width}"))?;
+        let child = probe(&mut app.page, true)?;
+        save_picture(ctx, &child, &format!("browser-preview-child-{width}.png"))?;
+    }
+    ctx.close(app.id)
+}
+
+fn german_preview(ctx: &mut Ctx) -> Result {
+    let (mut app, fixture) = open_browser_in(ctx, "de")?;
+    enter(&mut app.page, &fixture.url("/one"))?;
+    wait_page(&mut app.page, &fixture, "one")?;
+    select_preview(&mut app.page)?;
+    resize(&mut app.page, 720, 800)?;
+    ctx.shot(&mut app, "browser-preview-de-720")?;
+    ctx.close(app.id)
+}
+
+fn select_preview(page: &mut crate::page::Page) -> Result {
+    page.click(&css(".site-more"))?;
+    page.wait_for(
+        "the menu to park the native page it covers",
+        "window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(p=>p.shown===false && p.x < -10000)",
+    )?;
+    let size_label = page.text_with("site.screenSize", &json!({"size":""}), None)?;
+    page.click(&css("[role=menuitem]").has_text(size_label.trim()))?;
+    page.click(&css("[role=menuitem]").has_text("1920 × 1080"))
+}
+
+/// The column keeps drawing after the window's resize event: wait until the address field is the same element, at the same
+/// place and width, on two frames in a row, inside the new window.
+fn settle_address(page: &mut crate::page::Page) -> Result {
+    page.wait_for(
+        "the address field to settle after the resize",
+        "new Promise(resolve=>{const first=document.querySelector('.site-address'),before=first?.getBoundingClientRect();requestAnimationFrame(()=>requestAnimationFrame(()=>{const field=document.querySelector('.site-address'),now=field?.getBoundingClientRect();resolve(!!field && field===first && now.width>0 && now.width===before.width && now.left===before.left && now.right<=innerWidth);}));})",
+    )
+}
+
+fn resize(page: &mut crate::page::Page, width: u32, height: u32) -> Result {
+    page.eval(&format!("window.__TAURI_INTERNALS__.invoke('test_host_size', {{width:{width},height:{height}}})"))?;
+    page.wait_for("the real window to reach its requested size", &format!("innerWidth === {width} && innerHeight === {height}"))?;
+    page.wait_for(
+        "the child WebView2 to align with the resized site box",
+        "window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(p => { const r=document.querySelector('.site-view').getBoundingClientRect(),d=devicePixelRatio; return p.shown && Math.abs(p.x-r.left*d)<=2 && Math.abs(p.y-r.top*d)<=2 && Math.abs(p.width-r.width*d)<=2 && Math.abs(p.height-r.height*d)<=2; })",
+    )
+}
+
+fn browser_pane(ctx: &mut Ctx) -> Result {
+    let (mut app, fixture) = open_browser(ctx)?;
+    let page = &mut app.page;
+    page.eval(CLOSE_SAMPLER)?;
+    page.eval("localStorage.setItem('faber.browser-proof.host','keep-host-marker'); true")?;
+    super::system_motion(page, false)?;
+    let started = Instant::now();
+    let cpu_start = ctx.cpu_ms(app.id)?;
+    let mut sampled_peak = 0.0;
+
+    ensure(
+        page.eval(
+            "window.__TAURI_INTERNALS__.invoke('test_host_size',{width:1,height:1}).then(()=>false,e=>String(e).includes('outside'))",
+        )? == true,
+        || "invalid test host dimensions were not refused".into(),
+    )?;
+
+    enter(page, &fixture.url("/one"))?;
+    wait_page_load(page, &fixture, "one", 1).map_err(|error| format!("{error}; {}", ctx.stderr(app.id)))?;
+    wait_storage(page, "storage: written")?;
+    let one = probe(page, true)?;
+    same(one["private"].clone(), json!(true), "the observed browser profile must remain InPrivate")?;
+    save_picture(ctx, &one, "browser-pane-one.png")?;
+    sample_memory(ctx, app.id, &mut sampled_peak)?;
+    enter(page, &fixture.url("/two"))?;
+    wait_page_load(page, &fixture, "two", 1)?;
+    wait_storage(page, "storage: synthetic-conversation-one")?;
+    let two = probe(page, true)?;
+    save_picture(ctx, &two, "browser-pane-two.png")?;
+    ensure(one["picture"] != two["picture"], || "child screenshots for /one and /two were identical".into())?;
+    sample_memory(ctx, app.id, &mut sampled_peak)?;
+
+    page.wait_enabled(&css(".site-back"))
+        .map_err(|error| format!("{error}; native history: {}", probe(page, false).unwrap_or(Value::Null)))?;
+    page.click(&css(".site-back"))?;
+    wait_page(page, &fixture, "one")?;
+    page.wait_enabled(&css(".site-forward"))?;
+    page.click(&css(".site-forward"))?;
+    wait_page(page, &fixture, "two")?;
+    // At 1280 px the browser folds the sidebar away; close it before choosing another conversation.
+    page.click(&css(".site-head button[aria-label='Close the running list']"))?;
+    page.wait_gone(&css(".site-address"))?;
+    page.wait_visible(&css(".proj-chats .item").has_text("Other fixture"))?;
+    page.click(&css(".proj-chats .item").has_text("Other fixture"))?;
+    page.wait_visible(&css("article").has_text("Other fixture: the answer"))?;
+    page.wait_gone(&css(".site-address"))?;
+    page.click(&css(".pane-site"))?;
+    page.wait_visible(&css(".site-address"))?;
+    let next_load = fixture.request_count("/two") + 1;
+    enter(page, &fixture.url("/two"))?;
+    wait_page_load(page, &fixture, "two", next_load)?;
+    wait_storage(page, "storage: absent")?;
+    let other = probe(page, false)?;
+    same(other["owner"].clone(), json!(OTHER_CONVERSATION), "the new pane belongs to the selected conversation")?;
+    same(other["private"].clone(), json!(true), "the replacement browser remains InPrivate")?;
+    same(
+        page.eval("localStorage.getItem('faber.browser-proof.host')")?,
+        json!("keep-host-marker"),
+        "private-pane replacement preserves the host's synthetic storage",
+    )?;
+    ctx.notes.push("same-origin synthetic localStorage survived navigation within one conversation, was absent in the second conversation, and the main screen's independent synthetic marker remained; no real profile or credentials were read".into());
+    let reload_count = fixture.request_count("/two") + 1;
+    page.click(&css(".site-reload"))?;
+    wait_page_load(page, &fixture, "two", reload_count)?;
+
+    select_preview(page)?;
+    page.wait_visible(&css(".site-preview:has(.site-fit)"))?;
+    page.wait_for("the native page to finish applying its selected viewport",
+        "window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(p => p.shown && p.page?.width===1920 && p.page?.height===1080)")?;
+    let sized = probe(page, false)?;
+    same(sized["page"]["width"].clone(), json!(1920), "the selected native browser page width")?;
+    same(sized["page"]["height"].clone(), json!(1080), "the selected native browser page height")?;
+    page.click(&css(".site-fit"))?;
+    page.wait_gone(&css(".site-preview:has(.site-fit)"))?;
+
+    page.click(&css(".site-wide"))?;
+    page.wait_for("the browser column to widen", "document.querySelector('.runcol')?.classList.contains('wide')")?;
+    page.click(&css(".site-wide"))?;
+    page.wait_for("the browser column to return", "!document.querySelector('.runcol')?.classList.contains('wide')")?;
+
+    for (width, height) in [(720, 800), (1280, 800), (1920, 1080)] {
+        resize(page, width, height)?;
+        let bounds = page.eval("(() => { const r=document.querySelector('.site-view').getBoundingClientRect(); const d=devicePixelRatio; return {x:r.left*d,y:r.top*d,width:r.width*d,height:r.height*d,dpr:d}; })()")?;
+        let native = probe(page, false)?;
+        same(native["shown"].clone(), json!(true), "child remains shown at every physical window size")?;
+        for (key, wanted) in [
+            ("x", bounds["x"].as_f64().unwrap_or_default()),
+            ("y", bounds["y"].as_f64().unwrap_or_default()),
+            ("width", bounds["width"].as_f64().unwrap_or_default()),
+            ("height", bounds["height"].as_f64().unwrap_or_default()),
+        ] {
+            let actual = native[key].as_f64().ok_or_else(|| format!("native probe omitted {key}: {native}"))?;
+            ensure((actual - wanted).abs() <= 2.0, || {
+                format!("at {width}×{height}, native {key}={actual:.1}px but site box × DPR is {wanted:.1}px")
+            })?;
+        }
+        ctx.notes.push(format!(
+            "native browser placement at {width}×{height} logical px: child rect {:.0},{:.0} {:.0}×{:.0} physical px; screen DPR {:.2}",
+            native["x"].as_f64().unwrap_or_default(),
+            native["y"].as_f64().unwrap_or_default(),
+            native["width"].as_f64().unwrap_or_default(),
+            native["height"].as_f64().unwrap_or_default(),
+            bounds["dpr"].as_f64().unwrap_or(1.0)
+        ));
+    }
+
+    for width in [720, 1920] {
+        resize(page, width, 800)?;
+        // Native resize intentionally suppresses travel for 250 ms; exercise a close after that resize has settled.
+        page.eval("new Promise(resolve=>setTimeout(resolve,300))")?;
+        reopen_snapshot(ctx, page, width, "before")?;
+        page.eval(
+            r#"(() => {
+          window.__browserCloseTrace=null;
+          document.querySelector(".site-head button[aria-label='Close the running list']")
+            .addEventListener('click',()=>{
+          window.__browserCloseTrace=window.__sampleBrowserClose(800);
+            },{once:true,capture:true});
+          return true;
+        })()"#,
+        )?;
+        page.click(&css(".site-head button[aria-label='Close the running list']"))?;
+        page.wait_gone(&css(".site-address"))?;
+        let trace = page.eval("window.__browserCloseTrace")?;
+        let samples = trace.as_array().ok_or("native browser close trace was not an array")?;
+        let visible: Vec<_> = samples
+            .iter()
+            .filter(|sample| {
+                sample["exiting"] == true
+                    && sample["x"].as_f64().is_some_and(|x| {
+                        x + 24.0 < sample["viewport"].as_f64().unwrap_or_default()
+                            && sample["afterX"].as_f64().is_some_and(|after| after + 24.0 < sample["viewport"].as_f64().unwrap_or_default())
+                    })
+            })
+            .collect();
+        ensure(!visible.is_empty(), || format!("no visible close sample captured at {width}px: {trace}"))?;
+        ensure(visible.iter().all(|sample| sample["shown"] == true && sample["nativeX"].as_f64().is_some_and(|x| x > -10000.0)), || {
+            format!("native page parked while its departing column was still visible at {width}px: {trace}")
+        })?;
+        let xs: Vec<f64> = samples
+            .iter()
+            .filter(|sample| sample["exiting"] == true && sample["shown"] == true)
+            .filter_map(|sample| sample["nativeX"].as_f64())
+            .filter(|x| *x > -10000.0)
+            .collect();
+        let left = xs.iter().copied().fold(f64::INFINITY, f64::min);
+        let right = xs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let intermediate = xs.iter().filter(|x| **x > left + 2.0 && **x < right - 2.0).count();
+        ensure(intermediate > 0, || format!("the native page jumped instead of following close motion: {trace}"))?;
+        ensure(samples.iter().filter_map(|sample| sample["opacity"].as_f64()).all(|opacity| opacity >= 0.99), || {
+            format!("the closing column faded instead of sliding: {trace}")
+        })?;
+        std::fs::write(ctx.paths.target.join(format!("browser-close-motion-{width}.json")), trace.to_string())
+            .map_err(|e| e.to_string())?;
+        ctx.notes.push(format!("native browser close at {width}px: {intermediate} intermediate native positions in {} observations, column opacity stayed at least 0.99; driver sampling, not an FPS benchmark", samples.len()));
+        page.wait_for(
+            "the closed browser pane to park",
+            "window.__TAURI_INTERNALS__.invoke('test_site_probe', {capture:false}).then(p => p.shown === false && p.x < -10000 && p.y < -10000)",
+        )?;
+        page.click(&css(".pane-site"))?;
+        page.wait_visible(&css(".site-address"))?;
+        reopen_snapshot(ctx, page, width, "after")?;
+        wait_page(page, &fixture, "two")?;
+    }
+    ensure(ctx.records()?.is_empty(), || "the browser scenario started a CLI".into())?;
+    sample_memory(ctx, app.id, &mut sampled_peak)?;
+    let cpu_ms = ctx.cpu_ms(app.id)? - cpu_start;
+    ctx.notes.push(format!(
+        "browser scenario sampled peak: app tree private working set {sampled_peak:.1} MiB, highest of three samples (WebView2 present at each sample); CPU time {cpu_ms:.0} ms between readings over {:.1} s wall time; not a peak CPU or performance benchmark",
+        started.elapsed().as_secs_f64()
+    ));
+    let minimize = page.named("button", "window.minimize")?;
+    page.click(&minimize)?;
+    // CDP focus emulation normally keeps an offscreen document visible even after native minimization.
+    page.cdp.call("Emulation.setFocusEmulationEnabled", json!({"enabled": false}))?;
+    page.wait_for(
+        "the native host to report minimized",
+        "window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(p=>p.hostMinimized===true)",
+    )?;
+    let document_hidden = page.eval("document.hidden")?;
+    let hidden_cpu = ctx.cpu_ms(app.id)?;
+    let hidden_started = Instant::now();
+    super::pause(5.0);
+    let hidden_wall = hidden_started.elapsed().as_secs_f64() * 1000.0;
+    let hidden_cpu = ctx.cpu_ms(app.id)? - hidden_cpu;
+    let (hidden_mb, _) = ctx.memory_mb(app.id)?;
+    ensure(hidden_mb <= 400.0, || format!("minimized browser app sample {hidden_mb:.1} MiB exceeds 400 MiB"))?;
+    ctx.notes.push(format!("real titlebar Minimize made native is_minimized=true; offscreen CDP document.hidden={document_hidden}; minimized app tree sample {hidden_mb:.1} MiB, {hidden_cpu:.0} ms CPU over {hidden_wall:.0} ms wall; five-second static fixture sample, not a continuous peak or a zero-cost claim"));
+    ctx.close(app.id)
+}
+
+fn reopen_snapshot(ctx: &Ctx, page: &mut crate::page::Page, width: u32, phase: &str) -> Result {
+    let snapshot = page.eval(&format!("Promise.all([window.__TAURI_INTERNALS__.invoke('site_tabs',{{id:{}}}),window.__TAURI_INTERNALS__.invoke('test_site_probe',{{capture:false}})]).then(([tabs,native])=>({{tabs,native,address:document.querySelector('.site-address')?.value,strip:[...document.querySelectorAll('.site-tab')].map(t=>({{text:t.textContent,front:t.classList.contains('front')}}))}}))", json!(OTHER_CONVERSATION)))?;
+    std::fs::write(ctx.paths.target.join(format!("browser-reopen-{phase}-{width}.json")), snapshot.to_string()).map_err(|e| e.to_string())
+}
+fn enter(page: &mut crate::page::Page, url: &str) -> Result {
+    page.fill(&css(".site-address"), url)?;
+    page.press_on(&css(".site-address"), "Enter")
+}
+
+fn wait_page(page: &mut crate::page::Page, fixture: &Fixture, name: &str) -> Result {
+    let expected_url = fixture.url(&format!("/{name}"));
+    let loaded = page.wait_for(
+        &format!("the child WebView2 to show {name}"),
+        &format!(
+            "window.__TAURI_INTERNALS__.invoke('test_site_probe', {{capture:false}}).then(p => document.querySelector('.site-address')?.value === {} && !document.querySelector('.site-empty') && p.shown && p.page?.url === {} && p.page?.title === {} && p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed'||String(e).startsWith('the test browser closed'))return false;throw e;}})",
+            json!(expected_url), json!(expected_url), json!(format!("Native fixture {name}")), json!(format!("Native page {name}"))
+        ),
+    );
+    if let Err(error) = loaded {
+        let previous = page.cdp.set_deadline(Some(Instant::now() + Duration::from_secs(3)));
+        let state = page.eval("window.__TAURI_INTERNALS__.invoke('test_site_probe',{capture:false}).then(native=>({native,address:document.querySelector('.site-address')?.value,strip:[...document.querySelectorAll('.site-tab')].map(t=>({text:t.textContent,front:t.classList.contains('front')}))}))");
+        page.cdp.set_deadline(previous);
+        return Err(format!("{error}; native page failure snapshot: {state:?}; fixture requests: {:?}", fixture.diagnostics()));
+    }
+    let p = probe(page, false)?;
+    same(p["page"]["title"].clone(), json!(format!("Native fixture {name}")), "native child document title")?;
+    ensure(p["page"]["text"].as_str().is_some_and(|text| text.contains(&format!("Native page {name}"))), || {
+        format!("native child document text did not contain expected page content: {}", p["page"]["text"])
+    })
+}
+
+fn wait_page_load(page: &mut crate::page::Page, fixture: &Fixture, name: &str, count: usize) -> Result {
+    let marker = format!("Native page {name} · load {count}");
+    let url = fixture.url(&format!("/{name}"));
+    page.wait_for(
+        &format!("the child WebView2 to display {name} response {count}"),
+        &format!(
+            "window.__TAURI_INTERNALS__.invoke('test_site_probe',{{capture:false}}).then(p => document.querySelector('.site-address')?.value === {} && !document.querySelector('.site-empty') && p.shown && p.page?.url === {} && p.page?.title === {} && p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed'||String(e).startsWith('the test browser closed'))return false;throw e;}})",
+            json!(url), json!(url), json!(format!("Native fixture {name}")), json!(marker)
+        ),
+    )?;
+    ensure(fixture.request_count(&format!("/{name}")) >= count, || {
+        format!("fixture did not receive /{name} response {count}: {:?}", fixture.diagnostics())
+    })
+}
+
+fn wait_storage(page: &mut crate::page::Page, expected: &str) -> Result {
+    page.wait_for(
+        "the synthetic storage marker in the native page",
+        &format!(
+            "window.__TAURI_INTERNALS__.invoke('test_site_probe',{{capture:false}}).then(p=>p.page?.text.includes({})).catch(e=>{{if(String(e)==='the browser closed'||String(e).startsWith('the test browser closed'))return false;throw e;}})",
+            json!(expected)
+        ),
+    )
+}
+
+fn sample_memory(ctx: &mut Ctx, id: usize, peak: &mut f64) -> Result {
+    let (mb, webview) = ctx.memory_mb(id)?;
+    ensure(webview, || "the browser-pane memory sample must include WebView2".into())?;
+    *peak = peak.max(mb);
+    ensure(*peak <= 400.0, || format!("browser-pane sampled peak {peak:.1} MB exceeds 400 MB"))
+}
+
+fn probe(page: &mut crate::page::Page, capture: bool) -> Result<Value> {
+    page.eval(&format!("window.__TAURI_INTERNALS__.invoke('test_site_probe', {{capture:{capture}}})"))
+}
+
+fn save_picture(ctx: &Ctx, probe: &Value, name: &str) -> Result {
+    let data = probe["picture"].as_str().ok_or("native child screenshot missing")?;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
+    ensure(!bytes.is_empty() && bytes.len() <= 1_000_000, || {
+        format!("child screenshot size is outside the 1 MB evidence limit: {} bytes", bytes.len())
+    })?;
+    std::fs::create_dir_all(&ctx.paths.shots).map_err(|e| e.to_string())?;
+    std::fs::write(ctx.paths.shots.join(name), bytes).map_err(|e| e.to_string())
+}
+
+struct Fixture {
+    origin: String,
+    requests: Arc<Mutex<Vec<String>>>,
+    events: Arc<Mutex<Vec<String>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Fixture {
+    fn start() -> Result<Self> {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(|e| e.to_string())?;
+        listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+        let origin = format!("http://{}", listener.local_addr().map_err(|e| e.to_string())?);
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (thread_requests, thread_events, thread_stop) = (requests.clone(), events.clone(), stop.clone());
+        let thread = std::thread::spawn(move || {
+            let started = Instant::now();
+            let mut connection = 0;
+            while !thread_stop.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        connection += 1;
+                        fixture_event(&thread_events, started, connection, "accepted".into());
+                        let (requests, events) = (thread_requests.clone(), thread_events.clone());
+                        std::thread::spawn(move || serve(stream, &requests, &events, started, connection));
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
+                    Err(e) => {
+                        fixture_event(&thread_events, started, connection, format!("accept error {:?}/{:?}", e.kind(), e.raw_os_error()));
+                        break;
+                    }
+                }
+            }
+        });
+        Ok(Self { origin, requests, events, stop, thread: Some(thread) })
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!("{}{path}", self.origin)
+    }
+
+    fn requests(&self) -> Vec<String> {
+        self.requests.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn diagnostics(&self) -> String {
+        format!("requests {:?}; first 64 connection events {:?}", self.requests(), self.events.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    fn request_count(&self, path: &str) -> usize {
+        self.requests().iter().filter(|request| request.as_str() == path).count()
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn fixture_event(events: &Mutex<Vec<String>>, started: Instant, connection: usize, event: String) {
+    let mut events = events.lock().unwrap_or_else(|e| e.into_inner());
+    if events.len() < 64 {
+        events.push(format!("+{}ms connection {connection}: {event}", started.elapsed().as_millis()));
+    }
+}
+
+fn serve(mut stream: TcpStream, requests: &Mutex<Vec<String>>, events: &Mutex<Vec<String>>, started: Instant, connection: usize) {
+    // Accepted sockets inherit the listener's nonblocking mode on Windows.
+    if let Err(e) = stream
+        .set_nonblocking(false)
+        .and_then(|()| stream.set_read_timeout(Some(Duration::from_secs(2))))
+        .and_then(|()| stream.set_write_timeout(Some(Duration::from_secs(2))))
+    {
+        fixture_event(events, started, connection, format!("socket setup error: {e}"));
+        return;
+    }
+    let mut raw = [0u8; 4096];
+    let count = match stream.read(&mut raw) {
+        Ok(count) => {
+            fixture_event(events, started, connection, format!("read {count} bytes"));
+            count
+        }
+        Err(e) => {
+            fixture_event(events, started, connection, format!("read error {:?}/{:?}", e.kind(), e.raw_os_error()));
+            return;
+        }
+    };
+    let request = String::from_utf8_lossy(&raw[..count]);
+    let path = request.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("/");
+    let mut log = requests.lock().unwrap_or_else(|e| e.into_inner());
+    if log.len() >= 256 {
+        return;
+    }
+    log.push(path.to_string());
+    drop(log);
+    let load = requests.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|p| p.as_str() == path).count();
+    let (status, title, body, color, link) = match path {
+        "/one" => ("200 OK", "Native fixture one", "Native page one", "#f5b942", "/two"),
+        "/two" => ("200 OK", "Native fixture two", "Native page two", "#397fbd", "/one"),
+        _ => ("404 Not Found", "Not found", "Not found", "#ddd", "/one"),
+    };
+    let body = format!(
+        "<!doctype html><meta charset=utf-8><title>{title}</title><style>body{{font:24px sans-serif;padding:32px;background:{color}}}</style><h1>{body} · load {load}</h1><p id=storage-proof></p><script>if(location.pathname==='/one'){{localStorage.setItem('faber-browser-proof','synthetic-conversation-one');document.querySelector('#storage-proof').textContent='storage: written'}}else{{document.querySelector('#storage-proof').textContent='storage: '+(localStorage.getItem('faber-browser-proof')??'absent')}}</script><a href='{link}'>Next page</a>"
+    );
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let written = stream.write_all(response.as_bytes());
+    fixture_event(events, started, connection, format!("response {} bytes: {written:?}", response.len()));
+    let flushed = stream.flush();
+    fixture_event(events, started, connection, format!("flush: {flushed:?}"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_fixture_waits_for_the_request_after_accepting_a_connection() {
+        let fixture = Fixture::start().unwrap();
+        let mut stream = TcpStream::connect(fixture.origin.trim_start_matches("http://")).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        // WebView2 can connect before it has a request ready, especially under load.
+        std::thread::sleep(Duration::from_millis(100));
+        stream.write_all(b"GET /one HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}; {}", fixture.diagnostics());
+        assert_eq!(fixture.requests(), ["/one"]);
+    }
+}

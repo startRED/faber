@@ -1,0 +1,193 @@
+import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
+
+const root = fileURLToPath(new URL('../../', import.meta.url));
+const valid = {
+  invoice: ['invoice.mjs', `export function total(lines) {
+    return lines.reduce((sum, { quantity, unitCents }) => {
+      if (![quantity, unitCents].every(n => Number.isSafeInteger(n) && n >= 0)) throw Error('invalid');
+      return sum + quantity * unitCents;
+    }, 0);
+  }`],
+  settings: ['migrate.mjs', `import { readFileSync, writeFileSync } from 'node:fs';
+    const path = process.argv[2], value = JSON.parse(readFileSync(path, 'utf8'));
+    if (value.version === 2) process.exit(0);
+    if (value.version !== 1 || typeof value.theme !== 'string') process.exit(1);
+    const { theme, ...rest } = value;
+    writeFileSync(path, JSON.stringify({ ...rest, version: 2, appearance: { theme } }));`],
+  sales: ['summarize.mjs', `import { readFileSync } from 'node:fs';
+    const text = readFileSync(process.argv[2], 'utf8');
+    if (text.split(/\\r?\\n/)[0] !== 'category,amount') process.exit(1);
+    const rows = text.trim().split(/\\r?\\n/).slice(1), totals = Object.create(null);
+    for (const row of rows) {
+      const match = row.match(/^(?:"((?:[^"]|"")*)"|([^",]+)),(-?\\d+\\.\\d{2})$/);
+      if (!match) process.exit(1);
+      const key = (match[1] ?? match[2]).replaceAll('""', '"');
+      const amount = Math.round(Number(match[3]) * 100);
+      totals[key] = (totals[key] ?? 0) + amount;
+    }
+    console.log(JSON.stringify(totals));`],
+};
+
+function workspace(name, run) {
+  assert.ok(existsSync(join(root, 'bench/fixtures', `${name}.mjs`)), `${name}: benchmark fixture is provided`);
+  const base = mkdtempSync(join(tmpdir(), 'faber-practical-'));
+  try {
+    const pristine = join(base, 'pristine'), folder = join(base, 'result');
+    mkdirSync(pristine); mkdirSync(folder);
+    for (const dest of [pristine, folder]) execFileSync(process.execPath, [join(root, 'bench/fixtures', `${name}.mjs`), dest], { windowsHide: true });
+    const answer = join(base, 'answer.md'); writeFileSync(answer, 'Completed.');
+    const proof = (...extra) => {
+      const started = Date.now();
+      // Above the sales proof's ten summarize runs at 15 s each (bench/proofs/sales.mjs): those bound a hang, this only a
+      // proof that never ends. At 15 s, ten Node starts on a loaded macOS runner met it (queue/pr-462, run 41071854644),
+      // and at 5 s each, one start on a PC running three test builds met the inner limit.
+      const result = spawnSync(process.execPath, [join(root, 'bench/proofs', `${name}.mjs`), folder, pristine, answer, ...extra], { encoding: 'utf8', windowsHide: true, timeout: 180000 });
+      assert.equal(result.status, 0, result.signal ? `the proof was stopped by ${result.signal} after ${Date.now() - started} ms` : result.stderr);
+      const parsed = JSON.parse(result.stdout);
+      assert.ok(parsed.checks.length > 0);
+      return parsed.pass;
+    };
+    run({ folder, pristine, proof });
+  } finally { rmSync(base, { recursive: true, force: true }); }
+}
+
+function complete(name, folder) {
+  const [file, code] = valid[name]; writeFileSync(join(folder, file), code);
+  if (name === 'invoice') writeFileSync(join(folder, 'invoice.test.mjs'), `import assert from 'node:assert/strict'; import { total } from './invoice.mjs'; assert.equal(total([{quantity: 0, unitCents: 900}]), 0);`);
+  if (name === 'settings') execFileSync(process.execPath, [join(folder, file), join(folder, 'settings.json')], { windowsHide: true });
+}
+
+for (const name of Object.keys(valid)) {
+  test(`${name}: unfinished work fails, a complete result passes, source loss fails`, () => workspace(name, ({ folder, proof }) => {
+    assert.equal(proof(), false, 'the starting folder is not a completed task');
+    complete(name, folder);
+    assert.equal(proof(), true, 'an independently written solution meets the contract');
+    const source = { invoice: 'README.md', settings: 'notes.txt', sales: 'sales.csv' }[name];
+    writeFileSync(join(folder, source), 'lost data');
+    assert.equal(proof(), false, 'a working result cannot hide lost source data');
+  }));
+}
+
+test('invoice proof rejects the zero-quantity bug despite a passing ordinary example', () => workspace('invoice', ({ folder, proof }) => {
+  complete('invoice', folder);
+  assert.equal(proof(), true);
+  writeFileSync(join(folder, 'invoice.mjs'), 'export const total = lines => lines.reduce((sum, x) => sum + (x.quantity || 1) * x.unitCents, 0);');
+  assert.equal(proof(), false);
+}));
+
+test('invoice proof requires the separate scratch folder declared by the runner', () => workspace('invoice', ({ folder, proof }) => {
+  complete('invoice', folder);
+  const scratch = join(folder, '..', 'scratch');
+  assert.equal(proof(scratch), false, 'an unavailable scratch folder cannot silently fall back to the inputs');
+  mkdirSync(scratch);
+  assert.equal(proof(scratch), true);
+}));
+
+for (const [name, assertion] of [
+  ['ordinary quantity', 'assert.equal(total([{quantity: 1, unitCents: 100}]), 100)'],
+  ['invalid input', 'assert.throws(() => total([{quantity: -1, unitCents: 100}]))'],
+]) {
+  test(`invoice proof rejects a test that only covers ${name}`, () => workspace('invoice', ({ folder, proof }) => {
+    complete('invoice', folder);
+    writeFileSync(join(folder, 'invoice.test.mjs'), `import assert from 'node:assert/strict'; import { total } from './invoice.mjs'; ${assertion};`);
+    assert.equal(proof(), false, 'the submitted test must catch the zero-quantity bug');
+    assert.equal(readFileSync(join(folder, 'invoice.mjs'), 'utf8'), valid.invoice[1]);
+  }));
+}
+
+for (const [name, extraExport, binding] of [
+  ['named export', 'export const cents = 100;', 'import { cents } from "./invoice.mjs";'],
+  ['default export', 'export default 100;', 'import cents from "./invoice.mjs";'],
+]) {
+  test(`invoice proof preserves a ${name} unrelated to the bug`, () => workspace('invoice', ({ folder, proof }) => {
+    complete('invoice', folder);
+    writeFileSync(join(folder, 'invoice.mjs'), `${valid.invoice[1]}\n${extraExport}\n`);
+    const testFile = join(folder, 'invoice.test.mjs');
+    const setup = `import assert from 'node:assert/strict'; import { total } from './invoice.mjs'; ${binding}`;
+    writeFileSync(testFile, `${setup} assert.equal(total([{quantity: 1, unitCents: cents}]), 100);`);
+    assert.equal(proof(), false, 'an unrelated import failure must not count as detecting the zero-quantity bug');
+    writeFileSync(testFile, `${setup} assert.equal(total([{quantity: 0, unitCents: cents}]), 0);`);
+    assert.equal(proof(), true, 'a valid regression can use other exports from the invoice');
+  }));
+}
+
+test('settings proof rejects a migrator that discards unknown preferences', () => workspace('settings', ({ folder, proof }) => {
+  complete('settings', folder);
+  assert.equal(proof(), true);
+  const code = valid.settings[1].replace('...rest, version: 2', 'version: 2');
+  writeFileSync(join(folder, 'migrate.mjs'), code);
+  assert.equal(proof(), false);
+}));
+
+test('settings proof rejects presence validation that accepts non-string themes', () => workspace('settings', ({ folder, proof }) => {
+  complete('settings', folder);
+  assert.equal(proof(), true);
+  writeFileSync(join(folder, 'migrate.mjs'), valid.settings[1].replace("typeof value.theme !== 'string'", 'value.theme == null'));
+  assert.equal(proof(), false, 'numbers, booleans, arrays and objects are not string themes');
+}));
+
+test('settings proof requires empty strings to remain valid themes', () => workspace('settings', ({ folder, proof }) => {
+  complete('settings', folder);
+  assert.equal(proof(), true);
+  writeFileSync(join(folder, 'migrate.mjs'), valid.settings[1].replace("typeof value.theme !== 'string'", "typeof value.theme !== 'string' || value.theme.length === 0"));
+  assert.equal(proof(), false, 'the contract requires a string without a nonempty restriction');
+}));
+
+test('sales proof rejects a hardcoded fixture answer on fresh input', () => workspace('sales', ({ folder, proof }) => {
+  complete('sales', folder);
+  assert.equal(proof(), true);
+  writeFileSync(join(folder, 'summarize.mjs'), `console.log(JSON.stringify({ Food: 1025, 'Office, supplies': 230, 'Client "A"': 100 }));`);
+  assert.equal(proof(), false);
+}));
+
+test('sales proof fails a summarize that hangs, within its own limits', () => workspace('sales', ({ folder, proof }) => {
+  // It hangs on the invalid inputs only, so one run meets its 15 s limit, not every one.
+  complete('sales', folder);
+  writeFileSync(join(folder, 'summarize.mjs'), `if (process.argv[2].includes('invalid')) await new Promise(() => setTimeout(() => {}, 120000));
+${valid.sales[1]}`);
+  assert.equal(proof(), false, 'the hanging run is stopped and fails its check');
+}));
+
+test('invoice accepts a CommonJS regression test supported by node --test', () => workspace('invoice', ({ folder, proof }) => {
+  complete('invoice', folder);
+  rmSync(join(folder, 'invoice.test.mjs'));
+  writeFileSync(join(folder, 'invoice.test.cjs'), `const assert = require('node:assert/strict'); import('./invoice.mjs').then(({total}) => assert.equal(total([{quantity: 0, unitCents: 100}]), 0));`);
+  assert.equal(proof(), true);
+}));
+
+test('invoice uses native discovery for regression tests in a test directory', () => workspace('invoice', ({ folder, proof }) => {
+  complete('invoice', folder);
+  rmSync(join(folder, 'invoice.test.mjs'));
+  mkdirSync(join(folder, 'test'));
+  writeFileSync(join(folder, 'test', 'regression.cjs'), `const assert = require('node:assert/strict'); import('../invoice.mjs').then(({total}) => assert.equal(total([{quantity: 0, unitCents: 100}]), 0));`);
+  assert.equal(proof(), true);
+}));
+
+test('sales proof rejects prefix-only header validation', () => workspace('sales', ({ folder, proof }) => {
+  complete('sales', folder);
+  assert.equal(proof(), true);
+  writeFileSync(join(folder, 'summarize.mjs'), valid.sales[1].replace("text.split(/\\r?\\n/)[0] !== 'category,amount'", "!text.startsWith('category,amount')"));
+  assert.equal(proof(), false);
+}));
+
+test('sales proof rejects collisions with inherited object properties', () => workspace('sales', ({ folder, proof }) => {
+  complete('sales', folder);
+  assert.equal(proof(), true);
+  writeFileSync(join(folder, 'summarize.mjs'), valid.sales[1].replace('Object.create(null)', '{}'));
+  assert.equal(proof(), false);
+}));
+
+test('new requests name the real fixture and proof entry points', () => {
+  for (const [number, id, name] of [[6, 'fix-invoice', 'invoice'], [7, 'migrate-settings', 'settings'], [8, 'summarize-sales', 'sales']]) {
+    const path = join(root, 'bench/requests', `${number}-${id}.md`);
+    assert.ok(existsSync(path), `${id}: benchmark request is provided`);
+    const text = readFileSync(path, 'utf8');
+    for (const header of [`id: ${id}`, 'kind: project', `fixture: ${name}`, `proof: ${name}`]) assert.ok(text.includes(header), header);
+  }
+});

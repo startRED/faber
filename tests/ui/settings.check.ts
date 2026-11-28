@@ -1,0 +1,1870 @@
+import { createComponent, createSignal } from 'solid-js';
+import { render } from 'solid-js/web';
+import themes from '../../src-tauri/src/themes.json';
+import { api, type AppState, type Appearance, type CheckResult, type Look, type QuotaReading, type Settings as Saved, type Vendor, type VendorUsage } from '../../ui/api.ts';
+import { App } from '../../ui/App.tsx';
+import { AppearanceSection } from '../../ui/Appearance.tsx';
+import { previewer } from '../../ui/appearance.ts';
+import { Mini } from '../../ui/FirstRun.tsx';
+import { factory, failingPairs, groundColor, groundKey, normalizeHex, readings, sameChoices, shown } from '../../ui/draft.ts';
+import { de } from '../../ui/locales/de.ts';
+import { en } from '../../ui/locales/en.ts';
+import { es } from '../../ui/locales/es.ts';
+import { fr } from '../../ui/locales/fr.ts';
+import { ptBR } from '../../ui/locales/pt-BR.ts';
+import { useLanguage } from '../../ui/i18n.ts';
+import { level } from '../../ui/motion.ts';
+import { accountLine, seedQuotas, usageRows } from '../../ui/sidebar.ts';
+import { forgetSection, Settings } from '../../ui/Settings.tsx';
+import { check, deepEqual, equal, frames, ok } from './check.ts';
+
+check('R107: Settings names Chat and Projects and discloses the shared default', () => {
+  ok(en['set.permissions'].includes('Chat'));
+  ok(en['set.permissions'].includes('Projects'));
+  ok(en['set.chatFolderMore'].includes('first message'));
+  ok(en['set.chatFolderMore'].includes('private folder'));
+  ok(en['set.chatFolderMore'].includes('delete the conversation'));
+  ok(en['set.chatFolderHint'].length < 50, 'the row keeps one short line');
+});
+
+check('settings: plain words explain automatic actions, saved search results and incomplete limits in every language', () => {
+  equal(en['set.hooksBody'], 'Projects run my automatic actions');
+  equal(ptBR['set.hooksBody'], 'Os projetos rodam minhas ações automáticas');
+  equal(en['set.webSearch.cached'], 'Stored copy');
+  equal(ptBR['set.webSearch.cached'], 'Cópia salva');
+  equal(en['set.faberTrustHint'], 'The AI manages tools and web search without asking.');
+  equal(ptBR['set.faberTrustHint'], 'A IA gerencia ferramentas e busca na web sem perguntar.');
+  for (const [code, words] of Object.entries({ en, ptBR, es, fr, de })) {
+    ok(!/CLI|hooks/i.test(words['set.hooksBody']), `${code}: the label says what runs`);
+    ok(/hooks/i.test(words['set.hooksHint']) && /hooks/i.test(words['set.hooksMore']), `${code}: the tool's term is explained nearby`);
+    ok(!/cache|caché/i.test(words['set.webSearch.cached']), `${code}: saved results have a plain name`);
+    ok(!/[≥~+]/.test(words['quota.atLeast'] + words['quota.uncounted']), `${code}: uncertainty uses words`);
+    for (const key of ['set.hooksHint', 'set.hooksLocked'] as const) ok(words[key].length <= 70, `${code}: ${key} fits the row`);
+  }
+});
+
+check('R121: the risk and the credential limits of Do not ask are spelled out in Settings, not over every thread', () => {
+  ok(!Object.keys(en).some((key) => key.startsWith('project.permissions')), 'no permission sentence is kept for the top of a conversation');
+  const body = en['set.permissionsDontAskBody'];
+  ok(!/is kept out|cannot be kept out|Codex cannot/.test(body), 'no claim that one tool is kept away from the sign-in folders');
+  ok(!/sandbox|too broad|disabled/i.test(body), 'full access no longer describes a sandbox or disabled integrations');
+  const ask = en['set.permissionsAskBody'];
+  ok(ask.includes('ask the tools to stop and end the programs they started') && ask.includes('before changing a file') && ask.includes('plain reading commands'), ask);
+  ok(ask.includes('except the ones you already allowed in the tool\x27s own settings'), 'Ask names what the tools\x27 own settings can pre-approve');
+  ok(en['error.workingFolder'].includes('system files') && en['error.workingFolder'].includes('sign-in keys'));
+});
+
+check('the Full access text is a short list: every warning is its own short sentence, none dropped', () => {
+  // Each point is found whole inside one sentence: what Full access does, the five warnings, what to do and what Stop does.
+  const points = {
+    en: [
+      [/run commands and change files without asking/, /internet/],
+      [/any folder you choose/, /except system and sign-in folders/],
+      [/connected tools and hooks stay on/],
+      [/page or file the AI reads could steer it/, /network without asking/],
+      [/Codex and Claude Code can read and change your key folders/, /\.ssh/, /\.claude, \.codex/],
+      [/Only the files that hold the AI tools. sign-in stay closed to Claude Code.s file tools/],
+      [/Commands and Codex can still read them/],
+      [/What Claude Code would still ask about/, /goes ahead without asking/],
+      [/So, for anything you do not trust, pick Ask/],
+      [/Stop asks the tools to stop and ends the programs they started/],
+    ],
+    'pt-BR': [
+      [/executam comandos e alteram arquivos sem perguntar/, /internet/],
+      [/qualquer pasta que você escolher/, /exceto pastas do sistema e de login/],
+      [/ferramentas conectadas e hooks continuam ativos/],
+      [/página ou arquivo que a IA lê pode induzi-la/, /rede sem perguntar/],
+      [/O Codex e o Claude Code podem ler e alterar suas pastas de chaves/, /\.ssh/, /\.claude, \.codex/],
+      [/Só os arquivos de login das ferramentas de IA ficam fechados para as ferramentas de arquivo do Claude Code/],
+      [/Comandos e o Codex ainda conseguem lê-los/],
+      [/O que o Claude Code ainda perguntaria/, /segue sem perguntar/],
+      [/Por isso, para o que não for de confiança, use Perguntar/],
+      [/Parar pede às ferramentas que parem e encerra os programas que elas iniciaram/],
+    ],
+  };
+  for (const [lang, text] of [['en', en['set.permissionsDontAskBody']], ['pt-BR', ptBR['set.permissionsDontAskBody']]] as const) {
+    const items = text.split('\n');
+    ok(items.length >= 4, `${lang}: a short list, one point per line`);
+    const sentences = items.flatMap((item) => item.split(/(?<=[.!?])\s+/));
+    for (const s of sentences) ok(s.split(/\s+/).length <= 25, `${lang}: under 25 words: ${s}`);
+    for (const point of points[lang]) ok(sentences.some((s) => point.every((p) => p.test(s))), `${lang}: ${point.join(' ')}`);
+  }
+});
+
+const look = (over: Partial<Look> = {}): Look => ({
+  vars: {},
+  scheme: 'dark',
+  motion: 'full',
+  effects: { ambient: true, texture: true, glow: true },
+  checks: [],
+  notices: [],
+  appearance: {
+    base: 'sala',
+    ground: 'sala',
+    accent: '#f3f0e8',
+    textFont: 'archivo',
+    headingFont: 'narrow',
+    textSize: 14,
+    density: 1,
+    corners: 1,
+    motion: 'full',
+    effects: { ambient: true, texture: true, glow: true },
+  },
+  ...over,
+});
+
+check('settings: no appearance is the factory look, and key order or an empty field changes nothing', () => {
+  ok(sameChoices(undefined, factory()));
+  ok(sameChoices({ base: 'sala', accent: '#abcdef', corners: 1 }, { corners: 1, accent: '#abcdef', base: 'sala' }));
+  ok(sameChoices({ base: 'sala', accent: undefined }, { base: 'sala' }));
+  ok(sameChoices({ base: 'sala', effects: { ambient: true, texture: false, glow: true } }, { effects: { glow: true, texture: false, ambient: true }, base: 'sala' }));
+  equal(sameChoices({ base: 'sala' }, { base: 'oficina' }), false);
+  equal(sameChoices({ base: 'sala', accent: '#abcdef' }, { base: 'sala' }), false);
+  equal(sameChoices(undefined, { base: 'oficina' }), false);
+});
+
+check('settings: the controls show the draft over the last answer, and the answer fills in what the draft leaves out', () => {
+  const answer = look();
+  const own: Appearance = { base: 'sala', accent: '#123456', headingFont: undefined };
+  const seen = shown(own, answer);
+  equal(seen.accent, '#123456', 'the draft wins before its answer arrives');
+  equal(seen.textFont, 'archivo', 'a field the draft leaves out shows what the look gives it');
+  equal(seen.headingFont, 'narrow', 'an undefined field does not hide the look\'s own');
+});
+
+check('settings: the preview panel reads the three contrast pairs, and a failing pair blocks "Use this look"', () => {
+  const pairs = [
+    { a: 'ink', b: 'bg', ratio: 14.2, min: 7, pass: true },
+    { a: 'ink-3', b: 'bg', ratio: 4.1, min: 4.5, pass: false },
+    { a: 'accent', b: 'bg', ratio: 9, min: 3, pass: true },
+    { a: 'ink-2', b: 's1', ratio: 6, min: 4.5, pass: true },
+  ];
+  const l = look({ checks: pairs });
+  deepEqual(
+    readings(l).map((r) => [r.id, r.pass]),
+    [
+      ['text', true],
+      ['faint', false],
+      ['accent', true],
+    ],
+  );
+  equal(failingPairs(l), 'ink-3 / bg');
+  equal(failingPairs(look({ checks: pairs.map((p) => ({ ...p, pass: true })) })), '');
+  deepEqual(readings(look()), [], 'a look with no readings shows none');
+});
+
+check('settings: a typed colour is read as #rrggbb in lower case or refused', () => {
+  equal(normalizeHex('#F0A030'), '#f0a030');
+  equal(normalizeHex('f0a030'), '#f0a030');
+  equal(normalizeHex(' #abc '), '#aabbcc');
+  equal(normalizeHex('abc'), '#aabbcc');
+  for (const bad of ['', '#', '#12', '#12345', '#1234567', 'red', '#gggggg', '#12 456']) equal(normalizeHex(bad), undefined, bad);
+});
+
+check('settings: every ground chip has a colour, taken from the theme or preset that uses it', () => {
+  for (const id of themes['user-controls'].grounds) ok(/^(#|rgb|hsl|color-mix)/.test(groundColor(id)), `${id}: ${groundColor(id)}`);
+});
+
+check('settings: every look names the ground it reports, even High contrast, which keeps its own', () => {
+  const controls = themes['user-controls'];
+  for (const id of [...controls.themes, ...controls.presets]) {
+    ok(groundKey(id) in en, `${id}: no words for ${groundKey(id)}`);
+  }
+  equal(groundKey('manha'), 'look.ground.manha');
+  equal(groundKey('alto'), 'look.alto.name');
+});
+
+check('settings: the previewer hands the draft back with its answer, and only for the newest request', async () => {
+  const calls: Array<(l: Look) => void> = [];
+  const got: string[] = [];
+  const ask = previewer(
+    () => new Promise<Look>((resolve) => calls.push(resolve)),
+    (_look, draft) => got.push(draft.base ?? ''),
+    () => {},
+  );
+  const run = [ask({ base: 'sala' }), ask({ base: 'oficina' })];
+  calls[0]!(look());
+  calls[1]!(look());
+  await Promise.all(run);
+  deepEqual(got, ['oficina']);
+});
+
+const reading = (vendor: 'claude' | 'codex', window: string, used: number, resetsAt: number): QuotaReading => ({ vendor, window, used, resetsAt });
+
+check('settings: usage lines are the short window first; an old reading keeps its name and loses its numbers; none gives one empty line', () => {
+  const now = 1_000_000_000_000;
+  const future = Math.floor(now / 1000) + 3600;
+  const past = Math.floor(now / 1000) - 60;
+  const quotas = seedQuotas([reading('claude', 'seven_day', 0.4, future), reading('claude', 'five_hour', 0.8, future), reading('claude', 'opus', 0.1, past), reading('codex', 'five_hour', 0.2, 0)]);
+  deepEqual(usageRows(quotas, 'claude', now), [
+    { window: 'five_hour', used: 0.8, resetsAt: future },
+    { window: 'seven_day', used: 0.4, resetsAt: future },
+    { window: 'opus' },
+  ]);
+  deepEqual(usageRows(quotas, 'codex', now), [{ window: 'five_hour', used: 0.2, resetsAt: 0 }], 'a reading with no reset time stands');
+  deepEqual(usageRows({}, 'claude', now), [{}]);
+});
+
+check('settings: the new sections are written in every language, and the file hint, the locks and the privacy facts are not left in English', () => {
+  const keys = [
+    'set.group.you',
+    'set.group.ai',
+    'set.group.system',
+    'set.group.type',
+    'set.advanced',
+    'set.contrast',
+    'set.file',
+    'set.hooksHint',
+    'set.hooksMore',
+    'set.soundLine',
+    'set.previewsMore',
+    'set.faberTrust',
+    'set.faberTrustHint',
+    'set.faberTrustMore',
+    'ask.self.install',
+    'ask.self.line',
+    'ask.self.once',
+    'ask.self.always',
+    'tool.catalogInstall',
+    'set.chatFolderMore',
+    'usage.details',
+    'usage.pill.ok',
+    'usage.pill.spare',
+    'usage.pill.fast',
+    'usage.pill.low',
+    'usage.pill.out',
+    'usage.pill.unknown',
+    'notes.24.better',
+    'set.notifyMe',
+    'set.notifyHint',
+    'set.playSound',
+    'set.soundHint',
+    'set.keepAwake',
+    'set.keepAwakeHint',
+    'set.resumeInterrupted',
+    'set.resumeInterruptedHint',
+    'set.resumeInterruptedMore',
+    'set.autostart',
+    'set.autostartHint',
+    'set.updates',
+    'set.previews',
+    'set.previewsHint',
+    'set.privacy',
+    'set.accountsHint',
+    'set.connected',
+    'set.notConnected',
+    'usage.noReading',
+    'usage.resets',
+    'set.privacy.telemetry',
+    'set.privacy.history',
+    'set.privacy.logins',
+    'set.preview',
+    'set.previewPending',
+    'set.previewApplied',
+    'set.contrast.text',
+    'set.contrast.faint',
+    'set.contrast.accent',
+    'set.lockedTitle',
+    'set.saveFile',
+    'set.openFile',
+    'set.reset',
+    'set.use',
+    'look.effect.ambientHint',
+    'look.effect.textureHint',
+    'look.effect.glowHint',
+  ] as const;
+  const others = { 'pt-BR': ptBR, es, fr, de } as const;
+  for (const key of keys) {
+    ok(en[key] !== undefined, `en has ${key}`);
+    for (const [code, messages] of Object.entries(others)) {
+      ok(messages[key] !== undefined, `${code} has ${key}`);
+      // A sentence copied from English into another language means nobody translated it.
+      if (typeof en[key] === 'string' && String(en[key]).length > 24) ok(messages[key] !== en[key], `${code} ${key} is still English`);
+    }
+  }
+});
+
+// ---- the sections on a real page ----
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+/** Room for the short exit of what closes: a menu, a folded group or a row's long text stays in the page for it. */
+const leave = () => new Promise((resolve) => setTimeout(resolve, 400));
+
+/** Draws a component into the page, where the stylesheet applies, and takes it away again. */
+function mount(view: () => ReturnType<typeof createComponent>) {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const stop = render(view, host);
+  return {
+    host,
+    stop: () => {
+      stop();
+      host.remove();
+    },
+  };
+}
+
+type AppearanceProps = Parameters<typeof AppearanceSection>[0];
+const section = (props: AppearanceProps) => mount(() => createComponent(AppearanceSection, props));
+const useButton = (host: HTMLElement) => host.querySelector<HTMLButtonElement>('.ap-bar .btn.primary')!;
+const presetButton = (host: HTMLElement, id: string) => host.querySelector<HTMLButtonElement>(`[aria-labelledby="look-${id}-name"]`)!;
+// What the shell sends for a settings file nobody changed: each default lives in the engine (`Settings::shown`), never here.
+const SHOWN: Saved = { userHooks: false, permissions: 'dontAsk', notifications: true, notificationSound: true, keepAwake: true, resumeInterrupted: true, autostart: false };
+
+check('the key: Privacy has the other-windows switch, off until saved on, and the programs out of reach are added and removed in every language at 720 px', async () => {
+  const motion = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'none';
+  try {
+    for (const [language, words] of [['en', en], ['pt-BR', ptBR], ['es', es], ['fr', fr], ['de', de]] as const) {
+      useLanguage(language);
+      ok(words['set.otherWindowsHint'].length <= 70 && words['set.outOfReachHint'].length <= 70, `${language}: the hints fit the row`);
+      const [saved, setSaved] = createSignal<Saved>({ seeOtherWindows: false, programsOutOfReach: ['keepass.exe', 'bitwarden.exe'] });
+      const patches: Saved[] = [];
+      let accept = true;
+      const view = mount(() => createComponent(Settings, {
+        look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0, start: 'privacy',
+        onClose: () => {}, onOpenSetup: () => {},
+        onSave: async (patch) => { patches.push(patch); if (accept) setSaved({ ...saved(), ...patch }); return accept; },
+      }));
+      try {
+        view.host.querySelector<HTMLElement>('.settings')!.style.cssText = 'position:fixed;inset:0;width:720px;height:700px';
+        await tick();
+        const key = view.host.querySelector<HTMLInputElement>('#set-other-windows-switch')!;
+        ok(key, `${language}: Privacy has the key`);
+        equal(key.getAttribute('role'), 'switch');
+        equal(key.checked, false, `${language}: off by default`);
+        ok(view.host.textContent?.includes(words['set.otherWindows']));
+        key.click();
+        await tick();
+        deepEqual(patches.at(-1), { seeOtherWindows: true });
+        equal(saved().seeOtherWindows, true);
+        equal(key.checked, true);
+        const input = view.host.querySelector<HTMLInputElement>('#out-of-reach')!;
+        ok(input, `${language}: the list has its add field`);
+        const form = input.closest('form')!;
+        const add = form.querySelector<HTMLButtonElement>('button')!;
+        const names = () => [...view.host.querySelectorAll('.out-of-reach li span')].map((span) => span.textContent);
+        deepEqual(names(), ['keepass.exe', 'bitwarden.exe']);
+        equal(add.disabled, true, 'nothing typed, nothing to add');
+        input.value = 'Vault.exe';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        accept = false;
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await tick();
+        equal(input.value, 'Vault.exe', 'a failed save keeps what was typed');
+        deepEqual(saved().programsOutOfReach, ['keepass.exe', 'bitwarden.exe']);
+        accept = true;
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await tick();
+        deepEqual(patches.at(-1), { programsOutOfReach: ['keepass.exe', 'bitwarden.exe', 'Vault.exe'] });
+        equal(input.value, '');
+        equal(document.activeElement, input);
+        const remove = view.host.querySelector<HTMLButtonElement>('.out-of-reach button')!;
+        equal(remove.getAttribute('aria-label'), words['set.outOfReachRemove'].replace('{name}', 'keepass.exe'));
+        remove.click();
+        await tick();
+        deepEqual(saved().programsOutOfReach, ['bitwarden.exe', 'Vault.exe']);
+        setSaved({ ...saved(), programsOutOfReach: [] });
+        await tick();
+        equal(view.host.querySelector('.out-of-reach-empty')?.textContent, words['set.outOfReachEmpty'], `${language}: an emptied list says so`);
+        setSaved({ ...saved(), programsOutOfReach: Array.from({ length: 100 }, (_, n) => `${n}-${'a'.repeat(100)}.exe`) });
+        await tick();
+        equal(input.disabled, true, 'a full list takes no more');
+        const main = view.host.querySelector<HTMLElement>('.s-main')!;
+        ok(main.scrollWidth <= main.clientWidth + 1, `${language}: long names do not overflow at 720 px`);
+      } finally { view.stop(); }
+    }
+  } finally {
+    document.documentElement.dataset.motion = motion;
+    useLanguage('en');
+  }
+});
+
+check('blocked sites: Settings adds and removes saved hosts, retains failed edits and fits at 720 px in every language', async () => {
+  const motion = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'none';
+  try {
+    for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
+      useLanguage(language);
+      const [saved, setSaved] = createSignal<Saved>({});
+      let accept = false;
+      const view = mount(() => createComponent(Settings, {
+        look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0, start: 'privacy',
+        onClose: () => {}, onOpenSetup: () => {},
+        onSave: async (patch) => { if (accept) setSaved({ ...saved(), ...patch }); return accept; },
+      }));
+      try {
+        view.host.querySelector<HTMLElement>('.settings')!.style.cssText = 'position:fixed;inset:0;width:720px;height:700px';
+        await tick();
+        const input = view.host.querySelector<HTMLInputElement>('#blocked-host')!;
+        ok(input, 'Privacy exposes the blocked-sites field');
+        const form = input.closest('form')!;
+        const add = form.querySelector<HTMLButtonElement>('button')!;
+        const remove = () => view.host.querySelector<HTMLButtonElement>('.blocked-hosts button')!;
+        equal(input.maxLength, 253);
+        equal(add.disabled, true);
+        input.value = 'bank.example';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await tick();
+        equal(input.value, 'bank.example', 'a failed save retains the edit');
+        equal(saved().blockedHosts, undefined);
+        accept = true;
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await tick();
+        deepEqual(saved().blockedHosts, ['bank.example']);
+        equal(input.value, '');
+        equal(document.activeElement, input);
+        ok(remove().getAttribute('aria-label')?.includes('bank.example'));
+        const button = remove().getBoundingClientRect();
+        // The row ends at the card, or at the next setting when Electron adds developer mode below it.
+        const next = remove().closest('.blocked-hosts')!.nextElementSibling;
+        const end = next ? next.getBoundingClientRect().top : remove().closest('.st-card')!.getBoundingClientRect().bottom;
+        const option = view.host.querySelector('[data-opt="set-blocked-hosts"]')!.getBoundingClientRect();
+        ok(Math.abs((button.top - option.bottom) - (end - button.bottom)) <= 2, `${language}: the saved-host row has balanced vertical space`);
+        remove().focus();
+        accept = false;
+        remove().click();
+        await tick();
+        deepEqual(saved().blockedHosts, ['bank.example'], 'a refused removal keeps the host');
+        equal(document.activeElement, remove(), 'a refused removal restores keyboard focus');
+        accept = true;
+        remove().click();
+        await tick();
+        deepEqual(saved().blockedHosts, []);
+        equal(document.activeElement, input, 'focus survives removal of its button');
+        setSaved({ blockedHosts: Array.from({ length: 50 }, (_, n) => `${n}.${'a'.repeat(63)}.example`) });
+        await tick();
+        equal(input.disabled, true);
+        equal(add.disabled, true);
+        const main = view.host.querySelector<HTMLElement>('.s-main')!;
+        ok(main.scrollWidth <= main.clientWidth + 1, `${language}: names and actions do not overflow at 720 px`);
+        for (const button of view.host.querySelectorAll<HTMLButtonElement>('.blocked-hosts button')) {
+          const rect = button.getBoundingClientRect();
+          ok(rect.right <= 721 && rect.left >= 0, `${language}: Remove stays inside the window`);
+        }
+      } finally { view.stop(); }
+    }
+  } finally {
+    useLanguage('en');
+    forgetSection();
+    if (motion === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = motion;
+  }
+});
+
+check('settings: notification switches show what the engine sends, save separately and restore a refused change without playing anything', async () => {
+  const [saved, setSaved] = createSignal<Saved>(SHOWN);
+  const patches: Saved[] = [];
+  let accept = false;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => {
+      patches.push(patch);
+      if (accept) setSaved({ ...saved(), ...patch });
+      return accept;
+    },
+  }));
+  try {
+    const notify = view.host.querySelector<HTMLInputElement>('#set-notify-switch')!;
+    const sound = view.host.querySelector<HTMLInputElement>('#set-sound-switch')!;
+    ok(notify && sound, 'two switches in Notifications and system');
+    equal(notify.checked, true);
+    equal(sound.checked, true);
+    notify.click();
+    await tick();
+    equal(notify.checked, true, 'a refused save restores the switch');
+    deepEqual(saved(), SHOWN);
+    accept = true;
+    notify.click();
+    await tick();
+    equal(notify.checked, false);
+    equal(sound.checked, true, 'disabling notifications keeps the sound preference');
+    sound.click();
+    await tick();
+    notify.click();
+    await tick();
+    deepEqual(saved(), { ...SHOWN, notifications: true, notificationSound: false });
+    deepEqual(patches, [{ notifications: false }, { notifications: false }, { notificationSound: false }, { notifications: true }]);
+  } finally { view.stop(); }
+});
+
+check('settings: keep-awake and autostart show what the engine sends, saving separately and restoring on refusal', async () => {
+  const original = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+  Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Windows' });
+  const [saved, setSaved] = createSignal<Saved>(SHOWN);
+  const patches: Saved[] = [];
+  let accept = false;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => {
+      patches.push(patch);
+      if (accept) setSaved({ ...saved(), ...patch });
+      return accept;
+    },
+  }));
+  try {
+    const resume = view.host.querySelector<HTMLInputElement>('#set-resume-interrupted-switch')!;
+    const awake = view.host.querySelector<HTMLInputElement>('#set-awake-switch')!;
+    const autostart = view.host.querySelector<HTMLInputElement>('#set-autostart-switch')!;
+    ok(awake && autostart, 'the two system switches are there on Windows');
+    equal(awake.checked, true);
+    equal(resume.checked, true);
+    equal(autostart.checked, false);
+    awake.click();
+    await tick();
+    equal(awake.checked, true, 'a refused save restores the keep-awake switch');
+    deepEqual(saved(), SHOWN);
+    accept = true;
+    awake.click();
+    await tick();
+    equal(awake.checked, false);
+    resume.click();
+    await tick();
+    equal(resume.checked, false);
+    autostart.click();
+    await tick();
+    equal(autostart.checked, true);
+    deepEqual(saved(), { ...SHOWN, keepAwake: false, resumeInterrupted: false, autostart: true });
+    deepEqual(patches, [{ keepAwake: false }, { keepAwake: false }, { resumeInterrupted: false }, { autostart: true }]);
+  } finally {
+    view.stop();
+    if (original) Object.defineProperty(navigator, 'userAgent', original);
+    else Reflect.deleteProperty(navigator, 'userAgent');
+  }
+});
+
+check('settings: receive previews defaults off, saves on its own and is restored when the save is refused', async () => {
+  const [saved, setSaved] = createSignal<Saved>({});
+  const patches: Saved[] = [];
+  let accept = false;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => {
+      patches.push(patch);
+      if (accept) setSaved({ ...saved(), ...patch });
+      return accept;
+    },
+  }));
+  try {
+    const group = [...view.host.querySelectorAll<HTMLElement>('.st-group')].find((g) => g.querySelector('.st-title')?.textContent === en['set.updates']);
+    ok(group, 'General has an Updates group');
+    const previews = group!.querySelectorAll<HTMLInputElement>('input[role="switch"]');
+    equal(previews.length, 1, 'one switch, no second way');
+    equal(previews[0]!.checked, false, 'previews default off');
+    previews[0]!.click();
+    await tick();
+    equal(previews[0]!.checked, false, 'a refused save restores the switch');
+    accept = true;
+    previews[0]!.click();
+    await tick();
+    equal(previews[0]!.checked, true);
+    previews[0]!.click();
+    await tick();
+    equal(previews[0]!.checked, false, 'turning it off is saved too');
+    deepEqual(patches, [{ previews: true }, { previews: true }, { previews: false }]);
+  } finally { view.stop(); }
+});
+
+check('settings: full trust for Faber\u2019s own setup is one switch under How the AI works, off by default, saved on its own', async () => {
+  const [saved, setSaved] = createSignal<Saved>(SHOWN);
+  const patches: Saved[] = [];
+  let accept = false;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => {
+      patches.push(patch);
+      if (accept) setSaved({ ...saved(), ...patch });
+      return accept;
+    },
+  }));
+  try {
+    const group = [...view.host.querySelectorAll<HTMLElement>('.st-group')].find((g) => g.querySelector('.st-title')?.textContent === en['set.group.ai']);
+    ok(group, 'General has the How the AI works group');
+    const row = group!.querySelector<HTMLElement>('[data-opt="set-trust"]');
+    ok(row, 'the switch lives in Settings, in that group');
+    equal(view.host.querySelectorAll('[data-opt="set-trust"]').length, 1, 'one switch, no second way');
+    ok(row!.textContent!.includes(en['set.faberTrust']) && row!.textContent!.includes(en['set.faberTrustHint']), 'its label and its one line');
+    const sw = view.host.querySelector<HTMLInputElement>('#set-trust-switch')!;
+    equal(sw.checked, false, 'full trust defaults off');
+    sw.click();
+    await tick();
+    equal(sw.checked, false, 'a refused save restores the switch');
+    accept = true;
+    sw.click();
+    await tick();
+    equal(sw.checked, true);
+    sw.click();
+    await tick();
+    equal(sw.checked, false, 'turning it off is saved too');
+    deepEqual(patches, [{ faberTrust: true }, { faberTrust: true }, { faberTrust: false }]);
+  } finally { view.stop(); }
+});
+
+check('settings: an answer that arrives after Appearance closed leaves the draft alone', async () => {
+  const [draft, setDraft] = createSignal<Appearance>({ base: 'oficina' });
+  const asks: Array<{ resolve: (l: Look) => void; reject: (e: unknown) => void }> = [];
+  const request = () => new Promise<Look>((resolve, reject) => asks.push({ resolve, reject }));
+  const props: AppearanceProps = { look: look(), saved: undefined, draft, setDraft, onUse: async () => true, request };
+  // The draft is not saved, so the section asks for its preview as it opens; then it is closed with the answer still on its way.
+  const first = section(props);
+  equal(asks.length, 1);
+  first.stop();
+  const second = section(props);
+  presetButton(second.host, 'manha').click();
+  equal(draft().base, 'manha');
+  asks.at(-1)!.resolve(look());
+  asks[0]!.reject({ key: 'error.look.nearAmber' });
+  await tick();
+  equal(draft().base, 'manha', 'the old refusal put the old draft back');
+  second.stop();
+});
+
+check('settings: a failing contrast pair keeps "Use this look" shut, and a look that reads well opens it', async () => {
+  const [draft, setDraft] = createSignal<Appearance>({ base: 'oficina' });
+  const bad = look({ checks: [{ a: 'ink-3', b: 'bg', ratio: 4.1, min: 4.5, pass: false }] });
+  const answers = [bad];
+  let used = 0;
+  const props: AppearanceProps = {
+    look: look(),
+    saved: undefined,
+    draft,
+    setDraft,
+    onUse: async () => {
+      used++;
+      return true;
+    },
+    request: async () => answers.shift() ?? look(),
+  };
+  const view = section(props);
+  await tick();
+  const button = useButton(view.host);
+  ok(button.disabled, 'a failing pair is on show and the button is open');
+  button.click();
+  equal(used, 0, 'a refused look was sent to be saved');
+  presetButton(view.host, 'manha').click();
+  await tick();
+  ok(!button.disabled, 'a look that reads well should be usable');
+  button.click();
+  equal(used, 1);
+  view.stop();
+});
+
+check('settings: the preview draws the effect of the new conversation and the two lights, and wears none of them when they are off', () => {
+  const lines = { 'amber-line': 'rgb(9, 9, 9)', 'line-2': 'rgb(8, 8, 8)' };
+  const on = { ...lines, 'amb-beam': 'block', 'amb-loom': 'none', 'amb-flow': 'none', 'amber-light': '0 14px 34px -18px rgb(1, 2, 3)', 'focus-light': '0 18px 50px -22px rgb(4, 5, 6)' };
+  const off = { ...lines, 'amb-beam': 'none', 'amb-loom': 'none', 'amb-flow': 'none', 'amber-light': '0 0 0 0 transparent', 'focus-light': '0 0 0 0 transparent' };
+  const [vars, setVars] = createSignal<Record<string, string>>(on);
+  const view = mount(() => createComponent(Mini, { get look() { return look({ vars: vars() }); } }));
+  const style = (selector: string) => getComputedStyle(view.host.querySelector(selector)!);
+  equal(style('.m-beam').display, 'block');
+  ok(style('.m-ask').boxShadow.includes('rgb(1, 2, 3)'), 'the amber light is not on the question');
+  ok(style('.m-in').boxShadow.includes('rgb(4, 5, 6)'), 'the focus light is not on the text box');
+  setVars(off);
+  equal(style('.m-beam').display, 'none');
+  ok(!style('.m-ask').boxShadow.includes('rgb(1, 2, 3)'));
+  ok(!style('.m-in').boxShadow.includes('rgb(4, 5, 6)'));
+  view.stop();
+});
+
+const cli = (account: CheckResult['account'], installed = true): CheckResult => ({ vendor: 'claude', installed, account, canInstall: false });
+
+check('settings: only a CLI that says it is signed in is a connected account', () => {
+  equal(accountLine(undefined), 'checking');
+  equal(accountLine('failed'), 'unsure');
+  equal(accountLine(cli('signedIn')), 'connected');
+  equal(accountLine(cli('signedOut')), 'notConnected', 'an installed CLI nobody signed in to');
+  equal(accountLine(cli('signedOut', false)), 'notConnected');
+  equal(accountLine(cli('unknown')), 'unsure');
+  equal(accountLine(cli('unknown', false)), 'notConnected', 'nothing installed, nothing to check');
+});
+
+check('settings: unsupported system controls are absent outside Windows', () => {
+  const original = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+  Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Macintosh' });
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    // Hooks, full trust, stronger AI if stuck, notify, sound, resume and previews; keep-awake and autostart are Windows-only.
+    equal(view.host.querySelectorAll('input[role="switch"]').length, 7);
+  } finally {
+    view.stop();
+    if (original) Object.defineProperty(navigator, 'userAgent', original);
+    else Reflect.deleteProperty(navigator, 'userAgent');
+  }
+});
+
+check('settings default model follows account availability and saves Auto explicitly', async () => {
+  const [saved, setSaved] = createSignal<Saved>({});
+  const [vendors, setVendors] = createSignal<Vendor[]>(['claude']);
+  const patches: Saved[] = [];
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, get vendors() { return vendors(); }, quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => { patches.push(patch); setSaved({ ...saved(), ...patch }); return true; },
+  }));
+  try {
+    const chip = () => view.host.querySelector<HTMLButtonElement>('[data-opt=set-default-model] .model-chip')!;
+    const gemini = () => view.host.querySelector<HTMLElement>('.model-group.gemini');
+    chip().click();
+    await tick();
+    equal(gemini(), null);
+    setVendors(['claude', 'gemini']);
+    ok(gemini()?.querySelector('.mk.gemini'));
+    [...view.host.querySelectorAll<HTMLButtonElement>('.model-option')].find((o) => o.textContent === 'Gemini 4 Hydrogen')!.click();
+    await tick();
+    ok(chip().querySelector('.mk.gemini'));
+    setVendors(['claude']);
+    equal(chip().querySelector('.mk.gemini'), null);
+    setVendors(['claude', 'gemini']);
+    ok(chip().querySelector('.mk.gemini'));
+    chip().click();
+    await tick();
+    view.host.querySelector<HTMLButtonElement>('.model-option')!.click();
+    deepEqual(patches, [{ defaultModel: { vendor: 'gemini', model: 'gemini-4-hydrogen' } }, { defaultModel: { vendor: 'auto' } }]);
+  } finally {
+    view.stop();
+  }
+});
+
+check('R140: the permission menu lists five modes with one plain line each, and the long text stays out of the page until the "?" opens it', async () => {
+  const [saved, setSaved] = createSignal<Saved>({});
+  const [vendors, setVendors] = createSignal<Vendor[]>(['claude']);
+  const patches: Saved[] = [];
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, get vendors() { return vendors(); }, quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => { patches.push(patch); setSaved({ ...saved(), ...patch }); return true; },
+  }));
+  try {
+    const pick = () => view.host.querySelector<HTMLButtonElement>('#set-permissions-pick')!;
+    const options = () => [...view.host.querySelectorAll<HTMLElement>('#set-permissions-pick-list [role="option"]')];
+    equal(pick().textContent, en['set.permissions.dontAsk'], 'full access is on when nothing is saved');
+    equal(view.host.querySelector('[role="listbox"]'), null, 'the menu is closed until it is asked for');
+    equal(view.host.querySelector('#set-permissions-hint')!.textContent, en['set.permissions.dontAsk.line'], 'the row says the line of the mode that is on');
+    pick().click();
+    await tick();
+    deepEqual(options().map((o) => o.querySelector('b')!.textContent), [en['set.permissions.ask'], en['set.permissions.acceptEdits'], en['set.permissions.plan'], en['set.permissions.auto'], en['set.permissions.dontAsk']]);
+    deepEqual(options().map((o) => o.querySelector('small')!.textContent), [en['set.permissions.ask.line'], en['set.permissions.acceptEdits.line'], en['set.permissions.plan.line'], en['set.permissions.auto.line'], en['set.permissions.dontAsk.line']]);
+    for (const row of options()) ok(row.querySelector('small')!.textContent!.length < 70, 'one short line');
+    deepEqual(options().map((o) => o.getAttribute('aria-selected')), ['false', 'false', 'false', 'false', 'true']);
+    const body = (key: 'set.permissionsDontAskBody' | 'set.permissionsAskBody' | 'set.permissions.auto.more') => en[key].split('\n').every((line) => view.host.textContent!.includes(line));
+    equal(body('set.permissionsDontAskBody'), false, 'the long risk text is not on the page');
+    const more = view.host.querySelector<HTMLButtonElement>('#set-permissions-q')!;
+    equal(more.getAttribute('aria-expanded'), 'false');
+    equal(more.textContent, '?');
+    equal(more.getAttribute('aria-label'), en['set.learnMore']);
+    more.click();
+    await tick();
+    equal(body('set.permissionsDontAskBody'), true);
+    equal(more.getAttribute('aria-expanded'), 'true');
+    options()[3]!.click();
+    await tick();
+    deepEqual(patches, [{ permissions: 'auto' }]);
+    await leave();
+    equal(view.host.querySelector('[role="listbox"]'), null, 'picking closes the menu');
+    equal(pick().textContent, en['set.permissions.auto']);
+    equal(view.host.querySelector('#set-permissions-hint')!.textContent, en['set.permissions.auto.line']);
+    equal(body('set.permissions.auto.more'), true, 'the open text follows the mode');
+    more.click();
+    await leave();
+    equal(body('set.permissions.auto.more'), false, 'closed, it leaves the page');
+    // The keyboard opens the menu, and Esc closes it without reaching the page behind (which would leave Settings).
+    let escapes = 0;
+    const seen = (e: Event) => { if ((e as KeyboardEvent).key === 'Escape') escapes++; };
+    window.addEventListener('keydown', seen);
+    try {
+      pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await tick();
+      equal(options().length, 5, 'ArrowDown opens the menu');
+      pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await leave();
+      equal(view.host.querySelector('[role="listbox"]'), null, 'Esc closes it');
+      equal(document.activeElement, pick(), 'Esc returns focus to the access choice');
+      equal(escapes, 0, 'and stays inside the menu');
+      pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      equal(escapes, 1, 'with the menu shut, Esc goes on to the page as before');
+      pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await tick();
+      const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+      pick().dispatchEvent(tab);
+      equal(tab.defaultPrevented, false, 'Tab keeps native traversal to the next control');
+      await leave();
+      equal(view.host.querySelector('[role="listbox"]'), null, 'Tab removes the open options from traversal');
+    } finally { window.removeEventListener('keydown', seen); }
+    // Web search: Cached and the Codex-only choices exist only where Codex is connected.
+    const labels = (id: string) => [...view.host.querySelectorAll<HTMLButtonElement>(`#${id} button`)].map((b) => b.textContent);
+    deepEqual(labels('set-web-pick'), [en['set.webSearch.off'], en['set.webSearch.live']]);
+    equal(view.host.querySelector('#set-codex'), null);
+    equal(view.host.querySelector('#set-web-pick button[aria-pressed="true"]')!.textContent, en['set.webSearch.live'], 'live is the default');
+    setVendors(['claude', 'codex']);
+    await tick();
+    deepEqual(labels('set-web-pick'), [en['set.webSearch.off'], en['set.webSearch.cached'], en['set.webSearch.live']]);
+    // The Codex group starts closed and is not in the page until it is opened.
+    const fold = view.host.querySelector<HTMLButtonElement>('#set-codex')!;
+    equal(fold.getAttribute('aria-expanded'), 'false', 'the Codex group is closed by default');
+    equal(view.host.querySelector('[data-opt="set-summary"]'), null);
+    equal(view.host.querySelector('[data-opt="set-verbosity"]'), null);
+    fold.click();
+    await tick();
+    equal(fold.getAttribute('aria-expanded'), 'true');
+    const choices = (id: string) => [...view.host.querySelectorAll<HTMLOptionElement>(`[data-opt="${id}"] select option`)].map((o) => o.textContent);
+    deepEqual(choices('set-summary'), [en['set.default'], en['set.summary.auto'], en['set.summary.concise'], en['set.summary.detailed'], en['set.summary.none']]);
+    equal(view.host.querySelector('[data-opt="set-verbosity"]'), null, 'answer length is replaced by the shared reply style');
+    equal(view.host.querySelector<HTMLSelectElement>('[data-opt="set-summary"] select')!.value, 'default');
+    equal(view.host.textContent!.includes(en['set.webSearch.more']), false, 'the web details are closed too');
+    view.host.querySelector<HTMLButtonElement>('#set-web-q')!.click();
+    await tick();
+    equal(view.host.textContent!.includes(en['set.webSearch.more']), true);
+    view.host.querySelector<HTMLButtonElement>('#set-web-pick button')!.click();
+    const choose = (id: string, value: string) => {
+      const list = view.host.querySelector<HTMLSelectElement>(`[data-opt="${id}"] select`)!;
+      list.value = value;
+      list.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    choose('set-summary', 'detailed');
+    await tick();
+    deepEqual(patches.slice(1), [{ webSearch: 'off' }, { reasoningSummary: 'detailed' }]);
+  } finally { view.stop(); }
+});
+
+check('R140: every mode has a name, a line and, for the three new ones, details, in every language', () => {
+  for (const [code, messages] of Object.entries({ en, 'pt-BR': ptBR, es, fr, de })) {
+    for (const mode of ['ask', 'acceptEdits', 'plan', 'auto', 'dontAsk'] as const) {
+      ok(messages[`set.permissions.${mode}`].trim() && messages[`set.permissions.${mode}.line`].trim(), `${code} ${mode}`);
+    }
+    ok(messages['mode.fallback.auto'].trim() && messages['set.learnMore'].trim() && messages['composer.mode'].trim(), code);
+  }
+  equal(en['set.permissions.dontAsk'], 'Full access');
+});
+
+// ---- the calm grammar (calm screens, delivery 2) ----
+
+const SECTION_IDS = ['set.general', 'set.projects', 'set.appearance', 'set.subscriptions', 'set.privacy'] as const;
+const navButton = (host: HTMLElement, key: (typeof SECTION_IDS)[number]) => [...host.querySelectorAll<HTMLButtonElement>('.s-nav .item')].find((b) => b.textContent!.includes(en[key]))!;
+
+check('settings: five sections remain, accounts and their limits are one, and Faber\'s version closes the list once', () => {
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: [], quotas: {}, now: 0, version: '9.9.9',
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    const items = [...view.host.querySelectorAll<HTMLButtonElement>('.s-nav .item')].slice(1).map((b) => b.textContent!.trim());
+    deepEqual(items, [en['set.general'], en['set.projects'], en['set.appearance'], 'Accounts and limits', en['set.privacy']]);
+    equal(en['set.subscriptions'], 'Accounts and limits');
+    ok(!('set.usage' in en), 'the usage limits section is gone');
+    equal(view.host.querySelectorAll('.s-version').length, 1);
+    equal(view.host.querySelector('.s-nav')!.lastElementChild!.textContent, 'Faber 9.9.9', 'at the bottom of the list');
+  } finally { view.stop(); }
+});
+
+check('settings: no section has a "Learn more" link, and every long text sits behind the "?" of its own row', async () => {
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: ['claude', 'codex'], quotas: {}, now: 0,
+    usage: [{ vendor: 'claude', state: 'ok', ownSpendUsd: 0, windows: [] }] as unknown as VendorUsage[],
+    projects: [{ id: 'p1', name: 'Demo', path: 'C:/fixture/demo' }],
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true, onChatFolder: async () => {},
+  }));
+  try {
+    for (const key of SECTION_IDS) {
+      navButton(view.host, key).click();
+      await tick();
+      const links = [...view.host.querySelectorAll<HTMLElement>('button, a')].filter((e) => e.textContent!.trim() === en['set.learnMore']);
+      equal(links.length, 0, `${key}: a "Learn more" link is still on the page`);
+    }
+    navButton(view.host, 'set.general').click();
+    await tick();
+    const marks = [...view.host.querySelectorAll<HTMLButtonElement>('.st-q')];
+    ok(marks.length >= 5, `the long texts have their "?" (${marks.length})`);
+    for (const mark of marks) {
+      equal(mark.getAttribute('aria-label'), en['set.learnMore'], 'one accessible name, one key');
+      equal(mark.getAttribute('aria-expanded'), 'false');
+      ok(mark.getAttribute('aria-controls'), 'it says what it opens');
+    }
+    // A row's hint is one short line; the paragraphs are not on the page until the "?" opens one.
+    for (const hint of view.host.querySelectorAll('.st-hint')) ok(hint.textContent!.length <= 70, `a hint is one short line: ${hint.textContent}`);
+    equal(view.host.querySelectorAll('.st-more').length, 0, 'nothing is unfolded');
+    marks[0]!.click();
+    await tick();
+    equal(view.host.querySelectorAll('.st-more').length, 1);
+    equal(!('set.more' in en), true, 'the second "Learn more" key is gone');
+  } finally { view.stop(); }
+});
+
+check('settings: the chat working folder is one row, and only where its control exists', async () => {
+  const withFolder = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: [], quotas: {}, now: 0, chatFolder: 'C:/work',
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true, onChatFolder: async () => {},
+  }));
+  const without = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    equal(withFolder.host.querySelectorAll('[data-opt="set-folder"]').length, 1);
+    ok(withFolder.host.querySelector('[data-opt="set-folder"] .btn'), 'the row carries its control');
+    equal(without.host.querySelector('[data-opt="set-folder"]'), null, 'no label and no explanation without a control');
+    ok(!without.host.textContent!.includes(en['set.chatFolder']));
+  } finally { withFolder.stop(); without.stop(); }
+});
+
+check('settings: an exit copy preserves the language selected on the live native select', async () => {
+  forgetSection();
+  const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
+  Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
+    return this.media === '(prefers-reduced-motion: reduce)' ? false : preference.get!.call(this);
+  } });
+  const was = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'full';
+  useLanguage('pt-BR');
+  let saves = 0;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: { language: 'pt-BR' }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => { saves++; return true; },
+  }));
+  const selected = (list: HTMLSelectElement) => ({
+    value: list.value, index: list.selectedIndex, label: list.selectedOptions[0]?.label,
+    options: [...list.options].map((option) => ({ value: option.value, selected: option.selected, defaultSelected: option.defaultSelected })),
+  });
+  try {
+    view.host.querySelector<HTMLElement>('.settings')!.style.cssText = 'position:fixed;left:0;top:0;width:720px;height:444px';
+    const live = view.host.querySelector<HTMLSelectElement>('select[aria-label="Idioma"]')!;
+    ok(live, 'the reproduction uses Settings\' real native language select');
+    await leave();
+    const before = selected(live);
+    equal(before.value, 'pt-BR');
+    ok(before.index > 0, 'a nondefault native option is selected before the section leaves');
+    equal(before.label, 'Português (Brasil)');
+    // Keep native cloning separate in failure evidence: the regression is the real animateList exit copy below.
+    const nativeClone = selected(live.cloneNode(true) as HTMLSelectElement);
+    const privacy = [...view.host.querySelectorAll<HTMLButtonElement>('.s-nav .item')]
+      .find((button) => button.querySelector('span')?.textContent === ptBR['set.privacy'])!;
+    privacy.click();
+    await tick();
+    equal(view.host.querySelectorAll('.facts').length, 1, 'Privacy is the new live section');
+    equal(view.host.querySelectorAll('select[aria-label="Idioma"]').length, 0, 'General is only an exit copy');
+    equal(saves, 0, 'switching sections saved no setting');
+    const copy = [...document.querySelectorAll<HTMLElement>('.motion-exit')]
+      .flatMap((host) => [...(host.shadowRoot?.querySelectorAll<HTMLSelectElement>('select[aria-label="Idioma"]') ?? [])])[0];
+    ok(copy, 'the departing General section has a real native select in its shadow exit copy');
+    const observed = selected(copy);
+    const evidence = JSON.stringify({ before, nativeClone, detachedLive: selected(live), exitCopy: observed });
+    equal(observed.value, before.value, 'the exit copy must keep the live language: ' + evidence);
+    equal(observed.index, before.index, 'the exit copy keeps the actual selected index');
+    equal(observed.label, before.label, 'the visible departing label matches the live control');
+  } finally {
+    view.stop();
+    await leave();
+    Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
+    if (was === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = was;
+    useLanguage('en');
+  }
+});
+check('settings: switching sections is a short cross-fade (the old one leaves as a copy, the new one arrives), instant when reduced, and the new section opens at its top', async () => {
+  const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
+  Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
+    return this.media === '(prefers-reduced-motion: reduce)' ? false : preference.get!.call(this);
+  } });
+  const rectDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'getBoundingClientRect')!;
+  const geometry: unknown[] = [];
+  let phase = 'mount';
+  // Retain only rectangles the real animation already requested; never add a layout read.
+  Object.defineProperty(Element.prototype, 'getBoundingClientRect', { ...rectDescriptor, value(this: Element) {
+    const rect = rectDescriptor.value.call(this) as DOMRect;
+    if (geometry.length < 24 && this.matches('.s-main > .st-group, .s-main > .st-card')) {
+      geometry.push({ at: performance.now(), phase, class: this.className, connected: this.isConnected,
+        x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+        top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left });
+    }
+    return rect;
+  } });
+  let view: ReturnType<typeof mount>;
+  try {
+    view = mount(() => createComponent(Settings, {
+      look: look(), saved: {}, vendors: ['claude', 'codex'], quotas: {}, now: 0,
+      onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+    }));
+  } catch (error) {
+    Object.defineProperty(Element.prototype, 'getBoundingClientRect', rectDescriptor);
+    Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
+    throw error;
+  }
+  const was = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'full';
+  try {
+    const settings = view.host.querySelector<HTMLElement>('.settings')!;
+    settings.style.cssText = 'position:fixed;left:0;top:0;width:1100px;height:240px';
+    const main = view.host.querySelector<HTMLElement>('.s-main')!;
+    ok(main.hasAttribute('data-motion-list'), '.s-main is an animated list: the old section keeps an inert copy while it fades');
+    ok(main.scrollHeight > main.clientHeight, 'General is taller than the window here');
+    phase = 'scrolled';
+    main.scrollTop = 200;
+    ok(main.scrollTop > 0, 'the section is scrolled down');
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    phase = 'switching';
+    navButton(view.host, 'set.privacy').click();
+    await tick();
+    phase = 'after tick';
+    equal(main.scrollTop, 0, 'a section opens at its top');
+    equal(view.host.querySelectorAll('.facts').length, 1, 'only the new section is in the page');
+    equal(view.host.querySelectorAll('.st-group').length, 2, 'and none of General: only the Blocked sites and Other windows groups of Privacy are live');
+    const departing = document.querySelector('.motion-exit')?.shadowRoot?.querySelector('.st-group');
+    ok(departing, `the old section leaves as an inert copy${departing ? '' : `; diagnostic ${JSON.stringify({
+      motion: document.documentElement.dataset.motion, effectiveLevel: level(main),
+      localMotion: main.closest<HTMLElement>('[data-motion]')?.dataset.motion,
+      root: { class: document.documentElement.className, data: { ...document.documentElement.dataset } },
+      viewport: { width: innerWidth, height: innerHeight, visibility: document.visibilityState },
+      fonts: [...document.fonts].map(({ family, status }) => ({ family, status })),
+      style: { font: getComputedStyle(main).font, exitDuration: getComputedStyle(main).getPropertyValue('--dur-exit') },
+      geometry,
+      layers: [...document.querySelectorAll('.motion-exit')].map((layer) => ({
+        class: layer.className, inert: (layer as HTMLElement).inert,
+        copies: [...(layer.shadowRoot?.querySelectorAll('.motion-exit') ?? [])].map((copy) => ({
+          class: copy.className, style: copy.getAttribute('style'),
+          animations: copy.getAnimations().map((animation) => ({
+            state: animation.playState, time: animation.currentTime, timing: animation.effect?.getComputedTiming(),
+          })),
+        })),
+      })),
+    })}`}`);
+    ok(view.host.querySelector('.s-main > .st-card')!.getAnimations().length > 0, 'the new section arrives instead of appearing');
+    // Waits for the fade to end rather than a fixed time: a slow runner (macOS CI) ends it later.
+    for (const start = Date.now(); (document.querySelector('.motion-exit') || main.getAnimations({ subtree: true }).length > 0) && Date.now() - start < 3000; ) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    equal(document.querySelector('.motion-exit'), null, 'the copy is removed once it has faded');
+    equal(main.getAnimations({ subtree: true }).length, 0, 'and the stage rests');
+    // Reduced motion: the same switch is instant.
+    document.documentElement.dataset.motion = 'reduced';
+    navButton(view.host, 'set.general').click();
+    await tick();
+    equal(document.querySelector('.motion-exit'), null, 'no copy of the old section');
+    for (const frame of [0, 1, 2]) {
+      await frames(1);
+      equal(main.getAnimations({ subtree: true }).length, 0, `nothing on the stage animates (frame ${frame})`);
+    }
+  } finally {
+    Object.defineProperty(Element.prototype, 'getBoundingClientRect', rectDescriptor);
+    Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
+    if (was === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = was;
+    view.stop();
+  }
+});
+
+check('settings: reversing a section switch before its exit ends keeps the latest section and releases its copies', async () => {
+  const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
+  const was = document.documentElement.dataset.motion;
+  const rectDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'getBoundingClientRect')!;
+  const geometry: unknown[] = [];
+  let phase = 'mount';
+  Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
+    return this.media === '(prefers-reduced-motion: reduce)' ? false : preference.get!.call(this);
+  } });
+  useLanguage('en');
+  // Observe the rectangles already requested by the real list, without another layout read.
+  Object.defineProperty(Element.prototype, 'getBoundingClientRect', { ...rectDescriptor, value(this: Element) {
+    const rect = rectDescriptor.value.call(this) as DOMRect;
+    if (this.matches('.s-main > .st-group, .s-main > .st-card')) {
+      if (geometry.length === 24) geometry.shift();
+      geometry.push({ at: performance.now(), phase, class: this.className, connected: this.isConnected,
+        x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+        top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left });
+    }
+    return rect;
+  } });
+  try {
+    for (const mode of ['full', 'reduced', 'none']) {
+      phase = `${mode}:mount`;
+      document.documentElement.dataset.motion = mode;
+      const view = mount(() => createComponent(Settings, {
+        look: look(), saved: {}, vendors: ['claude', 'codex'], quotas: {}, now: 0, start: 'general',
+        onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+      }));
+      let paused: Animation[] = [];
+      try {
+        const settings = view.host.querySelector<HTMLElement>('.settings')!;
+        settings.style.cssText = 'position:fixed;left:0;top:0;width:1100px;height:240px';
+        await leave();
+        const main = view.host.querySelector<HTMLElement>('.s-main')!;
+        const rect = main.querySelector('.st-group')!.getBoundingClientRect();
+        ok(rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth,
+          `${mode}: General intersects the viewport before switching (${rect.x},${rect.y},${rect.width},${rect.height}; viewport ${innerWidth}x${innerHeight})`);
+        phase = `${mode}:switch`;
+        navButton(view.host, 'set.privacy').click();
+        await tick();
+        equal(main.querySelectorAll('.facts').length, 1, `${mode}: Privacy really opened`);
+        if (mode === 'full') {
+          const departing = document.querySelector('.motion-exit')?.shadowRoot?.querySelector<HTMLElement>('.st-group');
+          ok(departing, `General has an actual departing copy before reversing${departing ? '' : `; diagnostic ${JSON.stringify({
+            at: performance.now(), phase, effectiveLevel: level(main),
+            root: { class: document.documentElement.className, data: { ...document.documentElement.dataset } },
+            viewport: { width: innerWidth, height: innerHeight, visibility: document.visibilityState },
+            exitDuration: getComputedStyle(main).getPropertyValue('--dur-exit'), geometry,
+            layers: [...document.querySelectorAll('.motion-exit')].map((layer) => ({
+              copies: [...(layer.shadowRoot?.querySelectorAll('.motion-exit') ?? [])].map((copy) => ({
+                class: copy.className, animations: copy.getAnimations().map((animation) => ({
+                  state: animation.playState, time: animation.currentTime, timing: animation.effect?.getComputedTiming(),
+                })),
+              })),
+            })),
+          })}`}`);
+          paused = departing.getAnimations().filter((animation) => animation.playState === 'running');
+          ok(paused.length > 0, 'reverse while the first exit is still running');
+          // Keep the exit alive through the assertions even when the test runner is delayed.
+          paused.forEach((animation) => animation.pause());
+        }
+        const general = navButton(view.host, 'set.general');
+        general.focus();
+        general.click();
+        // Outlast the 250 ms exit cap to reproduce a runner delayed after the switch.
+        if (mode === 'full') await new Promise((resolve) => setTimeout(resolve, 350));
+        else await tick();
+        ok(main.querySelector('.st-group'), `${mode}: the latest General section is live`);
+        equal(main.querySelectorAll('.facts').length, 0, `${mode}: Privacy is no longer live`);
+        equal(document.activeElement, general, `${mode}: exit copies do not take focus`);
+        const layer = document.querySelector<HTMLElement>('.motion-exit');
+        if (mode === 'full') {
+          ok(layer?.inert && layer.getAttribute('aria-hidden') === 'true', 'departing copies stay outside input and accessibility');
+          for (const copy of layer.shadowRoot!.querySelectorAll<HTMLElement>('.motion-exit')) {
+            ok(copy.inert && copy.getAttribute('aria-hidden') === 'true', 'each departing section is inert');
+          }
+        } else {
+          equal(layer, null, `${mode}: neither switch makes an exit copy`);
+          equal(main.getAnimations({ subtree: true }).length, 0, `${mode}: the returned section is immediate`);
+        }
+        paused.forEach((animation) => animation.play());
+        for (const start = Date.now(); (document.querySelector('.motion-exit') || main.getAnimations({ subtree: true }).length > 0) && Date.now() - start < 3000; ) await frames(1);
+        equal(document.querySelector('.motion-exit'), null, `${mode}: interrupted exits release every copy`);
+        equal(main.getAnimations({ subtree: true }).length, 0, `${mode}: the returned section rests`);
+        ok(main.querySelector('.st-group'), `${mode}: General remains live after the exits finish`);
+        equal(main.querySelectorAll('.facts').length, 0, `${mode}: no late exit restores Privacy`);
+        equal(document.activeElement, general, `${mode}: finishing exits does not move focus`);
+      } finally {
+        paused.forEach((animation) => animation.cancel());
+        view.stop();
+      }
+    }
+  } finally {
+    Object.defineProperty(Element.prototype, 'getBoundingClientRect', rectDescriptor);
+    Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
+    if (was === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = was;
+    forgetSection();
+  }
+});
+
+/** Runs a check with both CLIs saying someone is signed in, as the accounts section asks them when it opens. */
+async function signedIn<T>(run: () => Promise<T> | T): Promise<T> {
+  const was = api.setupCheck;
+  api.setupCheck = async (vendor) => ({ vendor, installed: vendor !== 'gemini', account: vendor === 'gemini' ? 'unknown' : 'signedIn', canInstall: false });
+  try { return await run(); } finally { api.setupCheck = was; }
+}
+
+check('settings: Antigravity has a card with or without its CLI, like the other two, named for the provider and with the plan it runs on', async () => {
+  useLanguage('en');
+  const was = api.setupCheck;
+  try {
+    for (const found of [false, true]) {
+      api.setupCheck = async (vendor) => ({ vendor, installed: vendor !== 'gemini' || found, account: 'signedOut', canInstall: false });
+      const view = mount(() => createComponent(Settings, {
+        look: look(), saved: {}, vendors: [], start: 'accounts', now: Date.now(), quotas: {},
+        onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+      }));
+      try {
+        await tick();
+        await tick();
+        const card = view.host.querySelector<HTMLElement>('.acct[data-vendor="gemini"]');
+        ok(card, found ? 'a found agy has a card' : 'without agy the card is there too, as for the other two');
+        equal(card.querySelector('h3')!.textContent, en['setup.antigravity'], 'named Antigravity, not after one of its models');
+        ok(card.textContent!.includes(en['setup.antigravityPlan']), 'the card names the plan it runs on');
+      } finally { view.stop(); }
+    }
+  } finally { api.setupCheck = was; }
+});
+
+check('settings: the accounts card writes Faber\'s spend in the person\'s format, never four decimals', () => {
+  const usage = [{ vendor: 'claude', plan: 'max', state: 'ok', learning: false, relearning: false, foreignUse: false, overageOn: false, billedPerUse: false,
+    billingUnknown: false, askForPlan: false, paidPossible: false, ownSpendUsd: 3.2, unmetered: 0, counting: false, windows: [] }] as unknown as VendorUsage[];
+  const text = (language: 'en' | 'pt-BR' | 'de') => {
+    useLanguage(language);
+    const view = mount(() => createComponent(Settings, {
+      look: look(), saved: {}, vendors: ['claude'], quotas: {}, now: 0, usage, start: 'accounts',
+      onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+    }));
+    try { return view.host.querySelector('.acct-foot:not(.acct-unread)')!.textContent!; } finally { view.stop(); }
+  };
+  try {
+    ok(text('en').includes('$3.20'), text('en'));
+    ok(text('pt-BR').includes('US$ 3,20'), text('pt-BR'));
+    ok(text('de').includes('3,20 US$'), text('de'));
+    for (const language of ['en', 'pt-BR', 'de'] as const) ok(!/\d[.,]\d{4}/.test(text(language)), `${language}: "${text(language)}" shows four decimals`);
+  } finally { useLanguage('en'); }
+});
+
+check('settings: one card per AI with a capitalised plan, one status word, the reset time in full and the notes behind one Details fold', () => signedIn(async () => {
+  useLanguage('en');
+  const until = Math.floor(Date.now() / 1000) + 84.5 * 3600;
+  const usage = [{ vendor: 'claude', plan: 'max', state: 'low', learning: true, relearning: false, outsideShare: 0.2, foreignUse: true, overageOn: true, billedPerUse: false,
+    billingUnknown: false, askForPlan: false, paidPossible: false, ownSpendUsd: 1, unmetered: 2, counting: true,
+    windows: [{ name: 'seven_day', used: 0.4, elapsed: 0.5, expected: 0.5, resetsAt: until, readAt: Date.now(), uncounted: null }] }] as unknown as VendorUsage[];
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: ['claude'], start: 'accounts', now: Date.now(), usage,
+    quotas: { 'claude:seven_day': { vendor: 'claude', window: 'seven_day', used: 0.4, resetsAt: until } },
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    await tick();
+    await tick();
+    equal(view.host.querySelectorAll('.acct').length, 3, 'one card for each AI, Antigravity too');
+    ok(view.host.textContent!.includes(en['usage.apiValue']), 'the visible estimate explains that it is not a bill');
+    const card = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"]')!;
+    ok(card.textContent!.includes('Plan: Max'), 'the plan is capitalised');
+    const pill = card.querySelector('.acct-pill')!;
+    equal(pill.textContent, en['usage.pill.low']);
+    equal(card.dataset.state, 'connected');
+    ok(pill.classList.contains('warn'), 'amber for a window that is really near its limit (C002)');
+    const reset = card.querySelector<HTMLElement>('.urow .reset')!;
+    equal(reset.textContent, 'resets in 3d 13h', 'days and hours, rounded up, so 3.5 days never reads 4');
+    ok(reset.scrollWidth <= reset.clientWidth + 1, 'the reset time is not cut');
+    equal(card.querySelectorAll('.hint').length, 0, 'every note is behind the fold');
+    const fold = card.querySelector<HTMLButtonElement>('.st-fold-head')!;
+    equal(fold.getAttribute('aria-expanded'), 'false');
+    fold.click();
+    await tick();
+    const notes = [...card.querySelectorAll('.acct-details .hint')].map((n) => n.textContent!);
+    for (const key of ['quota.countingNote', 'usage.shared', 'usage.learning', 'usage.foreign', 'usage.overageOn'] as const) ok(notes.includes(en[key]), key);
+    ok(notes.some((n) => n.includes('2 requests')), 'the incomplete meter');
+    equal(view.host.querySelectorAll('[data-restore="manage"]').length, 1, 'Manage accounts appears once in the section');
+    equal(en['set.openSetup'], 'Manage accounts', 'one label opens the account cards from Settings');
+  } finally { view.stop(); }
+}));
+
+check('settings: a window still counting, or with an uncounted share, reads at least beside its number, not only inside Details (C010)', () => signedIn(async () => {
+  useLanguage('en');
+  const until = Math.floor(Date.now() / 1000) + 7 * 3600;
+  const usage = (counting: boolean, uncounted: number | null) => [{ vendor: 'claude', plan: 'max', state: 'ok', learning: false, relearning: false, foreignUse: false, overageOn: false,
+    billedPerUse: false, billingUnknown: false, askForPlan: false, paidPossible: false, ownSpendUsd: 0, unmetered: 0, counting,
+    windows: [{ name: 'seven_day', used: 0.44, elapsed: 0.5, expected: 0.5, resetsAt: until, readAt: Date.now(), uncounted }] }] as unknown as VendorUsage[];
+  const share = async (u: VendorUsage[]) => {
+    const view = mount(() => createComponent(Settings, {
+      look: look(), saved: {}, vendors: ['claude'], start: 'accounts', now: Date.now(), usage: u,
+      quotas: { 'claude:seven_day': { vendor: 'claude', window: 'seven_day', used: 0.44, resetsAt: until } },
+      onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+    }));
+    try {
+      await tick();
+      await tick();
+      const cell = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"] .urow .share')!;
+      ok(cell.scrollWidth <= cell.clientWidth + 1, `the share fits its cell (${cell.scrollWidth} > ${cell.clientWidth})`);
+      const label = cell.parentElement!.querySelector<HTMLElement>('.uname')!;
+      ok(label.getBoundingClientRect().right <= cell.getBoundingClientRect().left, 'the limit name and amount do not overlap');
+      return cell.textContent!.trim();
+    } finally { view.stop(); }
+  };
+  const counting = await share(usage(true, null));
+  ok(counting.startsWith('at least 44%'), `"${counting}" does not read at least 44%`);
+  ok(counting.includes(en['quota.counting']), 'screen readers still hear that it is counting');
+  const extra = await share(usage(false, 0.12));
+  ok(extra.startsWith('at least 44%') && !extra.includes(en['quota.counting']), `an uncounted share alone reads at least: "${extra}"`);
+  const calm = await share(usage(false, null));
+  equal(calm, '44%', 'a settled reading shows the number alone');
+  try {
+    for (const language of ['pt-BR', 'de', 'fr', 'es'] as const) {
+      useLanguage(language);
+      await share(usage(true, null));
+    }
+  } finally { useLanguage('en'); }
+}));
+
+check('settings: a billed-per-use or unconfirmed account says so calmly and is never amber; a really low one stays amber (C002)', () => signedIn(async () => {
+  useLanguage('en');
+  const card = async (flags: Record<string, boolean>, state: string) => {
+    const usage = [{ vendor: 'claude', plan: 'max', state, learning: false, relearning: false, foreignUse: false, overageOn: false, billedPerUse: false,
+      billingUnknown: false, askForPlan: false, paidPossible: false, ownSpendUsd: 0, unmetered: 0, counting: false, windows: [], ...flags }] as unknown as VendorUsage[];
+    const view = mount(() => createComponent(Settings, {
+      look: look(), saved: {}, vendors: ['claude'], start: 'accounts', now: Date.now(), usage, quotas: {},
+      onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+    }));
+    try {
+      await tick();
+      await tick();
+      const pill = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"] .acct-pill')!;
+      return { text: pill.textContent!, warn: pill.classList.contains('warn') };
+    } finally { view.stop(); }
+  };
+  deepEqual(await card({ billedPerUse: true }, 'out'), { text: en['usage.pill.billed'], warn: false });
+  deepEqual(await card({ billingUnknown: true }, 'unknown'), { text: en['usage.pill.unconfirmed'], warn: false });
+  deepEqual(await card({ billingUnknown: true }, 'out'), { text: en['usage.pill.unconfirmed'], warn: false });
+  deepEqual(await card({}, 'out'), { text: en['usage.pill.out'], warn: true }, 'a really exhausted quota stays amber');
+  const others = { 'pt-BR': ptBR, es, fr, de } as const;
+  for (const key of ['usage.pill.billed', 'usage.pill.unconfirmed'] as const) {
+    for (const [code, messages] of Object.entries(others)) ok(messages[key] !== undefined && messages[key] !== en[key], `${code} has its own ${key}`);
+  }
+}));
+
+check('settings: in Full access the hooks switch shows that hooks always run and is locked; in a mode that asks it is the saved choice', async () => {
+  const [saved, setSaved] = createSignal<Saved>({ permissions: 'dontAsk' });
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    const sw = () => view.host.querySelector<HTMLInputElement>('#set-hooks-switch')!;
+    const hint = () => view.host.querySelector('[data-opt="set-hooks"]')!.textContent!;
+    ok(sw().disabled && sw().checked, 'locked and on');
+    ok(hint().includes(en['set.hooksLocked']));
+    setSaved({ permissions: 'ask' });
+    await tick();
+    ok(!sw().disabled && !sw().checked, 'its own choice, off by default');
+    ok(hint().includes(en['set.hooksHint']));
+  } finally { view.stop(); }
+});
+
+check('settings: the first-run answers change later in General: experience saves on its own and the tutorial can play again', async () => {
+  const [saved, setSaved] = createSignal<Saved>({});
+  const patches: Saved[] = [];
+  let tours = 0;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onTour: () => void tours++,
+    onSave: async (patch) => {
+      patches.push(patch);
+      setSaved({ ...saved(), ...patch });
+      return true;
+    },
+  }));
+  try {
+    const pick = view.host.querySelectorAll<HTMLButtonElement>('#set-xp-pick button');
+    equal(pick.length, 2);
+    equal(pick[0]!.getAttribute('aria-pressed'), 'true', 'a person who never answered is a beginner');
+    pick[1]!.click();
+    await tick();
+    equal(pick[1]!.getAttribute('aria-pressed'), 'true');
+    deepEqual(patches, [{ experience: 'experienced' }]);
+    view.host.querySelector<HTMLButtonElement>('[data-opt="set-tour"] button')!.click();
+    equal(tours, 1);
+    ok(en['first.foot'].includes('Settings'), 'the first run says where its answers change');
+  } finally { view.stop(); }
+});
+
+check('reply_style: one shared Settings row saves each choice and restores the person’s words', async () => {
+  useLanguage('en');
+  const [saved, setSaved] = createSignal<Saved>({});
+  const [vendors, setVendors] = createSignal<Vendor[]>([]);
+  let refuse = false;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, get vendors() { return vendors(); }, quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => {
+      if (refuse) return false;
+      setSaved({ ...saved(), ...patch });
+      return true;
+    },
+  }));
+  const pick = () => view.host.querySelector<HTMLSelectElement>('[data-opt="set-reply-style"] select')!;
+  const words = () => view.host.querySelector<HTMLTextAreaElement>('textarea[aria-labelledby="set-reply-style-name"]');
+  const choose = async (style: string) => {
+    pick().value = style;
+    pick().dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+  };
+  try {
+    equal(pick().value, 'default', 'no account is needed to choose a style');
+    deepEqual([...pick().options].map((o) => o.textContent), [en['set.replyStyle.default'], en['set.replyStyle.short'], en['set.replyStyle.explained'], en['set.replyStyle.own']]);
+    for (const style of ['short', 'explained', 'default', 'own'] as const) {
+      await choose(style);
+      equal(saved().replyStyle, style);
+      equal(Boolean(words()), style === 'own');
+    }
+    equal(words()!.maxLength, 400);
+    words()!.value = '  Explain with game examples.  ';
+    words()!.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+    equal(saved().replyStyleText, 'Explain with game examples.');
+    await choose('short');
+    await choose('own');
+    equal(words()!.value, 'Explain with game examples.');
+    refuse = true;
+    await choose('explained');
+    equal(pick().value, 'own', 'a failed save restores the chosen style');
+    words()!.value = 'A refused edit';
+    words()!.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+    equal(words()!.value, 'Explain with game examples.', 'a refused edit restores the saved words');
+    for (const connected of [['claude'], ['codex'], ['claude', 'codex']] as Vendor[][]) {
+      setVendors(connected);
+      await tick();
+      equal(view.host.querySelectorAll('[data-opt="set-reply-style"]').length, 1);
+      equal(pick().value, 'own');
+      equal(view.host.querySelector('[data-opt="set-verbosity"]'), null);
+    }
+  } finally { view.stop(); }
+});
+
+check('reply_style: Escape saves the focused words before Settings closes and reopening restores them', async () => {
+  const original = { saveSettings: api.saveSettings, setClock: api.setClock, recents: api.recents };
+  const place = localStorage.getItem('faber.place');
+  const initial: AppState = {
+    vendors: [], models: [], quotas: [], projects: [], conversations: [], version: '0.0.0', running: { revision: 0, items: [] },
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' }, replyStyleText: 'Earlier words.' },
+    look: look({ motion: 'none', effects: { ambient: false, texture: false, glow: false } }),
+  };
+  let stored = initial.settings;
+  api.setClock = async () => {};
+  api.recents = async () => ({ folders: [], environments: [] });
+  api.saveSettings = async (patch) => {
+    stored = { ...stored, ...patch };
+    return { settings: stored, look: initial.look };
+  };
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'chat' }));
+  const view = mount(() => createComponent(App, { initial, inbox: { take: () => {} } }));
+  const open = async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', ctrlKey: true, bubbles: true, cancelable: true }));
+    await tick();
+    ok(view.host.querySelector('[data-screen="settings"]'));
+  };
+  try {
+    await tick();
+    await open();
+    const select = view.host.querySelector<HTMLSelectElement>('[data-opt="set-reply-style"] select')!;
+    select.value = 'own';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+    const field = view.host.querySelector<HTMLTextAreaElement>('textarea[aria-labelledby="set-reply-style-name"]')!;
+    field.focus();
+    field.value = 'Explain with game examples.';
+    field.dispatchEvent(new InputEvent('input', { data: field.value, inputType: 'insertText', bubbles: true }));
+    equal(document.activeElement, field);
+    // No blur or change: the real App Escape handler removes Settings while this field still has focus.
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await tick();
+    equal(view.host.querySelector('[data-screen="settings"]'), null);
+    equal(stored.replyStyleText, 'Explain with game examples.');
+    await open();
+    equal(view.host.querySelector<HTMLTextAreaElement>('textarea[aria-labelledby="set-reply-style-name"]')!.value, 'Explain with game examples.');
+  } finally {
+    view.stop();
+    Object.assign(api, original);
+    if (place === null) localStorage.removeItem('faber.place');
+    else localStorage.setItem('faber.place', place);
+  }
+});
+
+check('settings keyboard traversal: App restores the recreated opener after keyboard, Settings and quota entry', () => signedIn(async () => {
+  const original = { setClock: api.setClock, recents: api.recents };
+  const place = localStorage.getItem('faber.place');
+  const initial: AppState = {
+    vendors: ['claude'], models: [], quotas: [], projects: [], conversations: [], version: '0.0.0', running: { revision: 0, items: [] },
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } },
+    look: look({ motion: 'none', effects: { ambient: false, texture: false, glow: false } }),
+  };
+  api.setClock = async () => {};
+  api.recents = async () => ({ folders: [], environments: [] });
+  const key = (key: string, ctrlKey = false) => window.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey, bubbles: true, cancelable: true }));
+  try {
+    for (const area of ['chat', 'project']) {
+      localStorage.setItem('faber.place', JSON.stringify({ area }));
+      const view = mount(() => createComponent(App, { initial, inbox: { take: () => {} } }));
+      try {
+        await tick();
+        const entries = [['settings', '[data-restore="settings"]'], ['quota-claude', '[data-restore="quota-claude"]']];
+        if (area === 'chat') entries.unshift(['composer', '.composer textarea'], ['model', '.composer .model-chip']);
+        for (const [source, selector] of entries) {
+          const opener = view.host.querySelector<HTMLElement>(selector)!;
+          ok(opener, `${area}: ${source} exists`);
+          if (source === 'composer' || source === 'model') { opener.focus(); key(',', true); }
+          else {
+            view.host.querySelector<HTMLButtonElement>('.topbar .menu')?.click();
+            await tick();
+            opener.click(); // Clicks need not focus their button on every platform.
+          }
+          await tick();
+          ok(opener.closest('.shell')?.classList.contains('under'), 'entry leaves the shell mounted beneath');
+          equal(document.activeElement, view.host.querySelector('.s-nav button'), 'Back receives entry focus');
+          if (source.startsWith('quota-')) ok(view.host.querySelector('.s-nav button[aria-current="true"]')?.textContent?.includes(en['set.subscriptions']));
+          key(',', true); // Repeating the shortcut must not replace the original opener with Back.
+          if (source === 'settings') view.host.querySelector<HTMLButtonElement>('.s-nav button')!.click();
+          else key('Escape');
+          await tick();
+          equal(view.host.querySelector('.settings'), null);
+          equal(document.activeElement, view.host.querySelector(selector), `${area}: closing restores ${source} in the new shell`);
+        }
+      } finally { view.stop(); }
+    }
+  } finally {
+    Object.assign(api, original);
+    forgetSection();
+    if (place === null) localStorage.removeItem('faber.place');
+    else localStorage.setItem('faber.place', place);
+  }
+}));
+
+check('settings keyboard traversal: saved snapshots retain focused web choices and their Tab order', async () => {
+  const [snapshot, setSnapshot] = createSignal({ settings: SHOWN, vendors: ['claude'] as Vendor[] });
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return snapshot().settings; }, get vendors() { return snapshot().vendors; },
+    quotas: {}, now: 0, start: 'general', onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    const choices = () => [...view.host.querySelectorAll<HTMLButtonElement>('#set-web-pick button')];
+    const original = choices();
+    equal(original.length, 2);
+    for (const button of original) {
+      button.focus();
+      setSnapshot({ ...snapshot(), settings: { ...snapshot().settings, notificationSound: !snapshot().settings.notificationSound } });
+      await tick();
+      deepEqual(choices(), original, 'an unrelated save keeps both native Tab stops');
+      equal(document.activeElement, button, 'the focused choice survives the saved snapshot');
+    }
+    // A newly connected AI inserts Stored copy before Live without moving focus to the new choice.
+    setSnapshot({ ...snapshot(), vendors: ['claude', 'codex'] });
+    await tick();
+    equal(choices().length, 3);
+    equal(choices()[0], original[0]);
+    equal(choices()[2], original[1]);
+    equal(document.activeElement, original[1]);
+    useLanguage('pt-BR');
+    await tick();
+    equal(choices()[2], original[1], 'translated labels keep the same focused choice');
+    equal(choices()[2]!.textContent, ptBR['set.webSearch.live']);
+    equal(document.activeElement, original[1]);
+  } finally {
+    view.stop();
+    useLanguage('en');
+    forgetSection();
+  }
+});
+
+check('settings keyboard traversal: entry, reading order, hidden controls and visible rings at 720 px', () => signedIn(async () => {
+  const motion = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'none';
+  const original = { projectProof: api.projectProof, projectGoals: api.projectGoals };
+  api.projectProof = async () => ({ commands: ['npm test'], setup: [], declared: [], source: 'none', confirmed: true, changed: false });
+  api.projectGoals = async () => ({ auto: false, capUsd: 2, spentUsd: 0, goals: [], capSeen: true, checks: [], canWatchCrashes: false });
+  const opener = document.createElement('input');
+  document.body.append(opener);
+  const selector = 'button, input, select, textarea, a[href], [tabindex]';
+  try {
+    for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
+      useLanguage(language);
+      opener.focus();
+      const view = mount(() => createComponent(Settings, {
+        look: look(), saved: { permissions: 'ask', replyStyle: 'own' }, vendors: ['claude', 'codex'], quotas: {}, now: 0,
+        projects: [{ id: 'p1', name: 'Demo', path: 'C:/fixture/demo' }],
+        start: 'general', onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+      }));
+      try {
+        const settings = view.host.querySelector<HTMLElement>('.settings')!;
+        settings.style.cssText = 'position:fixed;inset:0;width:720px;height:700px;--accent-text:#777';
+        await tick();
+        const nav = [...settings.querySelectorAll<HTMLButtonElement>('.s-nav button')];
+        equal(document.activeElement, nav[0], 'opening puts focus on Back before the five sections');
+        for (const section of nav.slice(1)) {
+          section.click();
+          await tick();
+          const controls = () => [...settings.querySelectorAll<HTMLElement>(selector)].filter((el) => !el.matches(':disabled') && !el.closest('[inert]') && el.getClientRects().length > 0);
+          const inspect = () => {
+            const all = controls();
+            deepEqual(all.slice(0, 6), nav, 'navigation precedes the section controls in reading order');
+            for (const el of all) {
+              equal(el.tabIndex, 0, `native Tab order: ${el.outerHTML}`);
+              el.focus();
+              equal(document.activeElement, el, `reachable control: ${el.outerHTML}`);
+              const color = el.matches('input[type=color]');
+              if (color && !document.hasFocus()) {
+                // Hidden WebKit cannot activate :focus-within; inspect the explicit rule as styles.check.ts does.
+                const rules = [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules]).filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule);
+                const rule = rules.find((rule) => rule.selectorText.includes('.dot.custom:has(input:focus-visible)') && rule.selectorText.includes('.dot.custom input:focus-visible'));
+                ok(rule, 'the custom color wheel and its input have an explicit keyboard focus rule');
+                equal(rule.style.getPropertyValue('outline'), '2px solid var(--accent-text)', 'the color wheel uses the shared focus ring');
+                equal(rule.style.getPropertyValue('outline-offset'), '2px', 'the color wheel ring stays outside the control');
+              } else {
+                const ring = getComputedStyle(color ? el.parentElement! : el);
+                if (el.matches(':focus-visible') || color) ok(parseFloat(ring.outlineWidth) > 0 && ring.outlineStyle !== 'none' && ring.outlineColor !== 'rgba(0, 0, 0, 0)', `visible focus ring: ${el.outerHTML}`);
+              }
+            }
+          };
+          inspect();
+          // A closed fold contributes no stops; opening it exposes native controls in the same order.
+          for (const fold of settings.querySelectorAll<HTMLButtonElement>('.st-fold-head, .pset-head, .st-q, .more')) {
+            fold.click();
+            await tick();
+            if (fold.matches('.pset-head')) {
+              ok(settings.querySelector('[data-testid="proof-edit"]'), 'the seeded project exposes its check controls');
+              equal(settings.querySelector<HTMLInputElement>('#pset-p1-goals-switch')!.disabled, false, 'goal control is enabled');
+            }
+            inspect();
+            fold.click();
+            await tick();
+            const bodyId = fold.getAttribute('aria-controls');
+            const body = bodyId ? settings.querySelector(`#${bodyId}`) : null;
+            for (const el of body?.querySelectorAll<HTMLElement>(selector) ?? []) ok(el.closest('[inert]'), 'departing controls cannot receive Tab');
+          }
+        }
+      } finally { view.stop(); }
+      equal(document.activeElement, opener, 'closing returns focus to the connected opener');
+    }
+  } finally {
+    Object.assign(api, original);
+    opener.remove();
+    useLanguage('en');
+    forgetSection();
+    if (motion === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = motion;
+  }
+}));
+
+check('settings keyboard traversal: returning from account cards leaves focus restoration to the caller', async () => {
+  const opener = document.createElement('input');
+  document.body.append(opener);
+  opener.focus();
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: [], quotas: {}, now: 0, start: 'accounts', kept: factory(),
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try { await tick(); equal(document.activeElement, opener, 'kept Settings does not steal restored focus'); }
+  finally { view.stop(); opener.remove(); forgetSection(); }
+});
+
+check('settings: opening again lands on the section that was open', () => {
+  const props = { look: look(), saved: SHOWN, vendors: [], quotas: {}, now: 0, onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true };
+  const first = mount(() => createComponent(Settings, props));
+  const item = (host: HTMLElement, key: 'set.appearance' | 'set.general') => [...host.querySelectorAll<HTMLButtonElement>('button.item')].find((b) => b.textContent?.includes(en[key] as string))!;
+  item(first.host, 'set.appearance').click();
+  first.stop();
+  const again = mount(() => createComponent(Settings, props));
+  try {
+    equal(item(again.host, 'set.appearance').getAttribute('aria-current'), 'true');
+  } finally {
+    item(again.host, 'set.general').click();
+    again.stop();
+  }
+});
+
+check('accounts spend days: details show the total, daily bars and excluded unknown costs at 720 px', () => signedIn(async () => {
+  useLanguage('de');
+  const days = Array.from({ length: 30 }, (_, i) => [20000 + i, i === 29 ? 2.5 : 0, i === 28 ? 3 : 0]);
+  const usage = [{ vendor: 'claude', state: 'ok', ownSpendUsd: 2.5, spendDays: days, unmetered: 0, windows: [] }] as unknown as VendorUsage[];
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: ['claude'], start: 'accounts', now: Date.now(), usage, quotas: {},
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    const settings = view.host.querySelector<HTMLElement>('.settings')!;
+    settings.style.cssText = 'position:fixed;inset:0;width:720px;height:700px';
+    await tick(); await tick();
+    const card = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"]')!;
+    card.querySelector<HTMLButtonElement>('#acct-claude-details')!.click();
+    await tick();
+    const fold = card.querySelector<HTMLButtonElement>('#acct-claude-spend')!;
+    ok(fold.textContent!.includes('2,50'), 'the total uses the chosen language');
+    fold.click(); await tick();
+    equal(card.querySelectorAll('#acct-claude-spend-body .urow').length, 30);
+    ok(card.scrollWidth <= card.clientWidth + 1, 'daily values fit within the card');
+    ok(card.textContent!.includes('Unbekannte Kosten'));
+    ok(card.textContent!.includes('3 Anfragen'), 'unknown costs are counted across all 30 days');
+  } finally { view.stop(); useLanguage('en'); }
+}));
+
+check('settings: the hooks fold reads and shows previews only while open', async () => {
+  const previous = api.hookList;
+  let reads = 0;
+  api.hookList = async () => { reads++; return [{ file: 'project/.claude/settings.json', event: 'PreToolUse', command: 'check', length: 17, unreadable: false }, { file: 'broken.json', event: '', command: '', length: 0, unreadable: true }]; };
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: SHOWN, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    equal(reads, 0);
+    view.host.querySelector<HTMLButtonElement>('#set-hooks-q')!.click();
+    await tick();
+    equal(reads, 1);
+    const text = view.host.querySelector('#set-hooks-more')!.textContent!;
+    ok(text.includes('PreToolUse') && text.includes('check') && text.includes('project/.claude/settings.json'));
+    ok(text.includes('broken.json'));
+    view.host.querySelector<HTMLButtonElement>('#set-hooks-q')!.click();
+    view.host.querySelector<HTMLButtonElement>('#set-hooks-q')!.click();
+    await tick();
+    equal(reads, 2);
+  } finally { api.hookList = previous; view.stop(); }
+});
+
+check('report a problem: Settings previews the exact fields and Cancel opens nothing', async () => {
+  const oldReport = api.problemReport;
+  const oldOpen = api.openLink;
+  let opened = 0;
+  api.problemReport = async (language, crash) => {
+    equal(language, 'en');
+    equal(crash, false);
+    return { version: '1.2.3', environment: 'Build commit: abc123\nOperating system: windows 10', url: 'https://github.com/example' };
+  };
+  api.openLink = async () => { opened++; };
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: [], quotas: {}, now: Date.now(), onSave: async () => true,
+    onClose: () => {}, onOpenSetup: () => {},
+  }));
+  try {
+    const button = view.host.querySelector<HTMLButtonElement>('[data-opt="set-report"] button');
+    ok(button, 'the action is in General');
+    button.click();
+    await frames();
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[open][aria-labelledby="report-title"]');
+    ok(dialog, 'the preview opens');
+    ok(dialog.textContent?.includes('1.2.3') && dialog.textContent.includes('Build commit: abc123'), 'the exact values are visible');
+    const cancel = [...dialog.querySelectorAll('button')].find((b) => b.textContent === 'Cancel');
+    ok(cancel, 'Cancel is available');
+    cancel.click();
+    await frames();
+    equal(opened, 0, 'Cancel never opens the browser');
+    equal(document.querySelector('dialog[open][aria-labelledby="report-title"]'), null);
+  } finally { view.stop(); api.problemReport = oldReport; api.openLink = oldOpen; }
+});
+
+// General > Storage: what `storage_usage` sends for a data folder with an unreadable folder, a removed project and loose copies.
+const STORAGE = {
+  totalBytes: null,
+  freeBytes: 24 * 1024 ** 3,
+  byKind: { copies: 3.1 * 1024 ** 3, reports: 1.6 * 1024 ** 3, tools: 1.5 * 1024 ** 3, rewind: null, helperTranscripts: 0.6 * 1024 ** 3, conversations: 40 * 1024 ** 2, rest: 0 },
+  copiesByProject: { shop: 2 * 1024 ** 3, gone: 1024 ** 3, broken: null },
+  unassignedCopyBytes: 0.1 * 1024 ** 3,
+  partial: true,
+};
+
+const storageView = (projects = [{ id: 'shop', name: 'Shop', path: 'C:/shop' }, { id: 'broken', name: 'Broken', path: 'C:/broken' }]) => {
+  forgetSection();
+  return mount(() => createComponent(Settings, {
+    look: look(), saved: SHOWN, vendors: [], quotas: {}, now: 0, projects,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+};
+
+check('storage: General measures only when the fold opens or Measure again is pressed, lists every kind and copies by project, and an unknown size is never 0', async () => {
+  const previous = api.storageUsage;
+  let reads = 0;
+  api.storageUsage = async () => { reads++; return STORAGE; };
+  const view = storageView();
+  try {
+    await tick();
+    equal(reads, 0, 'a closed fold measures nothing');
+    ok(!view.host.querySelector('.store'), 'the view is not in the page while closed');
+    const head = view.host.querySelector<HTMLButtonElement>('#set-storage')!;
+    ok(head.closest('.st-group')!.querySelector('.st-title')!.textContent === en['set.group.storage'], 'it is its own group in General');
+    head.click();
+    await tick();
+    equal(reads, 1);
+    const store = view.host.querySelector<HTMLElement>('.store')!;
+    const [kinds, copies] = [...store.querySelectorAll<HTMLUListElement>('.store-list')];
+    const rows = (list: HTMLElement) => [...list.querySelectorAll('.store-row')].map((row) => [row.querySelector('.store-name')!.textContent, row.querySelector('.num')!.textContent]);
+    const kindRows = rows(kinds);
+    deepEqual(kindRows.map(([name]) => name), ['Conversation copies', 'Reports', 'Tools', 'Helper transcripts', 'Conversations', 'Saved files for going back', 'Everything else'], 'biggest first, unknown after, the rest last');
+    equal(kindRows[5][1], 'Unknown', 'a size that could not be read says so');
+    ok(kindRows[6][1] !== 'Unknown' && kindRows[6][1]!.startsWith('0'), `a real zero stays a zero: ${kindRows[6][1]}`);
+    ok(kindRows[0][1]!.includes('GB'), `large sizes read in gigabytes: ${kindRows[0][1]}`);
+    ok(store.querySelector('.st-ctl .store-total')!.textContent === 'Unknown', 'the total is unknown when a kind is');
+    ok(store.textContent!.includes('free on this drive'), 'the free space of the drive is shown');
+    ok(store.textContent!.includes(en['set.storage.partial']), 'a partial reading says the sizes may be larger');
+    deepEqual(rows(copies).map(([name]) => name), ['Shop', 'A removed project', 'Broken', 'Not linked to a project'], 'biggest first, copies with no project last');
+    equal(rows(copies)[2][1], 'Unknown');
+    const again = [...store.querySelectorAll<HTMLButtonElement>('button')];
+    deepEqual(again.map((b) => b.textContent), [en['set.storage.again']], 'the only control measures again: no clean-up is offered yet');
+    again[0].focus();
+    again[0].click();
+    ok(again[0].getAttribute('aria-disabled') === 'true' && store.getAttribute('aria-busy') === 'true', 'measuring again waits and keeps the old figures');
+    equal(document.activeElement, again[0], 'the button keeps focus while it measures');
+    again[0].click();
+    ok(store.querySelectorAll('.store-row').length > 0);
+    await tick();
+    equal(reads, 2);
+    head.click();
+    // The closed fold keeps its body only for its exit (at most --dur-exit), then lets it go.
+    await leave();
+    ok(!view.host.querySelector('.store'), 'closed again, the view leaves the page');
+    head.click(); await tick();
+    equal(reads, 3, 'opening again measures again');
+  } finally { api.storageUsage = previous; view.stop(); }
+});
+
+check('storage: pressing every control of the view reads and asks nothing, and a failed reading offers Try again', async () => {
+  const calls: string[] = [];
+  const saved = new Map<string, unknown>();
+  const shared = api as unknown as Record<string, unknown>;
+  for (const [name, fn] of Object.entries(shared)) {
+    if (typeof fn !== 'function') continue;
+    saved.set(name, fn);
+    shared[name] = (...args: unknown[]) => { calls.push(name); return (fn as (...a: unknown[]) => unknown)(...args); };
+  }
+  let fail = true;
+  shared.storageUsage = async () => { calls.push('storageUsage'); if (fail) throw 'error.store.read'; return { ...STORAGE, partial: false, copiesByProject: {}, unassignedCopyBytes: 0 }; };
+  const view = storageView([]);
+  try {
+    view.host.querySelector<HTMLButtonElement>('#set-storage')!.click();
+    await tick();
+    const store = view.host.querySelector<HTMLElement>('.store')!;
+    equal(store.querySelector('[role="alert"]')!.textContent, en['error.store.read']);
+    ok(!store.querySelector('.store-row'), 'a failed reading shows no sizes, not zeros');
+    fail = false;
+    calls.length = 0;
+    for (const button of store.querySelectorAll<HTMLButtonElement>('button')) { equal(button.textContent, en['set.storage.retry']); button.click(); }
+    await tick();
+    deepEqual(calls, ['storageUsage'], 'the view only reads');
+    ok(!document.querySelector('.ask, [role="alertdialog"], dialog[open]'), 'no question is asked');
+    ok(!store.querySelector('[role="alert"]'));
+    ok(store.textContent!.includes(en['set.storage.noCopies']), 'no copies is said in words');
+    ok(!store.textContent!.includes(en['set.storage.partial']));
+  } finally {
+    for (const [name, fn] of saved) shared[name] = fn;
+    view.stop();
+  }
+});
+
+check('storage: the new destination is shown and Reset restores the default folder', async () => {
+  const saved = { storageChoice: api.storageChoice, storageChoose: api.storageChoose, storageUsage: api.storageUsage };
+  const initial = { folder: 'D:/Faber-storage', custom: true, locked: false, notice: null, ask: false };
+  const resetTo = { ...initial, folder: 'C:/Profile/Faber', custom: false };
+  const calls: boolean[] = [];
+  api.storageChoice = async () => initial;
+  api.storageChoose = async (reset) => { calls.push(reset); return reset ? resetTo : null; };
+  api.storageUsage = async () => STORAGE;
+  const view = storageView();
+  try {
+    view.host.querySelector<HTMLButtonElement>('#set-storage')!.click();
+    await tick();
+    const row = view.host.querySelector('[data-opt="set-storage-location"]')!;
+    ok(row.textContent?.includes(en['set.storage.location']));
+    equal(row.querySelector('.st-hint')?.textContent, initial.folder);
+    const buttons = [...row.querySelectorAll<HTMLButtonElement>('.st-ctl button')];
+    const [change, reset] = buttons;
+    equal(change.textContent, en['set.storage.change']);
+    equal(reset.textContent, en['set.storage.reset']);
+    change.click();
+    await tick();
+    equal(row.querySelector('.st-hint')?.textContent, initial.folder, 'cancelling keeps the current folder');
+    reset.click();
+    await tick();
+    deepEqual(calls, [false, true]);
+    equal(row.querySelector('.st-hint')?.textContent, resetTo.folder);
+    equal(reset.getAttribute('aria-disabled'), 'true');
+  } finally {
+    Object.assign(api, saved);
+    view.stop();
+  }
+});
+
+check('storage: every language has the view written by hand, and the closed line fits its row', () => {
+  const keys = Object.keys(en).filter((key) => key.startsWith('set.storage') || key === 'set.group.storage') as (keyof typeof en)[];
+  equal(keys.length, 28);
+  for (const [code, words] of Object.entries({ ptBR, es, fr, de })) {
+    for (const key of keys) ok(typeof words[key] === 'string' && words[key].length > 0, `${code}: ${key}`);
+    for (const key of ['set.storage', 'set.storage.kind.copies', 'set.storage.kind.rewind', 'set.storage.sweep', 'set.storage.unknown'] as const) ok(words[key] !== en[key], `${code}: ${key} is not left in English`);
+    ok((words['set.storage.free'] as string).includes('{size}'), `${code}: the free space keeps its size`);
+  }
+  for (const words of [en, ptBR, es, fr, de]) ok(words['set.storage.line'].length <= 70, words['set.storage.line']);
+});

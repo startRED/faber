@@ -1,0 +1,205 @@
+# The `faber` command line and local channel
+
+`faber` (`cli/`, shipped as `bin\faber.exe` beside the app) lets an AI inside a conversation, an AI in an outside
+terminal, or a person at a terminal do what a person does on the screen. Every CLI session Faber starts gets `bin` first
+on its `PATH` and the full path in `FABER_CLI`.
+
+One command table (`host/src/table.rs`, R459) sits behind the screen, the command line and the AI's tools. A command added
+to the table is immediately callable through `faber call <command>` and listed in `faber help --json`.
+
+`faber mcp` serves the running app's table as MCP tools over standard input and output. Configure the AI client to
+start it and send JSON-RPC `initialize`, `tools/list` and `tools/call`. Tool failures carry an error key and detail.
+Schemas describe required arguments, array item types and supported conversation states. Complex objects name their
+Rust type instead of expanding nested fields. Both the terminal and MCP refuse numbered reads or exact state filters
+the connected app does not support. The process passes its own `FABER_AGENT_TOKEN` and `FABER_CONVERSATION` to the
+channel. A valid token establishes a conversation, an absent token leaves an unbound agent, and an invalid token is
+refused. The AI client starts the process on demand.
+
+Claude Code sessions that load catalog servers enable its process-wide MCP environment allowlist. All stdio servers
+in that session receive only the CLI's safe baseline plus their explicitly configured `env`; personal servers must
+configure any required values there. A personally configured `faber mcp` server in such a session receives no inherited
+conversation identity and remains an agent without a conversation. Faber's built-in SDK tools and shell-invoked
+`faber` commands retain their existing identity path. Sessions without catalog servers keep their existing policy.
+
+## Reaching Faber
+
+The `hello` offer and `faber status` report the running application's version from its shell, including the preview
+suffix, rather than the channel library's package version. The protocol number remains separate.
+
+`faber` talks to the running Faber over a local channel (`channel/`), never a network port:
+
+- **Windows:** the named pipe `\\.\pipe\faber-<16 hex>` (FNV-1a 64 of the lowercased data folder path with backslashes and
+  no trailing slash), created with a security descriptor that grants read and write only to the signed-in user's SID and
+  with `PIPE_REJECT_REMOTE_CLIENTS`.
+- **Unix:** `<data>/channel/faber.sock` inside a `0700` folder, with the peer UID checked against `geteuid()` before any
+  line is read.
+- **Per-run secret:** before listening, Faber writes 32 random bytes from the OS CSPRNG as 64 hex characters to
+  `<data>/channel/secret` (readable only by the signed-in user). A client's first line (`hello`, within 5 s) must carry
+  that secret; a missing or wrong one fails with `error.channel.secret` and closes. After connecting, the client also
+  gives the greeting 5 s. It closes the connection on timeout and treats the app as unreachable.
+- **Conversation tokens:** a token holds 256 random bits from the OS and a tag; the in-memory registry compares tokens in
+  constant time and names the AI's conversation. Knowing the channel secret cannot reconstruct another session's token.
+  `hello` passes it (from `FABER_AGENT_TOKEN`, or `FABER_AGENT_AUTH` when
+  Codex's shell filters token-named variables) with `FABER_AGENT_DEPTH`; a
+  tampered token or one from a previous run fails with `error.channel.token`; a closed session's token fails with
+  `error.channel.revoked`. Each Claude Code and Codex session gets a fresh token, including resumes. Codex shares its
+  warm process and sets identity per thread through `thread/start` or `thread/resume` configuration overrides; a resume
+  waits for a replaced thread's outstanding commands, then unsubscribes it so the loaded thread accepts the new identity.
+  Its shell snapshots may retain a token, but it is revoked when the session closes; Faber does
+  not write the token to its own files or put it in process arguments. Codex's own environment filters can still prevent the
+  identity from reaching a shell. In isolated mode, Faber runs its own command directly with the same identity. Revocation
+  refuses new requests immediately and drains requests already in flight in the background for up to five seconds, then aborts them. A mutation that has already passed its last revocation check may still commit after revocation; this is limited to that command.
+- **Starting Faber when closed:** when the local channel is absent, `faber` finds Faber's program (`FABER_APP`, or the app
+  folder above its own `bin` folder), starts it hidden in the tray (`--autostart`, no console) and
+  waits up to 10 s for the channel including the greeting. A channel that accepted the connection but failed its greeting
+  returns an error without launching another app. When the channel remains absent until the startup deadline, the command
+  reports `cli.error.noFaber`. `--no-start` and any process with `FABER_AGENT_DEPTH >= 1` never start Faber and exit with
+  code `3` when the channel is absent. A detached Windows app leaves the command's output streams free to close at exit.
+
+## Who may do what
+
+From `hello` and the OS peer process ID, Faber knows who is calling (`Caller` in `host/src/reach.rs`):
+
+1. A valid token from this run's secret names `Agent { conversation: Some(id) }`.
+2. Otherwise, a process inside one of Faber's CLI jobs on Windows (`winproc::in_any_cli_job`) or with `agentDepth >= 1` is
+   `Agent { conversation: None }` (an AI with no conversation family).
+3. Otherwise, the caller is `Person` (a person, or an outside AI, in the user's terminal). The window is `Screen`.
+
+Every command in `host/src/table.rs` names one of five reaches, checked in `Host::dispatch_as`:
+
+| Reach | Who may run it | What uses it |
+| :--- | :--- | :--- |
+| `free` | Anyone | `start_conversation`, `message_conversation`, `resume_conversation`, `mark_waiting`, `conversations`, `conversation`, `conversation_headers`, `conversation_steps`, `conversation_command_results`, `conversation_markdown`, `results`, `project_results`, `projects`, `quota`, `settings`, `create_chat_group`, `move_chat_to_group`, `search_messages`, `prompt_history`, `cli_sessions`, `versions`, `visual_answers`, `visual_pieces`, `rename`, `pin`, `child_words`, `child_transcript`, `mentions`, `commands`, `context_parts`, `background_commands`, `changes`, `change_patch`, `answer_changes`, `answer_change_patch`, `answer_pictures`, `project_rooms`, `rewind_points`, `rewind_redos`, `rewind_redo_preview`, `rewind_preview`, `asides`, `recents`, `project_goals`, `project_proof`, `project_memory`, `update_status`, `setup_check`, `tools_list`, `tools_inventory`, `mcp_servers`, `tools_in_use`, `storage_usage` |
+| `own` | Person anywhere; an AI only in its own family (or to start a new conversation) | `archive`, `move_turn`, `wait_turn`, `continue_closed`, `interrupt`, `send`, `save_piece_value`, `keep_going`, `remove_queued`, `tell_helper`, `compact_now`, `clear_asides`, `unfollow_pr`, `read_file_at`, `read_image`, `site_tabs`, `site_picture` |
+| `ask` | Person at a terminal or on screen; an AI gets `error.reach.ask` and asks the person | `show_conversation`, `show_panel`, `save_chat_group`, `add_chat_group_files`, `remove_chat_group_file`, `remove_chat_group`, `new_group_chat`, `forget_auto_learned`, `pick_up`, `move_to_project`, `stop_background`, `rewind_recover`, `rewind_restore`, `rewind_redo`, `stop_aside`, `remove_project`, `save_settings`, `forget_recent`, `save_environment`, `forget_environment`, `show_file`, `show_project`, `open_link`, `project_goal_add`, `project_goal_add_crashes`, `project_goal_remove`, `project_goal_resume`, `update_restart`, `setup_install`, `tools_install`, `tools_prepare_replacement`, `tools_replace`, `tools_remove`, `tools_set_enabled`, `tools_restore`, `wake_wait` |
+| `person` | Only the person on the screen (`error.reach.person` for everyone else): signing in, answering cards, granting folders, security settings, deleting for good, native pickers | `answer_plan`, `approve_credits`, `answer`, `approve_plan`, `answer_question`, `remove`, `save_theme`, `export_conversation`, `open_theme`, `add_project`, `open_folders`, `chat_folder`, `save_file`, `open_terminal`, `project_proof_confirm`, `edit_project_memory`, `branch`, `branch_here`, `follow_up`, `ask_aside`, `edit_queued`, `send_queued`, `start_environment`, `project_copies`, `project_goals_auto`, `run_app_start`, `run_app_confirm`, `run_app_status`, `run_app_stop`, `setup_sign_in`, `set_mcp_server`, `tools_clear_removed`, `cookie_profiles`, `cookie_sites`, `cookie_import`, `cookie_held`, `cookie_forget`, and the security fields of `save_settings` (`permissions`, `userHooks`, `faberTrust`, `grantsEpoch`, `permissionsRevision`, `beforePlan`, `blockedHosts`, `previews`, `autostart`, `extensionsDeveloperMode`) |
+| `screen` | Only the screen itself (`error.reach.screen` over the channel) | `open`, `state`, `set_clock`, `quota_attention`, `parked_seen`, `warm`, `route_draft`, `seen`, `preview_look`, `set_shell_texts`, `input_seen`, `draft_dirty`, `game_in_front`, `notes_seen`, `save_notes_seen`, `site_place`, `site_round`, `site_size`, `site_park`, `site_open`, `site_step`, `site_go`, `site_tab`, `site_history`, `site_pick`, `site_clear`, `screen_ready`, `visual_open`, `visual_page`, `visual_close`, `visual_policy`, `report_checks`, `checks_progress`, `test_site_probe`, `test_host_size`, `test_site_refuse_once` |
+
+A conversation's agent reaches the same table without a process through its `faber` tool (R585): `find` lists up to 8
+matching commands, and `run` is `Host::dispatch_as` as `Agent { conversation }`, under exactly these rules. Both apply one
+rule first, so nothing found is refused: never `person`, `screen` or `send`; in Plan and Isolated only true reads
+(`error.reach.readOnly`, which also refuses the reads in name only `setup_check`, `tools_list`, `tools_prepare_replacement`,
+`project_memory`, `show_file`, `show_project` and `cli_sessions`); in a Chat no project command (`error.reach.projectOnly`).
+`background_commands` from an agent lists only its family's commands.
+
+An AI's **family** is the root conversation found by following `startedBy` up from the AI's own conversation (up to 64
+steps), plus every conversation whose `startedBy` chain leads to that same root.
+
+When the agent's conversation is in Full access (the stored mode, with a session running in it in Full access, read at
+the call, never the agent's arguments), an `ask` command that names no conversation, or names one of its own family, runs
+at once and the conversation shows a Faber line saying what was done or tried (R587). Deleting for good, spending quota,
+`update_restart`, `open_link`, `stop_aside` and the tool commands keep the card in every mode
+([which and why](../design/app-control.md#reach-follows-the-permission-mode)), and `person` and `screen` commands are
+refused in every mode. Otherwise, when an
+identified agent needs the person's permission, Faber records a request and returns `error.reach.ask` with a
+request ID. `faber asks` lists that conversation's requests and their state. An approval permits one identical retry,
+for the same conversation, command and arguments, within ten minutes. A refusal or expiry does not grant access.
+The screen reads `asks` on opening and after an `asks` event to recover each pending command and its arguments; events carry only summaries and agents receive only their own request status. Requests are kept in memory, at most 20, and do not survive a restart. Expired arguments are cleared on the next book operation. An agent without a conversation still receives
+`error.reach.ask`, but has no request ID or grant because Faber cannot distinguish it from another unidentified agent;
+the person must perform the action on the screen. Person-only and screen-only commands are never askable.
+
+What the rules do not stop: they keep a well-meant AI on its own work. An AI runs as the same user as the person, so a
+program that sets out to break them can read `<data>/channel/secret`, copy a live token from another process, or act as
+the person at a terminal (on Unix, with no job to tell it apart, an AI that drops `FABER_AGENT_DEPTH` is taken for the
+person). The channel is a wall against other accounts and other machines, not against the person's own programs.
+
+## Conversation states
+
+See [conversation states and numbered reads](cli-conversations.md).
+
+## Verbs and arguments
+
+Global flags work anywhere on the line: `--json`, `--human`, `--no-start`, `--timeout <s>`.
+
+| Verb | Arguments | What it calls |
+| :--- | :--- | :--- |
+| `help` | `[<verb or command>] [--json]` | Built-in (`cli/commands.json` + verb table); needs no running Faber |
+| `status` | | `hello` offer + `conversations {state: ["running"]}` |
+| `list` | `[--state s1,s2] [--archived \| --all] [--project <id>] [--family <id>] [--query <words>] [--limit <n>]` | `conversations` (default limit 50; `--state running` means `working,waiting`) |
+| `read` | `<id> [--last <n> \| --from <n> [--limit <n>]]` | `conversation` (default `last: 20`) |
+| `export` | `<id>` | `conversation_markdown` returns the same Markdown as the file export without writing a file |
+| `search` | `<words> [--area chat\|projects]` | `search_messages` searches Chat and Projects, or the selected area |
+| `open` | `<id>` | `show_conversation` brings the window to the conversation |
+| `send` | `<text \| -> [--to <id>] [--project <id>] [--vendor auto\|claude\|codex] [--model <m>] [--effort low\|medium\|high] [--wait] [--timeout <s>]` | `send`, then `wait` when `--wait` is given |
+| `start` | `<title> <brief>` (use `-` for stdin), optional `--ai`, `--model`, `--effort`, `--step`, `--keep-going` | `start_conversation`, for an AI inside a conversation |
+| `message` | `<id> <message>` (use `-` for stdin) | `message_conversation` |
+| `resume` | `<id> [message]` (use `-` for stdin) | `resume_conversation` |
+| `mark-waiting` | `[--on id1,id2] [--note <text>]` | `mark_waiting`; the agent then ends its turn rather than polling |
+| `stop` | `<id>` | `interrupt` |
+| `continue` | `<id>` | `conversation {id, last: 1}` to find the last message id, then `continue_closed` |
+| `wake` | `<id> --since <ms> --until <ms>` | `wake_wait` checks one overdue saved project wait; copy both timestamps from `waitingOn` in a read |
+| `archive` / `unarchive` | `<id>` | `archive` (`archived: true` / `false`) |
+| `pin` / `unpin` | `<id>` | `pin` (`pinned: true` / `false`) |
+| `rename` | `<id> <title>` | `rename` |
+| `projects` / `quota` / `settings` | | `projects`, `quota`, `settings` |
+| `asks` | | `asks` (the calling conversation's permission requests) |
+| `watch` | `[--id <id>] [--family <id>] [--project <id>]` | Subscribes to channel events and emits state-transition JSON lines |
+| `wait` | `<id> [--timeout <s>]` | Waits until `<id>` reaches an ending state, prints `conversation {id, last: 1}` (default timeout 300 s; `0` = none) |
+| `call` | `<command> [<arguments as JSON> \| -]` | Any non-`screen` command in `host/src/table.rs` |
+
+`projects` and `quota` read their own records independently of the conversation list.
+
+## Output, exit codes, `watch` and `wait`
+
+Use `wake` when a local supervisor finds an overdue saved project wait. `admitted` means Faber took the return, possibly
+into the queue. `alreadyHandled` means its receipt is present. `tooSoon` and `deferred` give the next check time. A
+deferred storage retry keeps the original saved deadline. `obsolete` means the supplied wait is missing or was replaced.
+`closing` says to reconnect after the app closes. `decisionPending` reports an open decision. `blocked` gives the reason,
+including separate subscription and quota blockers. The return names the local control channel as its source.
+`--no-start` requires a running app. Otherwise the usual terminal start can open Faber hidden, and its restored timer
+can handle the wait before the supervisor's request arrives.
+
+When `--json` is passed or stdout is not a terminal (every AI tool call), `faber` writes one compact JSON value per line
+on stdout, and failures write `{"error":"<key>","message":"<English words>"}` on stdout as well. When stdout is a
+terminal (or `--human` is passed), `faber` prints short lines in the user's language (`cli.*` in `ui/locales/*.ts`) and
+errors on stderr. When a refusal includes a detail, both modes show it; JSON puts it in a separate `detail` field and keeps `error` unchanged.
+
+A successful `start` or `call start_conversation` returns `{ "event": "conversation_started", "childId": "…" }` in JSON mode. Human mode prints the same JSON marker first, then the id. The engine keeps the first 4,000 characters of a tool result, so emit the marker before lengthy output.
+
+An ask refusal with a request ID instead prints `{"error":"error.reach.ask","request":"<id>"}` in JSON mode.
+
+| Exit code | Meaning |
+| :--- | :--- |
+| `0` | Done |
+| `1` | Faber refused (`error.*`) |
+| `2` | Command-line usage error |
+| `3` | Faber could not be reached or started (`cli.error.noFaber`, `cli.error.channel`, `error.channel.*`) |
+| `4` | Needs the person (`error.reach.ask`, `error.reach.person`, `error.reach.screen`) |
+| `5` | `wait` timed out |
+| `130` | Interrupted (`Ctrl+C`) |
+
+`faber watch` prints current `working` or `waiting` conversations (`"was": null`), then state changes. State notices
+trigger reads at most every 250 ms. It ignores streaming events from older hosts. `Ctrl+C` also interrupts reads:
+
+```json
+{"type":"state","id":"c1","family":"c0","title":"Auth tests","was":"working","state":"concluded","conclusion":{"messageId":"r1","at":42,"recap":"All 14 auth tests pass.","done":true}}
+```
+
+`watch` includes `waitingOn` (`since`, `until`, optional `problem`) from list metadata. A change emits a line even if
+`was` equals `state`. When the wait clears, the line omits `waitingOn`. Use `read` for the note.
+
+When a conversation leaves `working` or `waiting` for `idle`, `watch` calls `conversation {id, last: 0}` so the emitted
+line carries its exact end state. Only a `concluded` state includes a closing box.
+
+`faber wait <id>` subscribes to state notices, reads `conversation {id, last: 1}`, and rereads on changes or after missing notices. It prints the view and exits `0` once the conversation is `concluded`, `ended`, `interrupted`, `stopped` or `failed`. It keeps waiting while the conversation is `working`, `waiting` for the person or other conversations, or `new`. The wait timer covers the subscription and reads. At the deadline it exits `5` with the last known view, or `cli.error.waitTimeout` if it has none. Only `concluded` means the AI concluded the request.
+
+## Limits
+
+- At most **16 connections** at once on the channel (the 17th receives `{"id":0,"err":"error.channel.busy"}` and closes),
+  **16 requests in flight** per connection, and **1 MiB** per request line (64 MiB for responses).
+- An AI caller may have at most **2 turns** it started running at once and start at most **20 turns per hour**
+  (`error.channel.agentTurns`); at `agentDepth >= 2` it may start none (`error.channel.agentDepth`).
+- Commands marked `Window` in `host/src/table.rs` return `error.host.noWindow` over the channel.
+
+## How an AI uses `faber`
+
+```bash
+# Start a sibling conversation in the same project and get its id:
+id=$(faber start "SQL migrations" "Audit the SQL migrations for lock time" | tee /dev/stderr | jq -r .childId)
+
+# Do other work, then mark the wait and end this turn:
+faber mark-waiting --on "$id"
+
+# In a later turn, after reading and checking the child's report:
+faber archive "$id"
+```

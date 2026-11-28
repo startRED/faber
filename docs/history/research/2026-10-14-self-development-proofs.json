@@ -1,0 +1,67 @@
+{
+  "informationalOnly": true,
+  "measuredDate": "2026-10-14",
+  "privateEvidence": "C:/Users/Erick/AppData/Local/Faber/t13-r112-20261014-qualification",
+  "commands": [
+    {
+      "command": "npm run lint",
+      "started": "2026-10-14T05:04:42.024Z",
+      "exit": 0,
+      "seconds": 0.28,
+      "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-r112-20261014-qualification\\proof-01.log"
+    },
+    {
+      "command": "npm run typecheck",
+      "started": "2026-10-14T05:04:42.305Z",
+      "exit": 0,
+      "seconds": 0.681,
+      "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-r112-20261014-qualification\\proof-02.log"
+    },
+    {
+      "command": "npm run build",
+      "started": "2026-10-14T05:04:42.987Z",
+      "exit": 0,
+      "seconds": 1.419,
+      "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-r112-20261014-qualification\\proof-03.log"
+    },
+    {
+      "command": "cargo fmt --all --check",
+      "started": "2026-10-14T05:04:44.407Z",
+      "exit": 0,
+      "seconds": 1.741,
+      "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-r112-20261014-qualification\\proof-04.log"
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "started": "2026-10-14T05:04:46.149Z",
+      "exit": 0,
+      "seconds": 10.793,
+      "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-r112-20261014-qualification\\proof-05.log"
+    },
+    {
+      "command": "cargo clippy -p faber --features test-hooks -- -D warnings",
+      "started": "2026-10-14T05:04:56.943Z",
+      "exit": 0,
+      "seconds": 5.375,
+      "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-r112-20261014-qualification\\proof-06.log"
+    },
+    {
+      "command": "cargo t --all",
+      "started": "2026-10-14T05:05:02.319Z",
+      "exit": 0,
+      "seconds": 1197.076,
+      "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-r112-20261014-qualification\\proof-07.log"
+    }
+  ],
+  "fullSuite": {
+    "passed": 1370,
+    "failed": 0,
+    "notRun": 0,
+    "skipped": 0
+  },
+  "pureExampleTests": {
+    "passed": 6,
+    "failed": 0
+  },
+  "projectsFixturePeakRamMb": 236.8
+}

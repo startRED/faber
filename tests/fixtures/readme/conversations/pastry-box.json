@@ -1,0 +1,47 @@
+{
+  "id": "c4a70001-0000-4000-8000-000000000001",
+  "title": "Price a box of twelve pastries",
+  "area": "chat",
+  "sessions": {},
+  "createdAt": -8280000,
+  "updatedAt": -8232000,
+  "queued": [],
+  "messages": [
+    {
+      "id": "c4a70001-0000-4000-8000-0000000000a1",
+      "role": "user",
+      "text": "A box of twelve pastries costs me $14.20 to make. What should I charge to keep a 60% margin? And what happens if I give regulars 10% off?",
+      "at": -8280000
+    },
+    {
+      "id": "c4a70001-0000-4000-8000-0000000000a2",
+      "role": "assistant",
+      "at": -8274000,
+      "took": 41000,
+      "finishedAt": -8233000,
+      "vendor": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "reason": "reason.route.math.medium",
+      "status": "done",
+      "costUsd": 0.04,
+      "inputTokens": 8900,
+      "outputTokens": 1240,
+      "acts": [
+        {
+          "kind": "route",
+          "actor": {
+            "who": "faber"
+          },
+          "what": "act.route.chose",
+          "why": "reason.route.math.medium",
+          "params": {
+            "model": "gpt-6.1-sol",
+            "effort": "medium"
+          }
+        }
+      ],
+      "text": "## Charge $35.50 for the box\n\nA 60% margin means the cost is the other 40% of the price: $14.20 / 0.40.\n\n| | Price | You keep | Margin |\n|---|---|---|---|\n| Full price | $35.50 | $21.30 | 60% |\n| Regulars, 10% off | $31.95 | $17.75 | 56% |\n\nThe discount costs four points of margin on every box a regular buys. Two ways to live with it:\n\n1. Keep $35.50 and accept 56% from regulars. If they are one buyer in four, the average is still 59%.\n2. List the box at **$39.45**, so the price after the discount is the $35.50 you wanted.\n\n```\nprice  = cost / (1 - margin)        14.20 / 0.40 = 35.50\nlisted = price / (1 - discount)     35.50 / 0.90 = 39.45\n```"
+    }
+  ]
+}

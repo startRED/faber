@@ -1,0 +1,47 @@
+name: Translation correction
+description: Suggest a better wording for a text in one of Faber's languages
+labels: ["help wanted"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste API keys, sign-in tokens or session credentials** in this form, in logs or in screenshots.
+        Faber's languages are written by hand. A correction from a native speaker is what we need.
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language
+      options:
+        - Brazilian Portuguese
+        - Spanish
+        - French
+        - German
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where in the app?
+      description: The screen, menu or button where the text appears.
+    validations:
+      required: true
+  - type: textarea
+    id: now
+    attributes:
+      label: The text as it is now
+    validations:
+      required: true
+  - type: textarea
+    id: should
+    attributes:
+      label: The text as it should be
+    validations:
+      required: true
+  - type: checkboxes
+    id: native
+    attributes:
+      label: Native speaker
+      options:
+        - label: I am a native speaker of this language
+          required: true

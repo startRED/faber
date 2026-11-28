@@ -1,0 +1,9 @@
+Started { session_id: "00000000-0000-4000-8000-000000000109", model: "gemini-4-neon-high" }
+Started { session_id: "00000000-0000-4000-8000-000000000109", model: "gemini-3.8-flash-low" }
+Context { used: Some(0), window: Some(1048576) }
+Context { used: Some(11721), window: Some(1048576) }
+Tool { id: "call_1", name: "Bash", input: Object {"command": String("ping -n 62 127.0.0.1")}, parent: None }
+Permission { request_id: "1", tool: "Bash", input: Object {"command": String("ping -n 62 127.0.0.1")} }
+ToolResult { id: "call_1", ok: false, declined: false, exit_code: None, text: "" }
+Reason("reason.interrupted")
+Done { ok: false, reason: "cancelled", cost_total_usd: None, input_tokens: 11670, output_tokens: 51, cache_read_tokens: 0, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: false }

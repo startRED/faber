@@ -1,0 +1,775 @@
+import { confirmProjectRemoval } from './RecoveryNotes.tsx';
+import { createComputed, createEffect, createMemo, createSignal, createUniqueId, For, type JSX, on, onCleanup, Show } from 'solid-js';
+import { createStore, reconcile } from 'solid-js/store';
+import { UpdateLine } from './UpdateStage.tsx';
+import { api, type Area, type ChatGroup, type Conversation, type MessageHit, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
+import { windowHidden } from './appearance.ts';
+import * as opt from './optimistic.ts';
+import { openMenu } from './contextmenu.ts';
+import { Icon, VendorMark } from './Glyphs.tsx';
+import { StateGlyph, stateKind } from './icons/kinds.tsx';
+import { percent, t } from './i18n.ts';
+import { keysOf } from './keys.ts';
+import { en, type Key } from './locales/en.ts';
+import { Peek } from './Mark.tsx';
+import { animateList, keepForExit } from './motion.ts';
+import { vendorName } from './models.ts';
+import { forgetProject } from './projects.ts';
+import { type Place, stateWords, waitNeedsAttention, waitWords } from './running.ts';
+import { planWords } from './Plan.tsx';
+import { ageOf, floorOnly, freshness, groupChats, lineReading, matches, nest, otherReadings, pinned, type Quotas, showsChats, tailOf } from './sidebar.ts';
+
+/** What was typed in each open rename box, by what it renames: a row rebuilt while its box is open (its conversation changed,
+ * say a reply ended) opens the box again with these words instead of losing them. */
+const renameDrafts = new Map<string, string>();
+
+/** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed.
+ * `id` names what is renamed, for the draft kept across a rebuilt row; a box with none keeps no draft. */
+function RenameBox(props: { id?: string; title: string; onDone: (title?: string) => void }) {
+  let done = false;
+  let box: HTMLInputElement | undefined;
+  const draft = props.id === undefined ? undefined : renameDrafts.get(props.id);
+  // Enter and Esc give focus back to the row; leaving the box by a click leaves focus where the click put it.
+  const finish = (title?: string, refocus = false) => {
+    if (done) return;
+    done = true;
+    if (props.id !== undefined) renameDrafts.delete(props.id);
+    const row = box?.closest('.crow, .prow');
+    props.onDone(title);
+    if (refocus) queueMicrotask(() => row?.querySelector<HTMLElement>('.item')?.focus());
+  };
+  return (
+    <input
+      class="field sm rename"
+      value={draft ?? props.title}
+      maxLength={120}
+      aria-label={t('menu.renameLabel')}
+      ref={(el) => ((box = el), queueMicrotask(() => {
+        if (!el.isConnected) return;
+        el.focus();
+        // A box opened again keeps going where the typing was; a new one starts with the whole name chosen.
+        if (draft === undefined) el.select();
+        else el.setSelectionRange(el.value.length, el.value.length);
+      }))}
+      onInput={(e) => props.id !== undefined && renameDrafts.set(props.id, e.currentTarget.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !e.isComposing) finish(e.currentTarget.value, true);
+        else if (e.key === 'Escape') finish(undefined, true);
+        else return;
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      // The browser also reports a blur when the box leaves the page with its row: that is a rebuilt row, not the person
+      // leaving, so only a box still on the page finishes.
+      onBlur={(e) => {
+        const el = e.currentTarget;
+        queueMicrotask(() => el.isConnected && finish(el.value));
+      }}
+    />
+  );
+}
+
+function ConversationGroup(props: { label: string; children: JSX.Element }) {
+  const heading = createUniqueId();
+  return (
+    <section aria-labelledby={heading} ref={animateList}>
+      <h2 class="group-h" id={heading}>{props.label}</h2>
+      {props.children}
+    </section>
+  );
+}
+
+/** "5 h", "3 d 13 h": how long until a reset, hours rounded up, so it agrees with the bar's time mark. */
+export function untilReset(resetsAt: number): string {
+  const hours = Math.ceil((resetsAt * 1000 - Date.now()) / 3_600_000);
+  if (hours <= 0) return t('quota.now');
+  if (hours < 24) return t('quota.hours', { n: hours });
+  const days = Math.floor(hours / 24);
+  return hours % 24 ? t('quota.daysHours', { d: days, h: hours % 24 }) : t('quota.days', { n: days });
+}
+
+/** "now", "4 min ago": how long ago a reading was taken, in plain words. */
+export function ageWords(readAt: number, nowMs: number): string {
+  const { key, n } = ageOf(readAt, nowMs);
+  return t(key, { n });
+}
+
+export function windowName(window: string): string {
+  const key = `quota.${window}`;
+  return key in en ? t(key as Key) : window.replace('_', ' ');
+}
+
+interface Props {
+  conversations: Summary[];
+  groups?: ChatGroup[];
+  onGroup?: (id: string) => void;
+  onNewGroupChat?: (id: string) => void;
+  onGroupsChanged?: () => void;
+  projects: Project[];
+  vendors: Vendor[];
+  version: string;
+  /** The shell's view of the update (`update.rs`): a download or an install, or one kept for a restart. */
+  update?: UpdateStatus;
+  onRestart?: () => void;
+  /** The name the person gave, shown above the connected accounts. */
+  userName?: string;
+  place: Place;
+  catalogOpen?: boolean;
+  onCatalog?: () => void;
+  running: RunningItem[];
+  quotas: Quotas;
+  /** What the engine knows about how current each vendor's number is. */
+  usage?: VendorUsage[];
+  /** The time now in milliseconds, which the screen moves on every minute: the groups of chats and the quota readings age. */
+  now: number;
+  /** A new conversation in the area and project the user is in. */
+  onNew: () => void;
+  onTemporary?: () => void;
+  onClose?: () => void;
+  onArea: (area: Area) => void;
+  /** The user picked a project: its row is selected and no conversation is open. */
+  onProject: (id: string) => void;
+  /** A new conversation in this project. */
+  onNewIn: (id: string) => void;
+  onAddProject: () => void;
+  onFindProjectFolder?: (id: string) => void;
+  onRemoveProject?: (id: string) => void;
+  onOpen: (conversation: Summary) => void;
+  onMoved?: (conversation: Conversation) => void;
+  onMessage?: (hit: MessageHit) => void;
+  /** Deletes a conversation; `'unsaved'` when its copy holds work found nowhere else, which needs `discard`. */
+  onRemove: (id: string, discard?: boolean) => Promise<'unsaved' | undefined> | void;
+  /** Opens Settings; the quota of a vendor opens it at the usage limits. */
+  onSettings: (section?: 'usage', from?: HTMLElement) => void;
+  /** Something a menu asked for was refused (a folder that is gone, a project still working). */
+  onError?: (err: unknown) => void;
+  /** Runs a row action with its change shown first (ui/optimistic.ts); without it the action just runs and the list follows. */
+  onMutate?: <T>(patch: opt.Patch, call: () => Promise<T>, until?: 'read' | 'answer') => Promise<T>;
+  /** The person skipped the account cards and one AI is still not connected: a quiet line offers it until the cards close. */
+  remindConnect?: boolean;
+  onConnect?: () => void;
+}
+
+/** The open projects and groups, stored with the widths in `faber.layout` (`open`), so a restart shows the list as it was left. */
+function openFolded(): string[] {
+  try {
+    const open = (JSON.parse(localStorage.getItem('faber.layout') ?? 'null') as { open?: unknown } | null)?.open;
+    return Array.isArray(open) ? open.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+function keepOpen(open: ReadonlySet<string>): void {
+  try {
+    const held = JSON.parse(localStorage.getItem('faber.layout') ?? 'null') as Record<string, unknown> | null;
+    localStorage.setItem('faber.layout', JSON.stringify({ ...held, open: [...open] }));
+  } catch { /* per-viewer convenience only */ }
+}
+
+/** The sidebar: new conversation, the two areas, the projects with their conversations, the chats by day, and at the
+ * bottom Settings and the quota of each connected vendor. */
+export function Sidebar(props: Props) {
+  let cancelRowFocus: (() => void) | undefined;
+  let disposed = false;
+  onCleanup(() => { disposed = true; cancelRowFocus?.(); });
+  const followRowFocus = (list: Element, id: string) => {
+    cancelRowFocus?.();
+    if (disposed || !props.conversations.some((c) => c.id === id)) return;
+    let stopped = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      observer.disconnect();
+      document.removeEventListener('focusin', stop);
+      cancelRowFocus = undefined;
+    };
+    const restore = () => {
+      if (stopped) return;
+      if (!list.isConnected || document.activeElement !== document.body) return stop();
+      const title = list.querySelector<HTMLButtonElement>(`[data-conversation-id="${CSS.escape(id)}"] .item`);
+      if (!title) return;
+      stop();
+      title.focus({ preventScroll: true });
+      title.scrollIntoView({ block: 'nearest' });
+    };
+    // A moved row may arrive in a later snapshot. Observe only until it exists or the person chooses another focus.
+    const observer = new MutationObserver(restore);
+    observer.observe(list, { childList: true, subtree: true });
+    document.addEventListener('focusin', stop);
+    cancelRowFocus = stop;
+    queueMicrotask(restore);
+  };
+  const [confirming, setConfirming] = createSignal<string>();
+  // A delete refused because the conversation's copy holds work found nowhere else: the same row asks once more.
+  const [losing, setLosing] = createSignal<string>();
+  const [renaming, setRenaming] = createSignal<string>();
+  const [newGroup, setNewGroup] = createSignal(false);
+  const [moving, setMoving] = createSignal<string>();
+  const [moveFocus, setMoveFocus] = createSignal<{ id: string; groupId: string }>();
+  let list: HTMLDivElement | undefined;
+  const [groupRows, setGroupRows] = createStore<ChatGroup[]>([]);
+  createComputed(() => setGroupRows(reconcile(props.groups ?? [], { key: 'id' })));
+  const groups = () => groupRows;
+  const membership = (id: string) => groups().find((g) => g.conversationIds.includes(id));
+  createEffect(() => {
+    const pending = moveFocus();
+    if (!pending) return;
+    const cancel = (event: FocusEvent) => { if (event.target !== document.body) setMoveFocus(undefined); };
+    document.addEventListener('focusin', cancel);
+    onCleanup(() => document.removeEventListener('focusin', cancel));
+    if (membership(pending.id)?.id !== pending.groupId) return;
+    // The destination's row is drawn after the membership arrives, possibly after the picker has already gone.
+    queueMicrotask(() => {
+      if (moveFocus() !== pending) return;
+      const target = list?.querySelector<HTMLButtonElement>(`[data-chat-group-id="${CSS.escape(pending.groupId)}"] [data-conversation-id="${CSS.escape(pending.id)}"] .item`);
+      if (!target) return;
+      setMoveFocus(undefined);
+      if (document.activeElement === document.body) {
+        target.focus({ preventScroll: true });
+        target.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  });
+  const mutate = <T,>(patch: opt.Patch, call: () => Promise<T>, until?: 'read' | 'answer') => props.onMutate ? props.onMutate(patch, call, until) : call();
+  const changed = () => props.onGroupsChanged?.();
+  const changeGroup = (job: Promise<unknown>) => void job.then(changed, (err) => props.onError?.(err));
+  // Titles filter immediately; message text is searched after a short pause.
+  const [query, setQuery] = createSignal('');
+  const searching = () => query().trim() !== '';
+  const [hits, setHits] = createStore<(MessageHit & { key: string })[]>([]);
+  const [waiting, setWaiting] = createSignal(false);
+  const [searchFailed, setSearchFailed] = createSignal(false);
+  const searchArea = createMemo(() => props.place.area);
+  let previousSearch: { text: string; area: Area } | undefined;
+  createEffect(() => {
+    const text = query().trim();
+    const area = searchArea();
+    const conversations = props.conversations;
+    const hidden = windowHidden();
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (!text || previousSearch?.text !== text || previousSearch.area !== area) setHits([]);
+    previousSearch = { text, area };
+    setSearchFailed(false);
+    setWaiting(!!text);
+    const search = async () => {
+      try {
+        const result = await api.searchMessages(text, area);
+        if (cancelled) return;
+        setHits(reconcile(result.hits.filter((hit) => hit.area === area && conversations.some((c) => c.id === hit.conversationId))
+          .map((hit) => ({ ...hit, key: `${hit.conversationId}:${hit.messageIndex}` })), { key: 'key' }));
+        setWaiting(!result.ready);
+        if (!result.ready) timer = setTimeout(() => void search(), 700);
+      } catch {
+        if (!cancelled) { setWaiting(false); setSearchFailed(true); }
+      }
+    };
+    if (text && !hidden) timer = setTimeout(() => void search(), 180);
+    onCleanup(() => { cancelled = true; clearTimeout(timer); });
+  });
+  // The projects whose conversations show. The project the user is in starts open.
+  const [open, setOpenNow] = createSignal<ReadonlySet<string>>(new Set([...openFolded(), ...(props.place.projectId ? [props.place.projectId] : [])]));
+  const setOpen = (change: (held: ReadonlySet<string>) => ReadonlySet<string>) => {
+    setOpenNow(change(open()));
+    keepOpen(open());
+  };
+  const toggle = (id: string, on: boolean) =>
+    setOpen((held) => {
+      const next = new Set(held);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  // A conversation opened from elsewhere (a row of the running column) opens its project too, so the marked row is in view.
+  createEffect(
+    on(
+      () => props.place.id,
+      (id) => {
+        if (id && props.place.area === 'project' && props.place.projectId) toggle(props.place.projectId, true);
+        const group = id && membership(id);
+        if (group) toggle(group.id, true);
+      },
+    ),
+  );
+  // An archived conversation leaves the list; a search still finds it.
+  const listed = (c: Summary) => (!c.archived || searching()) && matches(c.title, query());
+  const inProject = (p: Project) => props.conversations.filter((c) => c.area === 'project' && c.projectId === p.id && listed(c));
+  const projectPins = (p: Project) => searching() ? [] : pinned(inProject(p));
+  const projectRest = (p: Project) => inProject(p).filter((c) => searching() || c.pinnedAt === undefined);
+  // A project shows when its name or one of its conversations holds the search, and then opens on those conversations.
+  const projects = () => props.projects.filter((p) => !searching() || matches(p.name, query()) || inProject(p).length > 0);
+  const chats = createMemo(() => groupChats(props.conversations.filter((c) => c.area === 'chat' && (searching() || !membership(c.id)) && listed(c)), props.now, !searching()));
+  // The one rule for a project showing its conversations: the user opened it, or the search found something in it. The
+  // list and aria-expanded both read it, so they never disagree.
+  const expanded = (p: Project) => showsChats(open().has(p.id), searching(), inProject(p).length);
+  // Each area lists only its own: Chat its conversations, Projects its projects with theirs.
+  const inChat = () => props.place.area === 'chat';
+  const nothing = () => searching() && !waiting() && !searchFailed() && hits.length === 0;
+  // The first click asks, the second deletes. When the copy holds unsaved work the row asks a third time, saying so.
+  const remove = (id: string) => {
+    if (losing() === id) {
+      setLosing(undefined);
+      return void props.onRemove(id, true);
+    }
+    if (confirming() !== id) return setConfirming(id);
+    setConfirming(undefined);
+    void ask(id);
+  };
+  const ask = async (id: string) => {
+    if ((await props.onRemove(id)) === 'unsaved') setLosing(id);
+  };
+
+  const Row = (row: { c: Summary; child?: boolean }) => {
+    let rowEl: HTMLDivElement | undefined;
+    const [confirmDamaged, setConfirmDamaged] = createSignal<number>();
+    const [removingDamaged, setRemovingDamaged] = createSignal(false);
+    const removeDamaged = async () => {
+      const askedAt = confirmDamaged();
+      if (askedAt === undefined) return void setConfirmDamaged(Date.now());
+      if (Date.now() - askedAt < 500 || removingDamaged()) return;
+      setRemovingDamaged(true);
+      try {
+        await api.removeDamagedConversation(row.c.id);
+      } catch (err) {
+        props.onError?.(err);
+      } finally {
+        setRemovingDamaged(false);
+        setConfirmDamaged(undefined);
+      }
+    };
+    onCleanup(() => {
+      // Focus on any control of the row (its title or its ×) goes back to the recreated row's title.
+      if (!rowEl || !rowEl.contains(document.activeElement)) return;
+      const list = rowEl.closest('.side-scroll');
+      if (list) followRowFocus(list, row.c.id);
+    });
+    return (
+    <Show when={!row.c.reason} fallback={
+      <div class="damaged-conversation" data-conversation-id={row.c.id} onMouseLeave={() => setConfirmDamaged(undefined)} onKeyDown={(e) => {
+        if (e.key === 'Escape') setConfirmDamaged(undefined);
+      }}>
+        <span>{t('reason.conversation_damaged')}</span>
+        <div class="damaged-actions">
+          <button class="quiet sm" onClick={() => void api.showDamagedConversation(row.c.id).catch((err) => props.onError?.(err))}>{t('damaged.showFile')}</button>
+          <button class="quiet sm" disabled={removingDamaged()} onClick={() => void removeDamaged()}>{t(confirmDamaged() === undefined ? 'damaged.remove' : 'damaged.confirmRemove')}</button>
+        </div>
+      </div>
+    }>
+    <div
+      ref={(el) => (rowEl = el)}
+      class="crow"
+      classList={{ moving: moving() === row.c.id, child: row.child }}
+      data-conversation-id={row.c.id}
+      onContextMenu={(e) =>
+        openMenu(e, [
+          { id: 'rename', key: 'r', label: t('menu.rename'), run: () => (renameDrafts.delete(row.c.id), setRenaming(row.c.id)) },
+          ...(!row.c.archived ? [{
+            key: 'p', id: row.c.pinnedAt === undefined ? 'pin' : 'unpin',
+            label: t(row.c.pinnedAt === undefined ? 'menu.pin' : 'menu.unpin'),
+            run: () => void mutate(opt.pinned(row.c.id, row.c.pinnedAt === undefined), () => api.pin(row.c.id, row.c.pinnedAt === undefined)).catch((err) => props.onError?.(err)),
+          }] : []),
+          { id: 'export', key: 'e', label: t('menu.export'), run: () => void api.exportConversation(row.c.id, { you: t('export.you'), auto: t('model.auto'), attachments: t('export.attachments'), files: t('export.files') }).catch((err) => props.onError?.(err)) },
+          ...(row.c.area === 'chat' ? [
+            { id: 'move-group', key: 'g', label: t('menu.moveToGroup'), disabled: groups().filter((g) => g.id !== membership(row.c.id)?.id).length === 0, run: () => setMoving(row.c.id) },
+            ...(membership(row.c.id) ? [{ id: 'ungroup', key: 'u', label: t('menu.removeFromGroup'), run: () => changeGroup(mutate(opt.movedToGroup(row.c.id), () => api.moveChatToGroup(row.c.id))) }] : []),
+          ] : []),
+          ...(row.c.area === 'chat' && !row.c.archived && props.projects.length ? [{
+            id: 'move', key: 'm', label: t('menu.moveToProject'),
+            run: () => openMenu(e, props.projects.map((p) => ({
+              id: p.id, label: p.name,
+              run: () => void mutate(opt.movedToProject(row.c.id, p.id), () => api.moveToProject(row.c.id, p.id)).then((c) => {
+                setQuery('');
+                toggle(p.id, true);
+                props.onMoved?.(c);
+              }, (err) => props.onError?.(err)),
+            })), rowEl?.querySelector('.item') ?? null),
+          }] : []),
+          row.c.archived
+            ? { id: 'unarchive', key: 'a', label: t('menu.unarchive'), run: () => void mutate(opt.archived(row.c.id, false), () => api.archive(row.c.id, false)).catch((err) => props.onError?.(err)) }
+            : { id: 'archive', key: 'a', label: t('menu.archive'), run: () => void mutate(opt.archived(row.c.id, true), () => api.archive(row.c.id, true)).catch((err) => props.onError?.(err)) },
+          { id: 'delete', key: 'd', label: t('menu.delete'), danger: true, confirm: t('side.confirmDelete'), run: () => void ask(row.c.id) },
+        ])
+      }
+    >
+      <Show when={moving() === row.c.id}>
+        <select class="field sm" aria-label={t('menu.moveToGroup')} ref={(el) => queueMicrotask(() => el.focus())} onBlur={() => setMoving(undefined)} onKeyDown={(e) => {
+          if (e.key === 'Escape') { e.preventDefault(); setMoving(undefined); rowEl?.querySelector<HTMLButtonElement>('.item')?.focus(); }
+        }} onChange={(e) => {
+          const id = e.currentTarget.value;
+          const pending = id && document.activeElement === e.currentTarget ? { id: row.c.id, groupId: id } : undefined;
+          setMoveFocus(pending);
+          setMoving(undefined);
+          if (id) {
+            toggle(id, true);
+            void mutate(opt.movedToGroup(row.c.id, id), () => api.moveChatToGroup(row.c.id, id)).then(changed, (err) => {
+              if (moveFocus() === pending) setMoveFocus(undefined);
+              props.onError?.(err);
+            });
+          }
+        }}>
+          <option value="">{t('group.choose')}</option>
+          <For each={groups().filter((g) => g.id !== membership(row.c.id)?.id)}>{(g) => <option value={g.id}>{g.name}</option>}</For>
+        </select>
+      </Show>
+      <Show
+        when={renaming() !== row.c.id}
+        fallback={
+          <RenameBox
+            id={row.c.id}
+            title={row.c.title}
+            onDone={(title) => {
+              setRenaming(undefined);
+              if (title?.trim() && title.trim() !== row.c.title) void mutate(opt.renamed(row.c.id, title), () => api.rename(row.c.id, title)).catch((err) => props.onError?.(err));
+            }}
+          />
+        }
+      >
+        <button class="item" aria-current={row.c.id === props.place.id} title={row.c.plan ? `${row.c.title} · ${planWords(row.c.plan)}` : undefined} onClick={() => props.onOpen(row.c)}>
+          <span title={waitWords(row.c.waitingOn)}>{row.c.title}<Show when={waitWords(row.c.waitingOn)}>{(words) => <small class="conversation-wait" classList={{ 'wait-attention': !row.c.archived && waitNeedsAttention(row.c.waitingOn) }}>{words()}</small>}</Show></span>
+          <Show when={row.c.archived}>
+            <span class="tag-quiet">{t('archive.tag')}</span>
+          </Show>
+          <Show when={row.c.ended && row.c.id !== props.place.id}>
+            <span class="unseen" role="img" aria-label={t(row.c.ended?.kind === 'unconcluded' ? 'run.unconcluded' : 'side.unseen')} title={t(row.c.ended?.kind === 'unconcluded' ? 'run.unconcluded' : 'side.unseen')} />
+          </Show>
+          <Show when={!row.c.archived && stateWords(row.c.state)}>{(words) => <span class="state-mark" data-state={row.c.state} title={words()}><StateGlyph state={stateKind(row.c.state!)} small />{words()}</span>}</Show>
+          <Show when={props.running.find((r) => r.conversationId === row.c.id)?.waitUntil}>{(at) => <span class="waiting-label" title={t('run.waiting', { when: untilReset(at()) })}>{t('run.waiting', { when: untilReset(at()) })}</span>}</Show>
+        </button>
+      </Show>
+      <button
+        class="x"
+        classList={{ confirm: confirming() === row.c.id || losing() === row.c.id }}
+        aria-label={losing() === row.c.id ? t('side.unsavedCopy') : t('side.delete', { title: row.c.title })}
+        title={losing() === row.c.id ? t('side.unsavedCopy') : undefined}
+        onClick={() => remove(row.c.id)}
+      >
+        {losing() === row.c.id ? t('side.confirmDiscard') : confirming() === row.c.id ? t('side.confirmDelete') : <Icon name="close" small />}
+      </button>
+    </div>
+    </Show>
+    );
+  };
+
+  return (
+    <>
+      <div class="side-start">
+        <button class="newchat" onClick={() => props.onNew()}>
+          <Icon name="plus" />
+          <span>{t('side.new')}</span>
+          <kbd>{keysOf('new')}</kbd>
+        </button>
+        <Show when={inChat() && !props.catalogOpen && props.onTemporary}>
+          <button class="iconbtn" aria-label={t('side.newMenu')} aria-haspopup="menu" onClick={(e) => openMenu(e, [
+            { id: 'new-chat', label: t('side.new'), run: props.onNew },
+            { id: 'temporary-chat', label: t('chat.temporary'), run: () => props.onTemporary?.() },
+          ], e.currentTarget)}><Icon name="down" /></button>
+        </Show>
+        <Show when={props.onClose}>
+          <button class="iconbtn side-close" aria-label={t('side.hide')} title={t('side.hide')} onClick={() => props.onClose?.()}>
+            <Icon name="close" />
+          </button>
+        </Show>
+      </div>
+      <div class="areas" role="group" aria-label={t('area.label')}>
+        <button class="area" title={keysOf('chat')} aria-pressed={!props.catalogOpen && props.place.area === 'chat'} onClick={() => props.onArea('chat')}>
+          <Icon name="chat" />
+          <span>{t('area.chat')}</span>
+        </button>
+        <button class="area" data-tour="projects" title={keysOf('projects')} aria-pressed={!props.catalogOpen && props.place.area === 'project'} onClick={() => props.onArea('project')}>
+          <Icon name="folder" />
+          <span>{t('area.projects')}</span>
+          <span class="count num">{props.projects.length}</span>
+        </button>
+        <button class="area" data-catalog-tab title={keysOf('catalog')} aria-pressed={!!props.catalogOpen} onClick={() => props.onCatalog?.()}><Icon name="plug" /><span>{t('area.catalog')}</span></button>
+      </div>
+      <Show when={!props.catalogOpen}>
+      <label class="field search">
+        <Icon name="search" small />
+        <input type="search" placeholder={t('side.search')} aria-label={t('side.search')} value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
+      </label>
+      {/* Each keystroke of a search filters the list: rows change at once instead of sliding on every letter. */}
+      <div class="side-scroll" data-motion={query() ? 'none' : undefined} onKeyDown={(e) => {
+        if (e.defaultPrevented || e.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        const row = e.target instanceof HTMLButtonElement && e.target.matches('.item') ? e.target : undefined;
+        if (!row) return;
+        const rows = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('button.item')]
+          .filter((button) => !button.disabled && !button.closest('[inert], [aria-hidden="true"]') && button.getClientRects().length > 0);
+        const index = rows.indexOf(row);
+        if (index < 0) return;
+        let next: HTMLButtonElement | undefined;
+        if (e.key === 'ArrowDown') next = rows[Math.min(index + 1, rows.length - 1)];
+        else if (e.key === 'ArrowUp') next = rows[Math.max(index - 1, 0)];
+        else if (e.key === 'Home') next = rows[0];
+        else if (e.key === 'End') next = rows.at(-1);
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          const parent = row.closest<HTMLElement>('.proj');
+          const head = parent?.querySelector<HTMLButtonElement>(':scope > .prow > .item');
+          const id = parent?.dataset.projectId ?? parent?.dataset.chatGroupId;
+          if (!head || !id) return;
+          if (row !== head) {
+            if (e.key !== 'ArrowLeft') return;
+            next = head;
+          } else if (e.key === 'ArrowLeft') toggle(id, false);
+          else if (head.getAttribute('aria-expanded') !== 'true') toggle(id, true);
+          else next = rows[index + 1]?.closest('.proj') === parent ? rows[index + 1] : head;
+        } else return;
+        e.preventDefault();
+        if (next) { next.focus({ preventScroll: true }); next.scrollIntoView({ block: 'nearest', behavior: 'instant' }); }
+      }} onMouseLeave={() => (setConfirming(undefined), setLosing(undefined))} ref={(el) => { list = el; animateList(el, true); }}>
+        <Show when={!inChat()}>
+        <section class="projects" aria-labelledby="side-projects" ref={(el) => animateList(el, true)}>
+          <div class="group-h">
+            <span id="side-projects">{t('side.projects')}</span>
+            <button class="plus" aria-label={t('side.addProject')} title={t('side.addProject')} onClick={() => props.onAddProject()}>
+              <Icon name="plus" small />
+            </button>
+          </div>
+          <Show
+            when={props.projects.length > 0}
+            fallback={
+              <div class="side-empty">
+                <p>{t('empty.openProjectBody')}</p>
+                <Peek />
+                <span>{t('side.noProjects')}</span>
+              </div>
+            }
+          >
+            <For each={projects()}>
+              {(p) => {
+                const tail = () => tailOf(props.running, p.id);
+                const here = () => props.place.area === 'project' && props.place.projectId === p.id;
+                const shown = keepForExit(() => expanded(p));
+                const gone = () => p.state === 'missing' || p.state === 'disconnected';
+                const findFolder = () => (props.onFindProjectFolder ? props.onFindProjectFolder(p.id) : void api.repointProject(p.id).catch((err) => props.onError?.(err)));
+                const removeFromFaber = () => (props.onRemoveProject ? props.onRemoveProject(p.id) : void api.removeProject(p.id).then(() => forgetProject(p.id), (err) => props.onError?.(err)));
+                return (
+                  <div class="proj" data-project-id={p.id} data-folder-state={p.state ?? 'present'}>
+                    <div
+                      class="prow"
+                      classList={{ gone: gone() }}
+                      onContextMenu={(e) =>
+                        openMenu(
+                          e,
+                          gone()
+                            ? [
+                                { id: 'find', label: t('projects.findFolder'), run: findFolder },
+                                { id: 'remove', label: t('projects.removeFromFaber'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: removeFromFaber },
+                              ]
+                            : [
+                                { id: 'new', label: t('menu.newHere'), run: () => (toggle(p.id, true), props.onNewIn(p.id)) },
+                                { id: 'open', label: t('menu.openFolder'), run: () => void api.showProject(p.id).catch((err) => props.onError?.(err)) },
+                                { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: () => void mutate(opt.withoutProject(p.id), () => api.removeProject(p.id)).then(() => forgetProject(p.id), (err) => props.onError?.(err)) },
+                              ],
+                        )
+                      }
+                    >
+                      <button
+                        class="item"
+                        aria-current={here() ? (props.place.id ? 'location' : 'true') : undefined}
+                        aria-expanded={expanded(p)}
+                        title={p.path}
+                        onClick={() => {
+                          // A second click on the project the user is in folds its conversations.
+                          toggle(p.id, !(here() && open().has(p.id)));
+                          props.onProject(p.id);
+                        }}
+                      >
+                        <span class="t">{p.name}</span>
+                        <Show when={tail().running && tail().needs === 0}>
+                          <StateGlyph state="working" small label={t('side.running')} />
+                        </Show>
+                        {/* Amber always comes with its words, as on the run button and in the running column. */}
+                        <Show when={tail().needs > 0}>
+                          <span class="tail amber-tag">
+                            <Icon name="ask" small />
+                            {t('run.needs', { n: tail().needs })}
+                          </span>
+                        </Show>
+                      </button>
+                      <button class="plus" aria-label={t('side.newIn', { name: p.name })} title={t('side.newIn', { name: p.name })} onClick={() => (toggle(p.id, true), props.onNewIn(p.id))}>
+                        <Icon name="plus" small />
+                      </button>
+                    </div>
+                    <Show when={gone()}>
+                      <div class="proj-missing" role="status">
+                        <p>{t(p.state === 'disconnected' ? 'projects.disconnectedNote' : 'projects.missingNote', { path: p.path })}</p>
+                        <div class="proj-missing-actions">
+                          <button type="button" class="btn" data-action="find-folder" onClick={findFolder}>
+                            {t('projects.findFolder')}
+                          </button>
+                          <button type="button" class="btn ghost" data-action="remove-project" disabled={tail().running} onClick={(e) => confirmProjectRemoval(e, removeFromFaber)}>
+                            {t('projects.removeFromFaber')}
+                          </button>
+                        </div>
+                      </div>
+                    </Show>
+                    <div class="fold" classList={{ open: expanded(p) }} inert={!expanded(p)}>
+                      <div class="fold-inner">
+                        <Show when={shown()}>
+                          <div class="proj-chats" ref={animateList}>
+                            <Show when={projectPins(p).length > 0}>
+                              <ConversationGroup label={t('side.pinned')}>
+                                <For each={projectPins(p)}>{(c) => <Row c={c} />}</For>
+                              </ConversationGroup>
+                            </Show>
+                            {/* A conversation an agent started sits under the one that started it. */}
+                            <For each={nest(projectRest(p))}>
+                              {(c) => <Row c={c} child={!!c.startedBy && projectRest(p).some((o) => o.id === c.startedBy)} />}
+                            </For>
+                          </div>
+                        </Show>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }}
+            </For>
+          </Show>
+        </section>
+        </Show>
+        <Show when={inChat()}>
+          <section class="chat-groups" classList={{ "no-groups": groups().length === 0 }} aria-labelledby="side-chat-groups">
+            <div class="group-h"><span id="side-chat-groups" classList={{ sr: groups().length === 0 }}>{t('group.groups')}</span><button class="plus" data-action="new-group" aria-label={t('group.create')} title={t('group.create')} onClick={() => setNewGroup(true)}><Icon name="plus" small /></button></div>
+            <Show when={newGroup()}><RenameBox title="" onDone={(name) => {
+              setNewGroup(false);
+              if (name?.trim()) void mutate(opt.withGroup({ id: `pending-${Date.now()}`, name: name.trim(), instructions: '', files: [], conversationIds: [] }), () => api.createChatGroup(name), 'answer').then((g) => { changed(); props.onGroup?.(g.id); toggle(g.id, true); }, (err) => props.onError?.(err));
+            }} /></Show>
+            <For each={groups().filter((g) => !searching() || matches(g.name, query()))}>{(g) => {
+              const here = () => props.place.groupId === g.id || !!props.place.id && g.conversationIds.includes(props.place.id);
+              const expanded = () => !searching() && open().has(g.id);
+              const shown = keepForExit(expanded);
+              const rows = () => props.conversations.filter((c) => c.area === 'chat' && g.conversationIds.includes(c.id) && listed(c));
+              const sections = createMemo(() => groupChats(rows(), props.now, !searching()));
+              return <div class="proj" data-chat-group-id={g.id}>
+                <div class="prow" onContextMenu={(e) => openMenu(e, [
+                  { id: 'rename', key: 'r', label: t('menu.rename'), run: () => (renameDrafts.delete(`group:${g.id}`), setRenaming(g.id)) },
+                  { id: 'delete', key: 'd', label: t('menu.delete'), danger: true, confirm: t('group.confirmDelete'), run: () => changeGroup(mutate(opt.withoutGroup(g.id), () => api.removeChatGroup(g.id))) },
+                ])}>
+                  <Show when={renaming() !== g.id} fallback={<RenameBox id={`group:${g.id}`} title={g.name} onDone={(name) => { setRenaming(undefined); if (name?.trim() && name.trim() !== g.name) changeGroup(mutate(opt.groupNamed(g.id, name), () => api.saveChatGroup(g.id, name))); }} />}>
+                    <button class="item" aria-current={here() ? 'location' : undefined} aria-expanded={expanded()} onClick={() => { toggle(g.id, !(props.place.groupId === g.id && expanded())); props.onGroup?.(g.id); }}><Icon name="folder" small /><span class="t">{g.name}</span></button>
+                  </Show>
+                  <button class="plus" aria-label={t('group.newIn', { name: g.name })} title={t('group.newIn', { name: g.name })} onClick={() => { toggle(g.id, true); props.onNewGroupChat?.(g.id); }}><Icon name="plus" small /></button>
+                </div>
+                <div class="fold" classList={{ open: expanded() }} inert={!expanded()}><div class="fold-inner"><Show when={shown()}><div class="proj-chats" ref={animateList}>
+                  <For each={sections().map((section) => section.group)}>{(group) => <ConversationGroup label={t(`side.${group}` as Key)}><For each={sections().find((section) => section.group === group)?.chats ?? []}>{(c) => <Row c={c} />}</For></ConversationGroup>}</For>
+                </div></Show></div></div>
+              </div>;
+            }}</For>
+          </section>
+          <div class="list" ref={(el) => animateList(el, true)}>
+            {/* The groups are keyed by their name and the rows by their conversation, so a refresh builds again only what changed. */}
+            <For each={chats().map((g) => g.group)}>
+              {(group) => (
+                <ConversationGroup label={t(`side.${group}` as Key)}>
+                  <For each={chats().find((g) => g.group === group)?.chats ?? []}>{(c) => <Row c={c} />}</For>
+                </ConversationGroup>
+              )}
+            </For>
+          </div>
+        </Show>
+        <Show when={searching()}>
+          <section class="message-hits" aria-labelledby="side-message-hits" aria-busy={waiting()}>
+            <div class="group-h" id="side-message-hits">{t('side.messages')}</div>
+            <Show when={waiting()}><div class="side-empty" role="status">{t('side.searching')}</div></Show>
+            <Show when={searchFailed()}><div class="side-empty" role="status">{t('side.searchFailed')}</div></Show>
+            <For each={hits}>{(hit) => (
+              <button type="button" class="message-hit" onClick={() => props.onMessage?.(hit)}>
+                <span class="hit-heading">
+                  <span class="hit-title">{hit.title}</span>
+                  <Show when={props.conversations.find((c) => c.id === hit.conversationId)?.archived}>
+                    <span class="tag-quiet">{t('archive.tag')}</span>
+                  </Show>
+                </span>
+                <span class="hit-snippet">
+                  <For each={hit.highlights}>{(range, i) => <>
+                    {hit.snippet.slice(i() ? hit.highlights[i() - 1]!.end : 0, range.start)}
+                    <mark>{hit.snippet.slice(range.start, range.end)}</mark>
+                  </>}</For>
+                  {hit.snippet.slice(hit.highlights.at(-1)?.end ?? 0)}
+                </span>
+              </button>
+            )}</For>
+            <Show when={nothing()}><div class="side-empty" role="status">{t('side.noMatch')}</div></Show>
+          </section>
+        </Show>
+      </div>
+      </Show>
+      <div class="side-foot">
+        {/* One row: the name, when the person gave one, and Settings. The version waits in Settings' tooltip until Settings shows it. */}
+        <div class="foot-row">
+          <Show when={props.userName}>
+            <div class="who">{props.userName}</div>
+          </Show>
+          <button class="area" data-restore="settings" onClick={(e) => props.onSettings(undefined, e.currentTarget)} title={`${t('settings.open')} (${keysOf('settings')}) · ${t('side.version', { version: props.version })}`}>
+            <Icon name="sliders" />
+            <span>{t('settings.open')}</span>
+          </button>
+        </div>
+        {/* One thin line per connected AI: its mark and name, how much of its weekly window is used (R177), the share in words
+            ("24% used"). The window, the reset, the other windows (the five-hour one), how old the reading is and "still
+            counting" (C010) are in the tooltip, so the line never wraps. */}
+        <div class="usage" role="group" aria-label={t('quota.label')}>
+          <For each={props.vendors}>
+            {(v) => {
+              const q = () => lineReading(props.quotas, v, props.now);
+              const fresh = () => freshness(props.usage, v, q()?.window);
+              // The share as read; "at least 44%" only when use is still being counted on a reading that is no longer recent (C010).
+              const share = () => (!q() ? '' : floorOnly(fresh(), props.now) ? t('quota.atLeast', { share: percent(q()!.used) }) : percent(q()!.used));
+              const low = () => props.usage?.find((u) => u.vendor === v)?.state === 'low';
+              const details = () =>
+                q()
+                  ? [
+                      `${t('quota.window', { window: windowName(q()!.window) })} · ${untilReset(q()!.resetsAt)}`,
+                      ...otherReadings(props.quotas, v, props.now, q()).map((o) => `${t('quota.window', { window: windowName(o.window) })}: ${percent(o.used)}`),
+                      fresh().uncountedPoints ? t('quota.uncounted', { share: `${fresh().uncountedPoints}%` }) : '',
+                      fresh().readAt !== undefined ? t('quota.read', { when: ageWords(fresh().readAt!, props.now) }) : '',
+                      fresh().counting ? t('quota.counting') : '',
+                    ]
+                  : [...otherReadings(props.quotas, v, props.now).map((o) => `${t('quota.window', { window: windowName(o.window) })}: ${percent(o.used)}`), t('quota.unavailable')];
+              return (
+                <button class="vendor" data-restore={`quota-${v}`} classList={{ low: low(), unread: !q() }} onClick={(e) => props.onSettings('usage', e.currentTarget)} title={[vendorName(v), ...details()].filter(Boolean).join(' · ')}>
+                  <VendorMark vendor={v} />
+                  <span class="name">{vendorName(v)}</span>
+                  <Show when={q()}>
+                    <span class="meter" aria-hidden="true">
+                      <i style={{ 'clip-path': `inset(0 ${100 - Math.round(Math.min(1, Math.max(0, q()!.used)) * 100)}% 0 0)` }} />
+                    </span>
+                  </Show>
+                  <Show when={q()}>
+                    <span class="share num">{share()}</span>
+                    <span class="used">{t('quota.used')}</span>
+                  </Show>
+                  <Show when={q() && fresh().counting}>
+                    <span class="sr">{t('quota.counting')}</span>
+                  </Show>
+                  <Show when={!q()}><span class="unavailable">{t('side.usage')}</span></Show>
+                </button>
+              );
+            }}
+          </For>
+          <Show when={props.vendors.length === 0}>
+            <span class="note">{t('side.noAi')}</span>
+          </Show>
+          <Show when={props.remindConnect}>
+            <button type="button" class="vendor more" data-restore="connect-more" onClick={() => props.onConnect?.()}>
+              <Icon name="plus" small />
+              <span>{t('side.connectMore')}</span>
+            </button>
+          </Show>
+        </div>
+        {/* The update: a calm line while one downloads at open, a quiet control once one waits for a restart. */}
+        <UpdateLine status={props.update ?? { phase: 'none' }} />
+        <Show when={props.update?.phase === 'ready'}>
+          <button
+            type="button"
+            class="upd act"
+            title={t('update.readyHint')}
+            onClick={() => props.onRestart?.()}
+          >
+            {t('update.ready')}
+          </button>
+        </Show>
+      </div>
+    </>
+  );
+}

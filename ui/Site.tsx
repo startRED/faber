@@ -1,0 +1,1218 @@
+import { type Accessor, createEffect, createResource, createSignal, For, Index, on, onCleanup, onMount, Show } from 'solid-js';
+import { api, errorText, type Message, type RunAppView, type SitePick, type SiteTab, type SiteTabs, type SiteTabStep, type ToolUse } from './api.ts';
+import { PAGE_PICK, type PagePick } from './Composer.tsx';
+import { appliedLook } from './appearance.ts';
+import { Cookies, cookieProfiles } from './Cookies.tsx';
+import { SiteExtensions } from './SiteExtensions.tsx';
+import { hasBrowserExtensions, hasPagePick } from './shell.ts';
+import { type MenuItem, openMenu } from './contextmenu.ts';
+import { Icon } from './Glyphs.tsx';
+import { StateGlyph } from './icons/kinds.tsx';
+import { fromEngine, t } from './i18n.ts';
+import { type SiteKey, siteKeyOf } from './keys.ts';
+
+/** A page the agent opened in Faber's browser (R161 step 7), which the person opened from the reply. */
+export interface OpenSite {
+  conversationId: string;
+  url: string;
+  title: string;
+  /** What the agent did in the browser during the reply, oldest first, kept up to date while it works (step 8, "recorded"). */
+  steps?: Accessor<SiteStep[]>;
+}
+
+/** One thing the agent did in Faber's browser, and the picture the browser took after it. */
+export interface SiteStep {
+  call: string;
+  words: string;
+  /** The screen sizes a check looked at the page on, a picture each, in order. */
+  looks?: SiteLook[];
+}
+
+/** The page at one screen size, in a check at several (`engine-core/src/browser.rs`, `looks_text`). */
+export interface SiteLook {
+  /** The picture's call id: the call's own with the size's place after it. */
+  picture: string;
+  screen: 'site.screen.pc' | 'site.screen.mac' | 'site.screen.tablet' | 'site.screen.phone';
+  width: number;
+  height: number;
+  fits: boolean;
+}
+
+const SCREENS = { 'a PC': 'site.screen.pc', 'a MacBook': 'site.screen.mac', 'a tablet': 'site.screen.tablet', 'a phone': 'site.screen.phone' } as const;
+const SIZE = /^(a PC|a MacBook|a tablet|a phone), (\d+)x(\d+) at [\d.]+x/;
+
+/** Faber's own lines of an answer, above the page's words. */
+const headOf = (tool: ToolUse) => (tool.output ?? '').split("\nThe page's visible text follows.", 1)[0]!;
+
+/** The sizes a check looked at, read from Faber's own lines ("Size 2 of 6: a phone, 390x844 at 3x: fits."). */
+export function looksOf(tool: ToolUse): SiteLook[] {
+  if (tool.name !== 'Browser' || tool.ok !== true) return [];
+  return headOf(tool)
+    .split('\n')
+    .flatMap((line) => {
+      const [, place, rest] = /^Size (\d+) of \d+: (.*)$/.exec(line) ?? [];
+      const [said, screen, width, height] = SIZE.exec(rest ?? '') ?? [];
+      if (!said) return [];
+      // Only Faber's words for a page wider than the screen, or cut by its edge, say it does not fit; a size the person's turn
+      // stopped, or one with no picture, says nothing of it.
+      const fits = !/^: (?:\d+ px wider than the screen|cut by the right edge)/.test(rest!.slice(said.length));
+      return [{ picture: `${tool.id}-s${place}`, screen: SCREENS[screen as keyof typeof SCREENS], width: Number(width), height: Number(height), fits }];
+    });
+}
+
+/** The size a page is shown at, from Faber's own line, when the agent chose one. */
+function sizeOf(tool: ToolUse): string | undefined {
+  const [said, screen, width, height] = /^Shown at the size of (a PC|a MacBook|a tablet|a phone), (\d+)x(\d+)/m.exec(headOf(tool)) ?? [];
+  return said ? t('site.size', { screen: t(SCREENS[screen as keyof typeof SCREENS]), width: width!, height: height! }) : undefined;
+}
+
+const quoted = (text: unknown) => (typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '');
+
+/** A browser call in plain words. What the agent typed never shows, only where: it can be a search, a name or a secret. */
+export function stepWords(tool: ToolUse): string {
+  const input = (tool.input ?? {}) as { url?: unknown; action?: unknown; target?: unknown; up?: unknown; size?: unknown };
+  if (typeof input.url === 'string') return t('site.step.open', { host: hostOf(siteOf(tool)?.url ?? input.url) });
+  const target = quoted(input.target);
+  if (input.size !== undefined && input.size !== null) {
+    const size = sizeOf(tool);
+    return size ? t('site.step.size', { size }) : t('site.step.ownSize');
+  }
+  switch (input.action) {
+    case 'sizes':
+      return t('site.step.sizes', { n: looksOf(tool).length });
+    case 'click':
+      return t('site.step.click', { target });
+    case 'type':
+      return target ? t('site.step.type', { target }) : t('site.step.typeHere');
+    case 'scroll':
+      return t(input.up === true ? 'site.step.up' : 'site.step.down');
+    case 'back':
+      return t('site.step.back');
+    default:
+      return t('site.step.read');
+  }
+}
+
+/** Every call of a reply that the browser did, in order: the log the page view steps through. */
+export const stepsOf = (tools: ToolUse[]): SiteStep[] =>
+  tools
+    .filter((tool) => tool.name === 'Browser' && tool.ok === true)
+    .map((tool) => {
+      const looks = looksOf(tool);
+      return { call: tool.id, words: stepWords(tool), ...(looks.length ? { looks } : {}) };
+    });
+
+/** What "While you were away" shows of the browser (step 8): the latest step on each page the run left over its last `turns`
+ * replies, the newest four, each with the picture taken after it. */
+export function awaySites(messages: Message[], turns: number): SiteStep[] {
+  const replies = messages.filter((m) => m.role === 'assistant').slice(-Math.max(1, turns));
+  const tools = replies.flatMap((m) => (m.tools ?? []).filter((tool) => !tool.parent));
+  return sitesOf(tools).slice(-4).map(({ tool }) => ({ call: tool.id, words: stepWords(tool) }));
+}
+
+/** One page of "While you were away": its picture, when one was kept, and what the agent last did there. */
+export function AwayPage(props: { conversationId: string; step: SiteStep }) {
+  const [picture] = createResource(() => props.step.call, (call) => api.sitePicture(props.conversationId, call).catch(() => null));
+  return (
+    <li>
+      <Show when={picture()} fallback={<span class="away-none" />}>
+        {(src) => <img src={src()} alt="" />}
+      </Show>
+      <span title={props.step.words}>{props.step.words}</span>
+    </li>
+  );
+}
+
+const [opened, setOpened] = createSignal<OpenSite>();
+// Each box the page is placed over is named by a number that only grows while the screen lives (the shell forgets them all
+// when a screen loads, see main.tsx), so a placing that arrives after its box let the page go is ignored by the shell.
+let boxes = 0;
+const boxId = () => ++boxes;
+/** The page open in the running column, if any. */
+export const openedSite = opened;
+/** Opens a page in the running column, or goes back to the running list. */
+export const showSite = (site?: OpenSite) => {
+  setOpened(site);
+  if (!site) setWide(false);
+};
+
+const [wide, setWide] = createSignal(false);
+// Where each opened page is now, by the card's conversation and address: widening the column draws the pane again, and the
+// page it shows has not moved meanwhile.
+const lives = new Map<string, string>();
+// What the person is typing in the address field, by conversation. Crossing the docking width draws the pane again in the
+// column's other place: the words go with it, and the field keeps the focus it had. A conversation no pane shows any more
+// drops its words, a microtask later: the pane that takes over comes in the same update.
+const [drafts, setDrafts] = createSignal<Record<string, string>>({});
+const panes = new Set<() => string>();
+let refocus: string | undefined;
+const sweep = () =>
+  queueMicrotask(() => {
+    const shown = new Set([...panes].map((owner) => owner()));
+    if (refocus !== undefined && !shown.has(refocus)) refocus = undefined;
+    setDrafts((all) => (Object.keys(all).every((id) => shown.has(id)) ? all : Object.fromEntries(Object.entries(all).filter(([id]) => shown.has(id)))));
+  });
+/** The page fills the work area over the conversation instead of sitting in the column, as an opened subagent can. */
+export const siteWide = wide;
+export const toggleSiteWide = () => setWide((on) => !on);
+
+type Screen = 'pc' | 'mac' | 'tablet' | 'phone';
+/** The screen sizes the pane can draw its pages at (the agent's own list) and the one in use; none is the pane's own. */
+type Sizes = { now: string | null; sizes: { name: string; screen: Screen; width: number; height: number }[] };
+
+/** What on a page only the person does (`engine-core/src/browser.rs`, `Turn`), and the words the card says it with. */
+const TURNS = { 'a login': 'site.turn.login', 'a captcha': 'site.turn.captcha', 'a payment': 'site.turn.payment' } as const;
+export type SiteTurn = (typeof TURNS)[keyof typeof TURNS];
+
+/** What a browser call left open: the address the page ended on, its title and whether it is the person's turn there, read
+ * from Faber's own first lines of the answer (the page's words come after them), else the address the agent asked for. */
+export function siteOf(tool: ToolUse): { url: string; title: string; turn?: SiteTurn } | undefined {
+  if (tool.name !== 'Browser' || tool.ok !== true) return undefined;
+  const asked = (tool.input as { url?: unknown } | undefined)?.url;
+  const head = tool.output?.split('\n', 3) ?? [];
+  const ours = /^Opened (https?:\/\/\S+) in Faber's browser/.exec(head[0] ?? '')?.[1];
+  const url = ours ?? (typeof asked === 'string' ? asked : '');
+  if (!/^https?:\/\//.test(url)) return undefined;
+  // The title line is Faber's only right under its own first line.
+  const title = ours ? /^Title: (.*)$/.exec(head[1] ?? '')?.[1]?.trim() : undefined;
+  const turn = ours ? /^Your turn: the page asks for (a login|a captcha|a payment),/.exec(head[2] ?? '')?.[1] : undefined;
+  return { url, title: title ?? '', ...(turn ? { turn: TURNS[turn as keyof typeof TURNS] } : {}) };
+}
+
+/** The pages a reply's calls left open, one card each: a page the agent clicked through several times is the latest of them. */
+export function sitesOf(tools: ToolUse[]): { tool: ToolUse; site: NonNullable<ReturnType<typeof siteOf>> }[] {
+  const out = new Map<string, { tool: ToolUse; site: NonNullable<ReturnType<typeof siteOf>> }>();
+  for (const tool of tools) {
+    const site = siteOf(tool);
+    if (!site) continue;
+    out.delete(site.url);
+    out.set(site.url, { tool, site });
+  }
+  return [...out.values()];
+}
+
+// The colour codes a dev server wraps its lines in (ESC [ … m), an address on this computer up to the next space or quote,
+// the prose that can close a sentence after it, and the words outside the addresses that say a server is up or is not.
+const COLOURS = new RegExp(String.raw`${String.fromCharCode(27)}\[[0-9;]*[A-Za-z]`, 'g');
+const LOCAL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d+[^\s'"`<>]*/gi;
+const CLOSING = /[.,;:!?)\]}]+$/;
+const STARTED = /\b(?:local|listening|running|ready|started|starting|serving|available)\b/i;
+const FAILED = /\b(?:fail\w*|error|refused|cannot|can't|unable|could not|not|no longer|waiting|ECONNREFUSED)\b/i;
+const ALONE = /^\s*(?:[-*•➜]\s*)?https?:\/\/\S+\s*$/;
+
+/** The local addresses with a port on one line. */
+function addresses(line: string): string[] {
+  return [...line.matchAll(LOCAL)].flatMap(([found]) => {
+    try {
+      const url = new URL(found.replace(CLOSING, ''));
+      return url.port ? [url.href] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** The local addresses an output announces: on a line whose own words say a server is up there and name no failure, or
+ * listed one per line right under such a line that names none (http-server's "Available on:"). */
+function announced(output: string): string[] {
+  const out: string[] = [];
+  let listing = false;
+  for (const line of output.replace(COLOURS, '').split('\n')) {
+    const words = line.replace(LOCAL, ' ');
+    const found = addresses(line);
+    if (listing && ALONE.test(line)) {
+      out.push(...found);
+      continue;
+    }
+    const up = STARTED.test(words) && !FAILED.test(words);
+    if (up) out.push(...found);
+    listing = up && found.length === 0;
+  }
+  return out;
+}
+
+/** The apps the agent started on this computer (step 7, the app pane): a local address with its port that a command's
+ * output announces, such as a dev server's "Local: http://localhost:3000/", never one an error or a page of text only
+ * mentions; one card per server, the latest command's address. A server the agent already opened in Faber's browser has
+ * its page card instead. */
+export function appsOf(tools: ToolUse[]): { tool: ToolUse; site: { url: string; title: string } }[] {
+  const opened = new Set(sitesOf(tools).map(({ site }) => hostOf(site.url)));
+  const out = new Map<string, { tool: ToolUse; site: { url: string; title: string } }>();
+  for (const tool of tools) {
+    if (!/bash|command|exec|shell/i.test(tool.name) || !tool.output) continue;
+    for (const url of announced(tool.output)) {
+      const host = hostOf(url);
+      if (opened.has(host)) continue;
+      out.delete(host);
+      out.set(host, { tool, site: { url, title: t('site.app') } });
+    }
+  }
+  return [...out.values()];
+}
+
+/** Where a page lives, with its port when it has one: the person's own servers differ only by it. */
+export const hostOf = (url: string) => {
+  try {
+    return new URL(url).host.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+};
+
+/** A page the agent opened, in its reply: the picture it took, the title and the site, and a button to look at it. */
+export function SiteCard(props: { conversationId: string; tool: ToolUse; site: { url: string; title: string; turn?: SiteTurn }; steps?: Accessor<SiteStep[]> }) {
+  const [picture] = createResource(() => props.tool.id, (call) => api.sitePicture(props.conversationId, call).catch(() => null));
+  const [refused, setRefused] = createSignal<string>();
+  const open = async () => {
+    setRefused(undefined);
+    const { url, title } = props.site;
+    const opened = await api.siteOpen(props.conversationId, url).catch((error) => { setRefused(errorText(error)); return false; });
+    if (opened) showSite({ conversationId: props.conversationId, url, title, steps: props.steps });
+  };
+  return (
+    <div class="file site" data-turn={props.site.turn ? 'person' : undefined}>
+      <Show when={picture()}>{(src) => <img src={src()} alt="" />}</Show>
+      <Show when={props.site.turn}>{(turn) => <p class="site-turn">{t(turn())}</p>}</Show>
+      <Show when={refused()}>{(error) => <p class="note err" role="alert">{fromEngine(error())}</p>}</Show>
+      <div>
+        <span title={props.site.url}>
+          <b>{props.site.title || hostOf(props.site.url)}</b>
+          <Show when={props.site.title}>
+            <small>{hostOf(props.site.url)}</small>
+          </Show>
+        </span>
+        <button class="btn" onClick={() => void open()}>
+          {t('site.show')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** A check at several screen sizes, in the page's place: each size's picture with its name, and where the page runs past the
+ * screen's edge, said in words. The pictures load only while the step is picked. */
+function SiteLooks(props: { conversationId: string; looks: SiteLook[] }) {
+  return (
+    <ul class="site-looks" aria-label={t('site.sizes')}>
+      <Index each={props.looks}>
+        {(look) => {
+          const [picture] = createResource(() => look().picture, (call) => api.sitePicture(props.conversationId, call).catch(() => null));
+          const size = () => t('site.size', { screen: t(look().screen), width: look().width, height: look().height });
+          return (
+            <li>
+              <Show when={picture()} fallback={<span class="site-look-none" />}>
+                {(src) => <img src={src()} alt={size()} style={{ 'aspect-ratio': `${look().width} / ${look().height}` }} />}
+              </Show>
+              <span>{size()}</span>
+              <Show when={!look().fits}>
+                <span class="site-look-wider">{t('site.size.wider')}</span>
+              </Show>
+            </li>
+          );
+        }}
+      </Index>
+    </ul>
+  );
+}
+
+/** The person's steps in the pane's head, in the order a browser puts them. */
+const STEPS = [
+  ['back', 'left', 'site.back'],
+  ['forward', 'right', 'site.forward'],
+  ['reload', 'retry', 'site.reload'],
+] as const;
+
+/** What the person typed in the address field, as an address the browser loads: a bare name gets https. The shell still
+ * refuses anything but a web page (`allowed` in src-tauri/src/pane/mod.rs). */
+export function addressOf(typed: string): string | undefined {
+  const text = typed.trim();
+  if (!text || /\s/.test(text)) return undefined;
+  // "localhost:3000" names a host and a port, not a scheme; an app on this computer usually serves plain http.
+  const schemed = /^[a-z][a-z0-9+.-]*:/i.test(text) && !/^[^:/]+:\d+(\/|$)/.test(text);
+  const url = schemed ? text : /^(localhost|127\.0\.0\.1)([:/]|$)/i.test(text) ? `http://${text}` : `https://${text}`;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Where words typed in the address field go: the search page. The address field searches like a browser's. */
+const SEARCH = 'https://www.google.com/search?q=';
+
+/** What the person typed in the address field, as the page it goes to: an address (`addressOf`), or a search for the words
+ * when they are no address (spaces, or one word with no dot, port or slash). Anything with a scheme that is no web page goes
+ * nowhere, so `javascript:` is never searched for either. */
+export function goesTo(typed: string): string | undefined {
+  const text = typed.trim();
+  if (!text) return undefined;
+  const words = /\s/.test(text) || (!/[.:/]/.test(text) && !/^localhost$/i.test(text));
+  const address = words ? undefined : addressOf(text);
+  if (address) return address;
+  if (!/\s/.test(text) && /^[a-z][a-z0-9+.-]*:/i.test(text) && !/^[^:/]+:\d+(\/|$)/.test(text)) return undefined;
+  return SEARCH + encodeURIComponent(text);
+}
+
+/** How a tab names a page with no title: its site, or only the port for an app on this computer. */
+export function placeOf(url: string): string {
+  try {
+    const u = new URL(url);
+    return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(u.hostname) && u.port ? `:${u.port}` : u.hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+/** A tab's name in the strip. */
+export const tabName = (tab: SiteTab) => tab.title || (tab.url ? placeOf(tab.url) : t('site.newTab'));
+
+/** The corners the page takes: the box's own radius, drawn over the page in the colour of the card around it (the pane is a
+ * native rectangle; `round.js` in the shell draws them). None while that colour cannot be read. */
+export function cornersOf(box: HTMLElement): { radius: number; color: [number, number, number] } | undefined {
+  const radius = Number.parseFloat(getComputedStyle(box).borderTopLeftRadius) || 0;
+  const color = getComputedStyle(box.closest('.runcol') ?? document.body).backgroundColor.match(/[\d.]+/g)?.slice(0, 3).map((n) => Math.round(Number(n)));
+  if (!color || color.length < 3 || color.some((n) => !(n >= 0 && n <= 255))) return undefined;
+  return { radius, color: color as [number, number, number] };
+}
+
+/** The corners last sent, so a placing sends them only when a look changed them. */
+let rounded = '';
+function round(box: HTMLElement) {
+  const corners = cornersOf(box);
+  const key = corners ? `${corners.radius} ${corners.color.join(' ')}` : '';
+  if (!corners || key === rounded) return;
+  rounded = key;
+  void api.siteRound(corners.radius, corners.color).catch(() => (rounded = ''));
+}
+
+/** How long after a motion starts the pane keeps looking every frame: longer than any motion of the screen (300 ms at most). */
+const MOVING = 400;
+
+/** The screen's layers: what opens over the rest, wherever it lands. */
+const LAYERS = 'dialog[open], :popover-open, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tooltip"], .toast';
+
+/** Whether something the screen draws (the picture viewer, a menu, a dialog, a toast) lies over the box. Faber's browser is
+ * a native view over the window, above everything the screen draws, so the page has to leave while anything covers its box.
+ * A layer counts by its bounds, however small, once anything of it is painted (one kept in the page fully faded or hidden
+ * does not); nine points catch anything else drawn over the box. */
+export function covered(box: HTMLElement): boolean {
+  const leaving = box.closest<HTMLElement>('.runcol[data-exiting="true"]');
+  if (!leaving?.inert) return paintedCover(box, !!leaving);
+  // Inert excludes painted content from hit testing; restore it before any input can run.
+  leaving.inert = false;
+  try { return paintedCover(box, true); } finally { leaving.inert = true; }
+}
+
+function paintedCover(box: HTMLElement, departing: boolean): boolean {
+  const r = box.getBoundingClientRect();
+  if (r.width < 1 || r.height < 1) return false;
+  for (const layer of document.querySelectorAll<HTMLElement>(LAYERS)) {
+    // The column the box sits in is a dialog of its own below 1,100 px: only what lies over it counts.
+    if (layer.contains(box) || box.contains(layer)) continue;
+    const l = layer.getBoundingClientRect();
+    const over = l.width >= 1 && l.height >= 1 && l.left < r.right && l.right > r.left && l.top < r.bottom && l.bottom > r.top;
+    if (!over || !layer.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
+    // A layer under the box (a screen behind the column) does not cover it. Only one known to lie under it is left out: one
+    // that takes no pointer (a tooltip) is not in the stack and counts.
+    const stack = document.elementsFromPoint((Math.max(l.left, r.left) + Math.min(l.right, r.right)) / 2, (Math.max(l.top, r.top) + Math.min(l.bottom, r.bottom)) / 2);
+    const above = stack.findIndex((el) => layer.contains(el));
+    const under = stack.findIndex((el) => box.contains(el));
+    if (above === -1 || under === -1 || above < under) return true;
+  }
+  const xs = [r.left + 4, r.left + r.width / 2, r.right - 4];
+  const ys = [r.top + 4, r.top + r.height / 2, r.bottom - 4];
+  return xs.some((x) => ys.some((y) => {
+    const top = document.elementFromPoint(x, y);
+    // The column's own resize handle leaves with it; it never covers the page it belongs to.
+    return top !== null && !box.contains(top) && !(departing && (top.contains(box) || top.classList.contains('grip')));
+  }));
+}
+
+/** Whether this shell offers pick mode (`site_pick`, only the host's pane has it); the screen's checks turn it on. */
+export const pagePick = { supported: hasPagePick };
+/** How long pick mode lasts without a pick, in ms (`act.js` holds the same limit in the page). */
+const PICK_LIMIT = 60_000;
+
+/** What the person picked on the page, as the composer of conversation `owner` takes it: the words written into the message
+ * and the picture beside them. Answers whether a composer took it. */
+export function sendPick(owner: string, answer: SitePick): boolean {
+  const p = answer.picked;
+  if (!p) return false;
+  const what = `${p.role}${p.name ? ` "${p.name}"` : ''}`;
+  // The page's words are data, framed as such: one labelled block of JSON, whose quotes and backticks cannot end it.
+  const fields = JSON.stringify({ page: p.page, role: p.role, name: p.name, text: p.text, selector: p.selector }, null, 2).replace(/`/g, '\\u0060');
+  const lines = [t('site.pick.heading'), '```json', fields, '```'];
+  const short = what.length > 40 ? `${what.slice(0, 39)}…` : what;
+  const detail: PagePick = {
+    conversationId: owner,
+    name: t('site.pick.name', { what: short }),
+    block: lines.join('\n'),
+    ...(answer.picture ? { image: { mediaType: 'image/jpeg', base64: answer.picture } } : {}),
+  };
+  document.dispatchEvent(new CustomEvent(PAGE_PICK, { detail }));
+  return detail.taken === true;
+}
+
+/** The page in the right column: Faber's browser sits over this box, measured here, and leaves when the box goes. Every
+ * move of the box moves it, and it is placed again whenever the window changes size. The address field above it takes
+ * the person anywhere on the web; with no page yet, only the field shows. */
+export function SitePane(props: { site: OpenSite; onClose: () => void; wide?: boolean; onWide?: () => void; extensionsDeveloperMode?: boolean; runApp?: boolean }) {
+  let box: HTMLDivElement | undefined;
+  // The shell never places a box again once it let the page go, so coming back from a step of the log takes a new one.
+  let id = boxId();
+  // Where the page is now: a link or a redirect moves it off the card's site, and the head then names the new one.
+  const liveKey = () => `${props.site.conversationId} ${props.site.url}`;
+  const [live, setLiveNow] = createSignal(lives.get(liveKey()) ?? props.site.url);
+  const setLive = (url: string) => {
+    lives.set(liveKey(), url);
+    setLiveNow(url);
+  };
+  // Another tab or card brings its own page: the address it was last seen at, else the one it opens on.
+  createEffect(on(liveKey, () => setLiveNow(lives.get(liveKey()) ?? props.site.url), { defer: true }));
+  const stop = api.onSite(setLive);
+  onCleanup(() => void stop.then((unlisten) => unlisten()).catch(() => {}));
+  let disposed = false;
+  let placing = false;
+  let placeAgain = false;
+  const place = () => {
+    // While a step of the log shows, its picture holds the box and the page stays out of the window; with no page yet there
+    // is nothing to place.
+    if (disposed || away() || blank()) return;
+    if (placing) return void (placeAgain = true);
+    const r = box?.getBoundingClientRect();
+    if (!r) return;
+    if (r.width >= 1 && r.height >= 1) {
+      const placingId = id;
+      placing = true;
+      void api.sitePlace(placingId, r.left, r.top, r.width, r.height).then((placed) => {
+        if (placed && !disposed && !away() && id === placingId) round(box!);
+      }).finally(() => {
+        placing = false;
+        if (placeAgain) {
+          placeAgain = false;
+          place();
+        }
+      });
+    }
+  };
+  onMount(() => {
+    const seen = new ResizeObserver(place);
+    seen.observe(box!);
+    window.addEventListener('resize', place);
+    // The column slides in: the box is placed again once it has arrived.
+    const column = box!.closest('.runcol');
+    column?.addEventListener('transitionend', place);
+    // Anything drawn over the box takes the page out of the window until it goes. The screen says so by changing its DOM, a
+    // dialog's open state or a popover's toggle; the look is taken once a frame at most, and only while a page is shown.
+    let look = 0;
+    const lookAgain = () => {
+      look = 0;
+      if (!blank() && !picked()) setCovered(covered(box!));
+    };
+    const soon = () => (look ||= requestAnimationFrame(lookAgain));
+    const watch = new MutationObserver(soon);
+    watch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['open', 'class', 'hidden', 'style'] });
+    // Something that slides or fades may reach the box midway: while motion runs the look is taken every frame, for at most
+    // MOVING after the latest start (no motion of the screen's runs longer), and once more when it ends or stops.
+    let moving = 0;
+    let movingUntil = 0;
+    const follow = () => {
+      lookAgain();
+      place();
+      moving = performance.now() < movingUntil ? requestAnimationFrame(follow) : 0;
+    };
+    const started = (event: Event) => {
+      // A layer or the box's own ancestors: a row's hover never sets the pane looking.
+      if (!(event.target instanceof Element) || (!event.target.closest(LAYERS) && !event.target.contains(box!))) return;
+      if (event.type === 'faber-motion' && event.target instanceof HTMLElement && event.target.dataset.exiting === 'true' && event.target.contains(box!)) navigation++;
+      movingUntil = performance.now() + MOVING;
+      moving ||= requestAnimationFrame(follow);
+    };
+    const starts = ['transitionrun', 'animationstart', 'faber-motion'] as const;
+    const moved = ['toggle', 'transitionend', 'transitioncancel', 'animationend', 'animationcancel'] as const;
+    for (const event of starts) document.addEventListener(event, started, true);
+    for (const event of moved) document.addEventListener(event, soon, true);
+    // One already open counts before the first placing.
+    if (!blank() && !picked()) setCovered(covered(box!));
+    onCleanup(() => {
+      disposed = true;
+      placeAgain = false;
+      watch.disconnect();
+      for (const event of starts) document.removeEventListener(event, started, true);
+      for (const event of moved) document.removeEventListener(event, soon, true);
+      cancelAnimationFrame(moving);
+      cancelAnimationFrame(look);
+      seen.disconnect();
+      window.removeEventListener('resize', place);
+      column?.removeEventListener('transitionend', place);
+      void api.sitePark(id);
+    });
+  });
+  // A step picked in the log shows the picture taken after it, in the page's place; none picked is the live page.
+  const steps = () => props.site.steps?.() ?? [];
+  const [picked, setPicked] = createSignal<string>();
+  const pickedAt = () => steps().findIndex((s) => s.call === picked());
+  const [still] = createResource(picked, (call) => api.sitePicture(props.site.conversationId, call).catch(() => null));
+  const [isCovered, setCovered] = createSignal(false);
+  const away = () => !!picked() || isCovered();
+  // The live page goes out of the window while a picture stands in for it or something covers its box, and comes back after.
+  createEffect(
+    on(
+      away,
+      (gone) => {
+        if (gone) return void api.sitePark(id);
+        id = boxId();
+        place();
+        // The agent may have picked another screen size while the page was out of sight.
+        void readSizes();
+      },
+      { defer: true },
+    ),
+  );
+  // Another card, or an address typed in the field, starts on its live page, placed at once (the first one after a blank pane).
+  createEffect(
+    on(
+      () => props.site,
+      () => {
+        setPicked(undefined);
+        // A new tab has no page: the one the pane holds leaves the box, and the next page takes a new one.
+        if (blank()) return void api.sitePark(id), (id = boxId());
+        place();
+      },
+      { defer: true },
+    ),
+  );
+  // A new look may round the card differently: the page follows once the look has painted.
+  createEffect(on(appliedLook, () => requestAnimationFrame(() => box && !blank() && !picked() && round(box)), { defer: true }));
+  // The latest step is the live page, unless it is a check at several sizes: its pictures are what it saw.
+  const pick = (call?: string) => setPicked(call === steps().at(-1)?.call && !steps().at(-1)?.looks ? undefined : call);
+  const keys = (e: KeyboardEvent) => {
+    const list = steps();
+    // From the row that has the focus: the agent may have added steps since it got it.
+    const buttons = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('button')];
+    const focused = buttons.indexOf(document.activeElement as HTMLElement);
+    const at = focused >= 0 ? focused : picked() === undefined ? list.length - 1 : pickedAt();
+    const to = e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? at - 1 : e.key === 'ArrowDown' || e.key === 'ArrowRight' ? at + 1 : e.key === 'Home' ? 0 : e.key === 'End' ? list.length - 1 : -2;
+    if (to === -2 || to < 0 || to >= list.length) return;
+    e.preventDefault();
+    pick(list[to]!.call);
+    buttons[to]?.focus();
+  };
+  const moved = () => hostOf(live()) !== hostOf(props.site.url);
+  const blank = () => !props.site.url;
+  const title = () => (blank() ? t('site.browser') : moved() ? hostOf(live()) : props.site.title || hostOf(props.site.url));
+  // The address field shows where the page is until the person types; Enter loads what they typed, Esc puts it back.
+  // The conversation is kept as a plain value: a pane that goes reads no more of its closed `<Show>`'s props.
+  let mine = props.site.conversationId;
+  const owner = () => mine;
+  const typed = () => drafts()[props.site.conversationId];
+  const setTyped = (text?: string) =>
+    setDrafts((all) => {
+      if (all[mine] === text) return all;
+      const next = { ...all };
+      if (text === undefined) delete next[mine];
+      else next[mine] = text;
+      return next;
+    });
+  const [focused, setFocused] = createSignal(false);
+  panes.add(owner);
+  createEffect(on(() => props.site.conversationId, (now) => ((mine = now), sweep()), { defer: true }));
+  // The other place's pane goes in the same update, before or after this one comes: both have run by the next microtask.
+  onMount(() =>
+    queueMicrotask(() => {
+      if (refocus !== owner() || !address) return;
+      refocus = undefined;
+      address.focus();
+      address.setSelectionRange(address.value.length, address.value.length);
+    }),
+  );
+  onCleanup(() => {
+    panes.delete(owner);
+    if (focused()) refocus = owner();
+    sweep();
+  });
+  const [refused, setRefused] = createSignal<string>();
+  let navigation = 0;
+  onCleanup(() => navigation++);
+  const close = () => { navigation++; props.onClose(); };
+  createEffect(on(live, () => document.activeElement !== address && setTyped(undefined), { defer: true }));
+  const go = async (to: string | undefined) => {
+    const request = ++navigation;
+    const owner = props.site.conversationId;
+    setRefused(undefined);
+    if (!to) return setRefused('site.refused');
+    let failure: string | undefined;
+    const opened = await api.siteGo(owner, to).catch((error) => { failure = errorText(error); return false; });
+    if (request !== navigation || owner !== props.site.conversationId || box?.closest<HTMLElement>('.runcol')?.dataset.exiting === 'true') return;
+    if (!opened) return setRefused(failure ?? 'site.openFailed');
+    setTyped(undefined);
+    address?.blur();
+    // The new page is the live one, even on the same site: a step's picture that stood in for the page goes.
+    setPicked(undefined);
+    setLive(to);
+    if (blank() || hostOf(to) !== hostOf(props.site.url)) showSite({ conversationId: props.site.conversationId, url: to, title: '' });
+  };
+  const [profiles] = createResource(cookieProfiles);
+  // The screen size the page is drawn at, shrunk to fit the box: the agent may change it too, so it is read again with
+  // each page.
+  const [sizes, { mutate: setSizes, refetch: readSizes }] = createResource<Sizes | undefined>(() => api.siteSize(false).catch(() => undefined));
+  createEffect(on(live, () => void readSizes(), { defer: true }));
+  const sizeWords = (name: string | null | undefined) => {
+    const size = sizes()?.sizes.find((s) => s.name === name);
+    return size ? t('site.size', { screen: t(`site.screen.${size.screen}`), width: String(size.width), height: String(size.height) }) : t('site.size.own');
+  };
+  const [sizing, setSizing] = createSignal(false);
+  const [sizeError, setSizeError] = createSignal<string>();
+  const pickSize = async (name: string | null) => {
+    if (sizing()) return false;
+    setSizing(true);
+    try {
+      setSizes(await api.siteSize(true, name));
+      setSizeError(undefined);
+      return true;
+    } catch (error) {
+      setSizeError(errorText(error));
+      return false;
+    } finally {
+      setSizing(false);
+    }
+  };
+  const sizeMenu = (e: MouseEvent, from: HTMLElement) =>
+    openMenu(e, [null, ...(sizes()?.sizes.map((s) => s.name) ?? [])].map((name) => ({
+      id: name ?? 'own',
+      label: `${sizes()?.now === name ? '✓ ' : ''}${sizeWords(name)}`,
+      run: () => void pickSize(name),
+    })), from);
+  const [signingIn, setSigningIn] = createSignal(false);
+  const [extensions, setExtensions] = createSignal(false);
+  const developerMode = () => hasBrowserExtensions && props.extensionsDeveloperMode === true;
+  createEffect(on(developerMode, () => {
+    setSigningIn(false);
+    setExtensions(false);
+    if (!blank()) void step('new');
+  }, { defer: true }));
+  let address: HTMLInputElement | undefined;
+  const addressKeys = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void go(goesTo(typed() ?? live()));
+    } else if (e.key === 'Escape') {
+      // The first Esc puts back where the page is, the second leaves the field; the column itself stays.
+      e.stopPropagation();
+      if (typed() !== undefined) {
+        setTyped(undefined);
+        setRefused(undefined);
+        requestAnimationFrame(() => address?.select());
+      } else address?.blur();
+    }
+  };
+  // Unfocused, the field shows where the page is with its site bright and the rest quiet.
+  const shownAddress = () => {
+    if (blank() || focused() || typed() !== undefined) return undefined;
+    try {
+      const u = new URL(live());
+      return { site: (u.protocol === 'http:' ? 'http://' : '') + u.host, rest: (u.pathname === '/' ? '' : u.pathname) + u.search + u.hash };
+    } catch {
+      return undefined;
+    }
+  };
+
+  // The conversation's tabs (`engine-core/src/browser/tabs.rs`), read again whenever the engine changes them.
+  const conversation = () => props.site.conversationId;
+  const [tabs, setTabs] = createSignal<SiteTabs | null>(null);
+  const readTabs = () => void api.siteTabs(conversation()).then(setTabs, () => {});
+  createEffect(on(conversation, readTabs));
+  // A pane opened before it had any tab shows the one page it has.
+  const strip = (): SiteTab[] => (tabs()?.tabs.length ? tabs()!.tabs : [{ id: '', url: props.site.url, title: props.site.title }]);
+  const front = () => (tabs()?.tabs.length ? tabs()!.front : '');
+  const [busy, setBusy] = createSignal<ReadonlySet<string>>(new Set());
+  const [loading, setLoading] = createSignal(false);
+  const [history, setHistory] = createSignal<[boolean, boolean]>([false, false]);
+  let historyRead = 0;
+  onCleanup(() => historyRead++);
+  const readHistory = () => {
+    const request = ++historyRead;
+    const owner = conversation();
+    if (blank()) return setHistory([false, false]);
+    void api.siteHistory(owner).then((next) => {
+      if (request === historyRead && owner === conversation()) setHistory(next);
+    }, () => {});
+  };
+  createEffect(on([conversation, live, blank], readHistory));
+  createEffect(on(blank, (none) => none && setLoading(false)));
+  const listening = [
+    api.onSiteTabs((id) => id === conversation() && readTabs()),
+    api.onSiteBusy((b) => {
+      if (b.conversation !== conversation()) return;
+      setBusy((now) => {
+        const next = new Set(now);
+        if (b.busy) next.add(b.tab);
+        else next.delete(b.tab);
+        return next;
+      });
+    }),
+    api.onSiteLoading((loading) => {
+      setLoading(loading);
+      if (!loading) readHistory();
+    }),
+    api.onSiteKey((key) => siteKey(key as SiteKey)),
+  ].map((listening) => listening.catch(() => () => {}));
+  onCleanup(() => listening.forEach((stopping) => void stopping.then((unlisten) => unlisten()).catch(() => {})));
+
+  // Pick mode (task 205): the page outlines what is under the pointer and a click puts it in this conversation's composer
+  // instead of reaching the page. The screen waits for the pick a few seconds at a time; the page (Esc there), the button,
+  // Esc here, another page or anything that takes the page out of view ends it.
+  const [picking, setPicking] = createSignal(false);
+  const [pickRefused, setPickRefused] = createSignal(false);
+  let pickTurn = 0;
+  let pickOwner = '';
+  const endPick = (tell: boolean) => {
+    if (!picking()) return;
+    pickTurn++;
+    setPicking(false);
+    if (tell) void api.sitePick(pickOwner, false).catch(() => {});
+  };
+  const startPick = async () => {
+    const turn = ++pickTurn;
+    const owner = (pickOwner = conversation());
+    setPickRefused(false);
+    setPicking(true);
+    // However the page treats Esc, pick mode ends by itself a minute after it started.
+    const until = Date.now() + PICK_LIMIT;
+    while (turn === pickTurn) {
+      if (Date.now() > until) return endPick(true);
+      const answer: SitePick = await api.sitePick(owner, true).catch(() => ({ ended: true }));
+      if (turn !== pickTurn) return;
+      if (answer.waiting) continue;
+      endPick(false);
+      if (answer.picked && !sendPick(owner, answer)) setPickRefused(true);
+    }
+  };
+  createEffect(on([live, conversation, away, blank, front], () => (endPick(true), setPickRefused(false)), { defer: true }));
+  onCleanup(() => endPick(true));
+  createEffect(() => {
+    if (!picking()) return;
+    // Esc anywhere in the screen ends pick mode first, before it reaches anything else that Esc closes.
+    const escape = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      endPick(true);
+    };
+    window.addEventListener('keydown', escape, true);
+    onCleanup(() => window.removeEventListener('keydown', escape, true));
+  });
+
+  /** Does `kind` to the tabs; the tab in front then shows. Closing the last tab closes the pane. */
+  // The log of the agent's steps stays with its tab while the person looks at another.
+  let agentSteps = props.site.steps;
+  createEffect(() => props.site.steps && (agentSteps = props.site.steps));
+  const step = async (kind: SiteTabStep, tab?: string) => {
+    if (tab === '') return kind === 'close' ? close() : undefined;
+    const request = ++navigation;
+    const owner = conversation();
+    const answer = await api.siteTab(owner, kind, tab).catch(() => null);
+    if (request !== navigation || owner !== conversation() || box?.closest<HTMLElement>('.runcol')?.dataset.exiting === 'true') return;
+    if (!answer || answer.tabs === null) return;
+    setTyped(undefined);
+    setRefused(undefined);
+    setTabs(answer.tabs);
+    if (!answer.tabs.tabs.length) return close();
+    const now = answer.tabs.tabs.find((t) => t.id === answer.tabs.front);
+    if (!now) return;
+    // The agent's steps are the log of its own tab only.
+    const steps = now.id === answer.tabs.agent ? agentSteps : undefined;
+    showSite({ conversationId: conversation(), url: now.url, title: now.title ?? '', ...(steps ? { steps } : {}) });
+  };
+  const siteKey = (key: SiteKey) => {
+    const list = strip();
+    const at = list.findIndex((tab) => tab.id === front());
+    switch (key) {
+      case 'new':
+      case 'reopen':
+        return void step(key);
+      case 'close': {
+        // With tabs but none in front there is no tab to close; with none at all the one page is the pane's.
+        const tab = front();
+        return void (tab !== undefined && step('close', tab));
+      }
+      case 'next':
+      case 'previous': {
+        const to = list[(at + (key === 'next' ? 1 : list.length - 1)) % list.length];
+        return void (to && to.id !== front() && step('bring', to.id));
+      }
+      case 'address':
+        address?.focus();
+        return address?.select();
+      case 'reload':
+      case 'back':
+      case 'forward':
+        return void (!blank() && api.siteStep(conversation(), key).catch(() => false));
+      default: {
+        // Ctrl+9 is the last tab, as in any browser.
+        const n = Number(key.slice(3));
+        const to = n === 9 ? list.at(-1) : list[n - 1];
+        return void (to && to.id !== front() && step('bring', to.id));
+      }
+    }
+  };
+  const chromeKeys = (e: KeyboardEvent) => {
+    const key = siteKeyOf(e);
+    if (!key) return;
+    e.preventDefault();
+    e.stopPropagation();
+    siteKey(key);
+  };
+  const tabMenu = (e: MouseEvent, tab: SiteTab) =>
+    openMenu(e, [
+      { id: 'external', label: t('site.external'), disabled: !tab.url, run: () => void api.openLink(tab.url).catch(() => {}) },
+      { id: 'close', label: t('site.closeTab'), run: () => void step('close', tab.id) },
+      { id: 'others', label: t('site.closeOthers'), disabled: strip().length < 2, run: () => void step('closeOthers', tab.id) },
+    ]);
+  // Tabs that no longer fit the strip are all in one menu; the one in front is always in view.
+  let tabsBox: HTMLDivElement | undefined;
+  const [overflowing, setOverflowing] = createSignal(false);
+  const measure = () => tabsBox && setOverflowing(tabsBox.scrollWidth > tabsBox.clientWidth + 1);
+  onMount(() => {
+    const seen = new ResizeObserver(measure);
+    seen.observe(tabsBox!);
+    onCleanup(() => seen.disconnect());
+  });
+  createEffect(
+    on([strip, front], () =>
+      requestAnimationFrame(() => {
+        measure();
+        tabsBox?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }),
+    ),
+  );
+  const allTabs = (e: MouseEvent) =>
+    openMenu(e, strip().map((tab) => ({ id: tab.id || 'only', label: `${tab.id === front() ? '✓ ' : ''}${tabName(tab)}`, run: () => void step('bring', tab.id) })), e.currentTarget as HTMLElement);
+  const more = (e: MouseEvent) => {
+    const from = e.currentTarget as HTMLElement;
+    const items: MenuItem[] = [
+      { id: 'external', label: t('site.external'), disabled: blank(), run: () => void api.openLink(live()).catch(() => {}) },
+      { id: 'copy', label: t('site.copy'), disabled: blank(), run: () => void navigator.clipboard.writeText(live()) },
+    ];
+    // The screen the page is drawn at, for the person and the agent alike: a PC, a MacBook, a tablet or a phone.
+    if (sizes()?.sizes.length) {
+      items.push({
+        id: 'size',
+        label: t('site.screenSize', { size: sizeWords(sizes()?.now) }),
+        disabled: blank(),
+        run: () =>
+          requestAnimationFrame(() => {
+            const r = from.getBoundingClientRect();
+            sizeMenu(new MouseEvent('click', { clientX: r.left, clientY: r.bottom }), from);
+          }),
+      });
+    }
+    // The person's own sign-ins, from their Firefox, for this conversation's pages: only where a profile exists.
+    if (developerMode()) items.push({ id: 'extensions', label: t('site.extensions'), run: () => setExtensions(true) });
+    else if (profiles()?.length) items.push({ id: 'signin', label: t('cookies.open'), run: () => setSigningIn(true) });
+    items.push({ id: 'clear', label: t('site.clear'), danger: true, confirm: t('site.clear.confirm'), run: () => void clear() });
+    openMenu(e, items, from);
+  };
+  const clear = async () => {
+    await api.siteClear(conversation()).catch(() => {});
+    setTabs(null);
+    showSite({ conversationId: conversation(), url: '', title: '' });
+  };
+  return (
+    <>
+      {/* The browser's keys work wherever the focus is in its head and bar; on the page itself the shell hears them. */}
+      <div class="site-chrome" onKeyDown={chromeKeys}>
+        <div class="rc-head side-head site-head">
+          <h2 id="running-title" class="sr-only">
+            {title()}
+          </h2>
+          <div class="site-tabs" role="group" aria-label={t('site.tabs')} ref={(el) => (tabsBox = el)}>
+            <For each={strip()}>
+              {(tab) => {
+                const on = () => tab.id === front();
+                return (
+                  <div class="site-tab" classList={{ front: on() }}>
+                    <button
+                      class="site-tab-go"
+                      aria-current={on() ? 'page' : undefined}
+                      title={tab.url || tabName(tab)}
+                      onClick={() => !on() && void step('bring', tab.id)}
+                      onAuxClick={(e) => e.button === 1 && (e.preventDefault(), void step('close', tab.id))}
+                      onContextMenu={(e) => tabMenu(e, tab)}
+                    >
+                      <span class="site-mark" aria-hidden="true">
+                        <Show when={tab.url} fallback={<Icon name="globe" small />}>
+                          {placeOf(tab.url).replace(/^:/, '').charAt(0).toUpperCase()}
+                        </Show>
+                      </span>
+                      <span class="site-tab-name">{tabName(tab)}</span>
+                      <Show when={busy().has(tab.id)}>
+                        <span class="site-busy" role="img" aria-label={t('site.agentTab')} title={t('site.agentTab')}><StateGlyph state="working" small /></span>
+                      </Show>
+                    </button>
+                    <button class="site-tab-close" aria-label={t('site.closeTab')} title={t('site.closeTab')} onClick={() => void step('close', tab.id)}>
+                      <Icon name="close" small />
+                    </button>
+                  </div>
+                );
+              }}
+            </For>
+          </div>
+          <Show when={overflowing()}>
+            <button class="iconbtn" aria-haspopup="menu" aria-label={t('site.allTabs')} title={t('site.allTabs')} onClick={allTabs}>
+              <Icon name="down" />
+            </button>
+          </Show>
+          <button class="iconbtn site-new" aria-label={t('site.newTab')} title={t('site.newTab')} onClick={() => void step('new')}>
+            <Icon name="plus" />
+          </button>
+          <Show when={props.onWide}>
+            <button class="iconbtn site-wide" aria-label={t(props.wide ? 'agent.narrow' : 'site.widen')} title={t(props.wide ? 'agent.narrow' : 'site.widen')} onClick={() => props.onWide!()}>
+              <Icon name={props.wide ? 'shrink' : 'expand'} />
+            </button>
+          </Show>
+          <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={close}>
+            <Icon name="close" />
+          </button>
+        </div>
+        <div class="site-bar">
+          {/* Always there, dimmed when they cannot act: a step's picture standing in for the page, or no page or history. */}
+          <For each={STEPS}>
+            {([step, icon, label]) => (
+              <button
+                class={`iconbtn site-${step}`}
+                aria-label={t(label)}
+                title={t(label)}
+                disabled={blank() || !!picked() || (step === 'back' && !history()[0]) || (step === 'forward' && !history()[1])}
+                onClick={() => void api.siteStep(props.site.conversationId, step).catch(() => false)}
+              >
+                <Icon name={icon} />
+              </button>
+            )}
+          </For>
+          <div class="site-pill" classList={{ loading: loading() }}>
+            <input
+              class="site-address"
+              classList={{ veiled: !!shownAddress() }}
+              ref={(el) => (address = el)}
+              type="text"
+              inputmode="url"
+              spellcheck={false}
+              autocomplete="off"
+              aria-label={t('site.address')}
+              aria-invalid={refused() === 'site.refused' || undefined}
+              aria-describedby={refused() ? 'site-address-error' : undefined}
+              placeholder={t('site.addressHint')}
+              value={typed() ?? (blank() ? '' : live())}
+              onInput={(e) => (navigation++, setTyped(e.currentTarget.value), setRefused(undefined))}
+              onFocus={(e) => (setFocused(true), e.currentTarget.select())}
+              onBlur={() => setFocused(false)}
+              onKeyDown={addressKeys}
+            />
+            <Show when={shownAddress()}>
+              {(shown) => (
+                <span class="site-shown" aria-hidden="true">
+                  <span class="site-host">{shown().site}</span>
+                  <span class="site-path">{shown().rest}</span>
+                </span>
+              )}
+            </Show>
+            <span class="site-load" aria-hidden="true" />
+          </div>
+          <Show when={pagePick.supported}>
+            <button
+              class="iconbtn site-pick"
+              aria-pressed={picking()}
+              aria-label={t('site.pick')}
+              title={t('site.pick')}
+              disabled={blank() || !!picked()}
+              onClick={() => (picking() ? endPick(true) : void startPick())}
+            >
+              <Icon name="pick" />
+            </button>
+          </Show>
+          <button class="iconbtn site-more" aria-haspopup="menu" aria-label={t('site.more')} title={t('site.more')} onClick={more}>
+            <Icon name="more" />
+          </button>
+        </div>
+      </div>
+      <Show when={props.runApp && conversation()} keyed>
+        {(id) => <RunApp
+          id={id}
+          open={(url) => void go(url)}
+          onStart={() => {
+            const before = navigation;
+            return (url: string) => { if (before === navigation) void go(url); };
+          }}
+        />}
+      </Show>
+      <Show when={picking()}>
+        <div class="site-preview site-pick-hint" role="status">
+          <span>{t('site.pick.hint')}</span>
+          <button class="btn" onClick={() => endPick(true)}>{t('site.pick.stop')}</button>
+        </div>
+      </Show>
+      <Show when={pickRefused()}>
+        <p class="side-meta bad" role="alert">{t('site.pick.noComposer')}</p>
+      </Show>
+      <Show when={!blank() && !picked() && sizes()?.now}>
+        <div class="site-preview">
+          <span>{t('site.preview', { size: sizeWords(sizes()?.now) })}</span>
+          <button class="btn site-fit" disabled={sizing()} onClick={() => void pickSize(null).then((fitted) => fitted && address?.focus())}>{t('site.size.fit')}</button>
+        </div>
+      </Show>
+      <Show when={developerMode() && extensions()}>
+        <SiteExtensions conversationId={props.site.conversationId} onClose={() => setExtensions(false)} />
+      </Show>
+      <Show when={signingIn()}>
+        <Cookies conversationId={props.site.conversationId} onClose={() => setSigningIn(false)} />
+      </Show>
+      <Show when={sizeError()}>
+        {(error) => <p class="side-meta bad" role="alert">{fromEngine(error())}</p>}
+      </Show>
+      <Show when={refused()}>
+        {(error) => <p class="side-meta bad" id="site-address-error" role="alert">{fromEngine(error())}</p>}
+      </Show>
+      <div class="rc-body side-body site-body">
+        {/* The sizes of a check are a list a screen reader walks, never one image. */}
+        <div
+          class="site-view"
+          classList={{ blank: blank() }}
+          ref={(el) => (box = el)}
+          role={blank() || (picked() && steps()[pickedAt()]?.looks) ? undefined : 'img'}
+          aria-label={blank() || (picked() && steps()[pickedAt()]?.looks) ? undefined : t('site.view', { title: title() })}
+        >
+          {/* No page yet: the box says what it is for, where the page will be. The address field above names a live page. */}
+          <Show when={blank()}>
+            <div class="site-empty">
+              <Icon name="globe" />
+              <p>{t('site.blank')}</p>
+            </div>
+          </Show>
+          <Show when={picked()}>
+            <Show
+              when={steps()[pickedAt()]?.looks}
+              fallback={
+                <Show when={still()} fallback={<Show when={!still.loading}><p class="site-none">{t('site.step.noPicture')}</p></Show>}>
+                  {(src) => <img src={src()} alt="" />}
+                </Show>
+              }
+            >
+              {(looks) => <SiteLooks conversationId={props.site.conversationId} looks={looks()} />}
+            </Show>
+          </Show>
+        </div>
+        <Show when={steps().length > 1 || steps().some((step) => step.looks)}>
+          <div class="site-log">
+            <Show when={picked()}>
+              <button class="btn" onClick={() => setPicked(undefined)}>
+                {t('site.live')}
+              </button>
+            </Show>
+            <ol aria-label={t('site.steps')} onKeyDown={keys}>
+              <Index each={steps()}>
+                {(step, i) => {
+                  // By place, not by object: a new step of the agent keeps the rows, and the focus, that are there.
+                  const on = () => (picked() === undefined ? i === steps().length - 1 : picked() === step().call);
+                  return (
+                    <li>
+                      <button aria-current={on() ? 'step' : undefined} tabIndex={on() ? 0 : -1} title={step().words} onClick={() => pick(step().call)}>
+                        <span>{i + 1}</span>
+                        {step().words}
+                      </button>
+                    </li>
+                  );
+                }}
+              </Index>
+            </ol>
+          </div>
+        </Show>
+      </div>
+    </>
+  );
+}
+
+function RunApp(props: { id: string; open: (url: string) => void; onStart: () => (url: string) => void }) {
+  const [view, setView] = createSignal<RunAppView>({ phase: 'idle' });
+  const [pending, setPending] = createSignal(false);
+  const phase = () => view().phase;
+  const confirmation = () => { const now = view(); return now.phase === 'confirm' ? now : undefined; };
+  const running = () => { const now = view(); return now.phase === 'running' ? now : undefined; };
+  const notice = () => { const now = view(); return now.phase === 'notice' ? now : undefined; };
+  const output = () => { const now = view(); return 'output' in now ? now.output : undefined; };
+  const watching = () => ['starting', 'running', 'stopping'].includes(phase());
+  let timer: number | undefined;
+  let revision = 0;
+  let openWhenReady: ((url: string) => void) | undefined;
+
+  const schedule = () => {
+    if (watching()) timer = window.setTimeout(() => void read(), phase() === 'running' ? 1_000 : 400);
+  };
+  const apply = (next: RunAppView) => {
+    setView(next);
+    if (next.phase === 'running') openWhenReady?.(next.url);
+    if (next.phase !== 'starting') openWhenReady = undefined;
+    schedule();
+  };
+  const read = async () => {
+    const request = revision;
+    try {
+      const next = await api.runAppStatus(props.id);
+      if (request === revision) apply(next);
+    } catch {
+      if (request === revision) schedule();
+    }
+  };
+  const act = async (action: () => Promise<RunAppView>, autoOpen = true) => {
+    const request = ++revision;
+    clearTimeout(timer);
+    setPending(true);
+    openWhenReady = autoOpen ? props.onStart() : undefined;
+    try {
+      const next = await action();
+      if (request === revision) apply(next);
+    } catch (err) {
+      if (request === revision) apply({ phase: 'notice', reason: errorText(err), output: '' });
+    } finally {
+      if (request === revision) setPending(false);
+    }
+  };
+  onMount(() => void read());
+  onCleanup(() => { revision++; clearTimeout(timer); });
+
+  return (
+    <div class="site-run-app">
+      <div class="site-preview">
+        <Show when={!watching() && phase() !== 'stopFailed' && phase() !== 'confirm'}>
+          <button class="btn site-run-start" disabled={pending()} onClick={() => void act(() => api.runAppStart(props.id))}>{t('site.runApp')}</button>
+        </Show>
+        <Show when={running()}>{(app) =>
+          <button class="btn" onClick={() => props.open(app().url)}>{t('site.runApp.open')}</button>
+        }</Show>
+        <Show when={watching() || phase() === 'stopFailed'}>
+          <button class="btn site-run-stop" disabled={pending() || phase() === 'stopping'} onClick={() => void act(() => api.runAppStop(props.id), false)}>{t('commands.stop')}</button>
+        </Show>
+        <Show when={phase() === 'starting' || phase() === 'stopping' || phase() === 'stopFailed'}>
+          <span role="status">{phase() === 'starting' ? t('site.runApp.starting') : phase() === 'stopping' ? t('commands.stopping') : t('reason.runApp.stopFailed')}</span>
+        </Show>
+        <Show when={notice()}>{(info) => <span class="site-run-notice" role="status">{fromEngine(info().reason)}</span>}</Show>
+      </div>
+      <Show when={confirmation()}>{(question) =>
+        <div class="site-preview site-run-confirm" role="group" aria-label={t('site.runApp.confirm')} tabIndex={-1}
+          ref={(el) => queueMicrotask(() => el.isConnected && el.focus())}>
+          <span>{t('site.runApp.confirm')}</span>
+          <pre>{[question().command, ...question().scripts.map(([name, body]) => `${name}: ${body}`)].join('\n')}</pre>
+          <button class="btn" disabled={pending()} onClick={() => void act(() => api.runAppConfirm(props.id, question().seen))}>{t('site.runApp.allow')}</button>
+          <button class="btn" disabled={pending()} onClick={() => setView({ phase: 'idle' })}>{t('catalog.cancel')}</button>
+        </div>
+      }</Show>
+      <Show when={output()}>{(recent) =>
+        <details class="site-preview site-run-output">
+          <summary>{t('site.runApp.output')}</summary>
+          <pre>{recent()}</pre>
+        </details>
+      }</Show>
+    </div>
+  );
+}

@@ -1,0 +1,5 @@
+{"dir":"in","msg":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"faber","version":"0.0.0"}}}}
+{"dir":"stdout","msg":"Loading Antigravity…"}
+{"dir":"stdout","msg":"{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"sessionId\":"}
+{"dir":"stdout","msg":"{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}"}
+{"dir":"exit","msg":1}

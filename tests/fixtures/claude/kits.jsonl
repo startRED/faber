@@ -1,0 +1,4 @@
+{"dir":"in","msg":{"type":"user","message":{"role":"user","content":"Debug this failing test."},"parent_tool_use_id":null,"session_id":""}}
+{"dir":"out","msg":{"type":"system","subtype":"init","session_id":"kit-session","model":"claude-haiku-5-5","skills":["faber:debug"]}}
+{"dir":"out","msg":{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Using the debugging kit."}]}}}
+{"dir":"out","msg":{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0,"usage":{}}}

@@ -1,0 +1,79 @@
+[package]
+name = "faber"
+description = "The AI says done. Faber checks."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+default-run = "faber"
+
+[features]
+# Test builds only (testkit/): a command the screen's checks report through, and the page that runs them. Never default.
+test-hooks = ["faber-host/test-hooks"]
+# The manual webview spike only (examples/pane-spike-host.rs): Tauri's child webviews are behind its `unstable` feature.
+pane-spike = ["tauri/unstable"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+base64 = "0.23"
+# The config folder before the app exists, for the crash hook of the first line of main; Tauri reads the same call.
+dirs = "7"
+faber-channel = { path = "../channel", features = ["host"] }
+faber-engine = { path = "../engine" }
+faber-host = { path = "../host" }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
+# `unstable` gives the window a second webview, Faber's own browser pane (R161 step 7).
+tauri = { version = "2", features = ["tray-icon", "image-png", "unstable"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Already used by the notification plugin; its Linux builder cannot suppress the desktop's own sound.
+notify-rust = "4"
+# Tauri already enables v2_40; its response policy distinguishes top-level navigation from visual frames.
+webkit2gtk = { version = "2", features = ["v2_40"] }
+
+[target.'cfg(windows)'.dependencies]
+winsafe = { version = "0.0.29", features = ["gui"] }
+# The browser pane drives its page through WebView2's own DevTools call (pane/native.rs); the same versions Tauri uses.
+webview2-com = "0.39"
+# Its Result, Interface and HSTRING types must match webview2-com 0.39 (and Tauri).
+windows-core = "0.62"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Already supplied by Tauri; compile a child-frame URL blocker into WKWebView's network process.
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSString", "NSError", "NSObject"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["block2", "WKContentRuleList", "WKContentRuleListStore", "WKUserContentController"] }
+
+# Only the native API files (awake.rs, autostart.rs, tray/native.rs, pane/native.rs) opt in to FFI; the engine and testkit keep the
+# workspace's forbid.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[target.'cfg(windows)'.dev-dependencies]
+# Standard Rust cannot create junctions on stable; the overlap guard in update.rs is tested with one.
+junction = "2"
+
+[dev-dependencies]
+# Already in the workspace's dependency graph; validate the actual WebKit URL rule ordering and patterns.
+regex = "1"
+
+[[example]]
+name = "pane-spike-host"
+required-features = ["pane-spike"]

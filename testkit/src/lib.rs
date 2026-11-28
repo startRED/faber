@@ -1,0 +1,29 @@
+//! Faber's own test runner, and the fake CLI it replays recordings with.
+
+pub mod app;
+pub mod base;
+pub mod cdp;
+pub mod checks;
+pub mod contain;
+pub mod cross;
+#[cfg(windows)]
+pub mod desktop;
+pub mod fake;
+pub mod gate;
+pub mod lanes;
+pub mod page;
+pub mod plan;
+pub mod proctree;
+pub mod quarantine;
+pub mod rehearsal;
+pub mod replay;
+pub mod report;
+pub mod runner;
+pub mod sandbox;
+pub mod screen;
+pub mod sentinel;
+pub mod server;
+pub mod slots;
+pub mod sweep;
+pub mod testbuild;
+pub mod timing;

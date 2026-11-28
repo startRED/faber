@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest an improvement or new capability for Faber
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you write this, read the [non-goals](https://github.com/startRED/faber/blob/main/docs/product/README.md#non-goals)
+        and the [phases](https://github.com/startRED/faber/blob/main/docs/product/README.md#phases), which say what Faber
+        will not do and in what order it builds the rest.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem or workflow friction does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: This is not listed under the non-goals, and I searched the existing issues.
+          required: true

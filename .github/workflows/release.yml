@@ -1,0 +1,294 @@
+name: release
+
+# Two channels (R156). A tag vX.Y.Z is a stable release and vX.Y.Z-preview.N a preview, published as a GitHub pre-release so
+# /releases/latest, which stable installs read, never points at one. Both channels ship the same bundles; only the
+# manifest an install reads differs (see the `finish` job and scripts/channel.mjs for the version scheme).
+on:
+  push:
+    tags: ['v*']
+  # auto-release.yml starts this on the tag it pushed, since a tag pushed by a workflow fires no push event.
+  workflow_dispatch:
+
+# Each job asks for what it needs on top of this.
+permissions:
+  contents: read
+
+# Jobs that do not package Electron skip its binary download.
+env:
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+jobs:
+  # One job creates the release so the build jobs upload to it instead of racing to create it. It starts as a draft:
+  # a published release with no latest.json yet makes every Faber get "not found" and skip the update.
+  create:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      id: ${{ steps.release.outputs.id }}
+    steps:
+      # The body is the English "what's new" entries newer than the previous release (scripts/release-notes.mjs), which is
+      # why the whole history is fetched: the previous tag holds the last entry it shipped.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - id: release
+        run: |
+          set -euo pipefail
+          # Refuses any tag that is not vX.Y.Z or vX.Y.Z-preview.N before it is used anywhere else.
+          kind=$(node scripts/channel.mjs kind "$GITHUB_REF_NAME")
+          node scripts/electron-stable-guard.mjs "$GITHUB_REF_NAME"
+          # A stable lists what is new since the previous stable; a preview, since the build before it.
+          previous=$(node scripts/channel.mjs notes-base "$GITHUB_REF_NAME")
+          node scripts/release-notes.mjs "$previous" > "$RUNNER_TEMP/notes.md"
+          # Both channels start as drafts (the updater must never see a release without its latest.json); the publish job
+          # below makes it public, as a pre-release for a preview so /releases/latest keeps pointing at the newest stable.
+          # The id comes from the answer to the create itself: the release list may not show a new draft yet, and an empty id
+          # left every build uploading nowhere and every preview a draft.
+          prerelease=false
+          if [ "$kind" = preview ]; then prerelease=true; fi
+          id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$GITHUB_REF_NAME" -f name="Faber $GITHUB_REF_NAME" \
+            -F body=@"$RUNNER_TEMP/notes.md" -F draft=true -F prerelease="$prerelease" --jq .id)
+          [ -n "$id" ]
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    needs: create
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: ''
+    steps:
+      - uses: actions/checkout@v7
+      - name: webview libraries (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      # A tag cannot reuse a release cache from another tag (R165).
+      - run: npm ci
+      - run: npm ci
+        working-directory: installer
+      - run: node node_modules/electron/install.js
+      # Both macOS packages are made together; electron-builder needs the other chip's Electron too.
+      - name: Download the other macOS Electron
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          native=$(node -p 'process.arch')
+          if [ "$native" = arm64 ]; then other=x64; else other=arm64; fi
+          mkdir -p out
+          mv node_modules/electron/dist out/electron-native
+          rm -f node_modules/electron/path.txt
+          npm_config_arch="$other" node node_modules/electron/install.js
+          mv node_modules/electron/dist "out/electron-dist-$other"
+          mv out/electron-native node_modules/electron/dist
+      - run: npm pkg set version="${GITHUB_REF_NAME#v}"
+        shell: bash
+      - run: npm run dist:electron
+      - name: Download the last Tauri installer
+        if: runner.os == 'Windows'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download v0.3.17 --pattern Faber_0.3.17_x64-setup.exe --dir "$RUNNER_TEMP"
+        shell: bash
+      - name: Check the Windows installer
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          FABER_SMOKE_DISPOSABLE: '1'
+        run: node scripts/electron-smoke.mjs "out/installer/Faber_${GITHUB_REF_NAME#v}_x64-setup.exe" "$RUNNER_TEMP/Faber_0.3.17_x64-setup.exe"
+      - name: Sign and upload packages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          version=${GITHUB_REF_NAME#v}
+          mkdir -p "$RUNNER_TEMP/entries"
+          sign() {
+            local platform=$1 file=$2 name signature url
+            # The key has no password; saying so keeps the signer from asking for one on a runner with no terminal.
+            npx --no-install tauri signer sign --password '' "$file"
+            signature=$(cat "$file.sig")
+            name=$(basename "$file")
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$name"
+            jq -n --arg platform "$platform" --arg signature "$signature" --arg url "$url" \
+              '{platform: $platform, signature: $signature, url: $url}' > "$RUNNER_TEMP/entries/$platform.json"
+          }
+          case "$RUNNER_OS" in
+            Windows)
+              file="out/installer/Faber_${version}_x64-setup.exe"
+              sign windows-x86_64 "$file"
+              gh release upload "$GITHUB_REF_NAME" "$file" --clobber
+              ;;
+            macOS)
+              for pair in 'arm64 aarch64 mac-arm64' 'x64 x86_64 mac'; do
+                read -r arch platform folder <<< "$pair"
+                file="out/installer/Faber_${version}_${arch}.app.tar.gz"
+                tar -czf "$file" -C "out/installer/$folder" Faber.app
+                sign "darwin-$platform" "$file"
+              done
+              gh release upload "$GITHUB_REF_NAME" out/installer/*.dmg out/installer/*.zip out/installer/*.app.tar.gz --clobber
+              ;;
+            Linux)
+              files=(out/installer/*.AppImage)
+              [ "${#files[@]}" -eq 1 ] && [ -f "${files[0]}" ]
+              sign linux-x86_64 "${files[0]}"
+              gh release upload "$GITHUB_REF_NAME" "${files[0]}" out/installer/*.deb --clobber
+              ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: latest-${{ matrix.os }}
+          path: ${{ runner.temp }}/entries/*.json
+          if-no-files-found: error
+
+  # Publishes only after every platform uploaded and latest.json is there, so the updater never sees a release without
+  # it. A failed platform leaves the draft for a person to look at. A stable becomes the latest release, which stable
+  # installs read; a preview is a pre-release and never the latest.
+  publish:
+    needs: [create, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: latest-*
+          path: entries
+          merge-multiple: true
+      - name: Merge and upload the update manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create.outputs.id }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq .body > "$RUNNER_TEMP/notes.md"
+          node scripts/latest-json.mjs "${GITHUB_REF_NAME#v}" "$RUNNER_TEMP/notes.md" entries > latest.json
+          gh release upload "$GITHUB_REF_NAME" latest.json --clobber
+      - run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[].name' | grep -qx latest.json
+          case "$GITHUB_REF_NAME" in
+            *-preview.*) gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -F prerelease=true -f make_latest=false ;;
+            *) gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -F prerelease=false -f make_latest=true ;;
+          esac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create.outputs.id }}
+
+  # After the release is public, in both channels: the checksums and build provenance of what was uploaded. Every release gets
+  # its own, so this job has no concurrency group: GitHub cancels a pending run when a newer one queues in the same group, and
+  # a release would lose its SHA256SUMS.txt and attestation. Only the preview manifest below is serialized.
+  checksums:
+    needs: [create, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: checksums
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/assets"
+          gh release download "$GITHUB_REF_NAME" --dir "$RUNNER_TEMP/assets"
+          # The manifest can be replaced on a re-run; the sums are what this job makes.
+          rm -f "$RUNNER_TEMP/assets/latest.json" "$RUNNER_TEMP/assets/SHA256SUMS.txt"
+          (cd "$RUNNER_TEMP/assets" && sha256sum -- * > "$GITHUB_WORKSPACE/SHA256SUMS.txt")
+          cat SHA256SUMS.txt
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS.txt --clobber
+      # Provenance for exactly the files the sums list, which are the files people download. Verify with
+      # `gh attestation verify <file> --repo startRED/faber`.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: SHA256SUMS.txt
+
+  # The preview manifest: a release with the fixed tag `preview-channel` whose latest.json is the newest build's. Runs that
+  # finish together queue in one group where GitHub keeps one pending run and replaces the rest. That loses nothing, since
+  # every run works the manifest out again from all the published releases and not from its own tag, so the run that stays
+  # sees the release of a replaced one. A running job is never cancelled.
+  manifest:
+    needs: [create, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: channel-manifest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # It holds the newest build of either channel: a preview install takes a stable too, but never one built from older code
+      # than it already runs. Only a build whose manifest names every platform counts, so a release still being built is
+      # passed over.
+      - name: preview manifest
+        run: |
+          set -euo pipefail
+          complete=()
+          for tag in $(gh release list --limit 10 --exclude-drafts --json tagName --jq '.[].tagName'); do
+            node scripts/channel.mjs kind "$tag" > /dev/null 2>&1 || continue
+            dir="$RUNNER_TEMP/probe/$tag"
+            gh release download "$tag" --pattern latest.json --dir "$dir" 2>/dev/null || continue
+            if jq -e --arg v "${tag#v}" '.version == $v and ([.platforms | keys[]] | contains(["darwin-aarch64", "darwin-x86_64", "linux-x86_64", "windows-x86_64"]))' "$dir/latest.json" > /dev/null; then
+              complete+=("$tag")
+            fi
+          done
+          [ "${#complete[@]}" -gt 0 ]
+          best=$(node scripts/channel.mjs newest "${complete[@]}")
+          echo "The preview manifest describes $best."
+          if ! gh release view preview-channel > /dev/null 2>&1; then
+            gh release create preview-channel --target "$GITHUB_SHA" --prerelease --latest=false --title "Preview channel" \
+              --notes "Not a download. Faber reads latest.json from here when Receive previews is on in Settings."
+          fi
+          preview_id=$(gh release view preview-channel --json databaseId --jq .databaseId)
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$preview_id" -F prerelease=true -f make_latest=false > /dev/null
+          gh release upload preview-channel "$RUNNER_TEMP/probe/$best/latest.json" --clobber
+
+  # Owner decision R110: main follows each published release. Fast-forward only; a main that moved on its own stops here.
+  main:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/phase-1-base
+          # main may already be past this tag: it also follows each green commit (R127).
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then exit 0; fi
+          git merge-base --is-ancestor origin/main "$GITHUB_SHA"
+          git push origin "$GITHUB_SHA:refs/heads/main"

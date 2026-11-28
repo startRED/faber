@@ -1,0 +1,5 @@
+{"dir":"in","msg":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"faber","title":"Faber","version":"0.0.0"}}}}
+{"dir":"out","msg":{"id":1,"result":{"userAgent":"faber/0.161.0 (Windows 10.0.26200; x86_64) xterm-256color (faber; 0.0.0)","platformFamily":"windows","platformOs":"windows"}}}
+{"dir":"in","msg":{"method":"initialized"}}
+{"dir":"in","msg":{"id":2,"method":"model/list","params":{}}}
+{"dir":"out","msg":{"id":2,"result":{"data":[{"id":"gpt-6.1-sol","model":"gpt-6.1-sol","displayName":"GPT-6.1-Sol","description":"Latest workhorse model for coding and everyday work.","hidden":false,"defaultReasoningEffort":"low","isDefault":true},{"id":"gpt-6-astra","model":"gpt-6-astra","displayName":"GPT-6-Astra","description":"Frontier intelligence for the most demanding work.","hidden":false,"defaultReasoningEffort":"medium","isDefault":false},{"id":"codex-auto-review","model":"codex-auto-review","displayName":"Codex Auto Review","description":"Internal reviewer.","hidden":true,"isDefault":false}],"nextCursor":null}}}

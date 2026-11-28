@@ -1,0 +1,195 @@
+# Composer
+
+The same message box serves Chat and Projects, at home and below a conversation. Its controls and model picker are
+listed in the Composer row of [product-map.md](../product-map.md); placement follows [layout.md](layout.md).
+
+Below an open conversation, the box shares the reading column and its gutters. The conversation surface uses an 8 px
+inset, a one-line draft at least 32 px high, and a wrapping row with Attach, the model and access choices where offered,
+and Send or Stop at the right. While a reply streams, a new draft can still be queued or sent alongside Stop.
+The empty field has its usual placeholder. Attachments above the draft use 56 × 40 px previews and 28 px removal targets.
+
+From 660 px wide through heights of 540 px, the conversation box uses a 26 px minimum field and replaces the attachment
+strip with a localized count beside Send or Stop. Opening the count reserves a row for the attachment panel above the
+draft and below the transcript. The first removal target takes focus. Escape or clicking the count closes the panel and
+returns focus to the count. Removing the last attachment returns it to the draft. The panel and the draft can scroll
+internally when long. The home composition, file picker, paste and drop, and draft recovery use the existing behavior.
+When a resize hides a focused attachment in the strip, focus moves to the compact count.
+
+After the first answer, an ordinary new conversation may receive a title of at most six words in the first message's
+language. A link-only or code-only message uses the Settings language. A bare web link immediately shows a localized
+host-only fallback, with no URL credentials, path or query. The existing sidebar row receives the title through the
+ordinary list update; the draft, model choice and composer controls do not change. Manual names always win, including
+a rename back to the initial name. Branched, picked-up and agent-started conversations retain their existing names.
+One bounded request uses the cheapest available model at low effort, a connected subscription and the existing quota
+gate. Completed titles with reported usage add known spend to the subscription ledger and conversation total; denial, failure or a
+30-second timeout keeps the fallback, without retries or an extra control. Checks: `engine/tests/title.rs` and
+`tests/ui/composer.check.ts` (`composer: a localized first-exchange title updates the existing sidebar row without changing the draft`).
+
+The model and manual effort share one chip. Its native top-layer popover uses the context menu's surface, stays within
+window edges and opens down when the full menu fits, otherwise toward the side with more room. Auto is first, followed
+by connected AI groups with their existing square/diamond marks. Current models (the Auto profile ids and the account
+default) precede older models in a disclosure; the selected older model is revealed on reopening. Search appears only
+above eight manual models, matches partial names without case sensitivity and searches folded entries too.
+
+Picking another model resets effort to Medium when available; picking the same model preserves a supported effort.
+Auto removes manual effort. Chat, Projects and the default model setting show the connected Antigravity account's
+model families using its own labels. The composer offers only the efforts that account lists for the model, including
+Extra high where available. A fixed variant needs no effort control. Auto can choose Antigravity on a confirmed
+subscription tier with quota available, in Ask or Full access.
+The existing answer and helper rows name xhigh in every language; the stronger retry carries it through the choice
+contract and saves it like the other efforts. No control or picker layout changes.
+Auto's task guide names supplied-text chores, everyday documents/slides/spreadsheets and scoped code, and multi-part
+or costly-error work. Fable starts at medium; Luna high is available. A sufficient dominating row can replace the
+cheapest within a 15% factored price premium and its time cap. Easy/medium chat favors rows within 300 s;
+a premium row may be slower within that pool. At neutral factors, medium Chat uses Sonnet medium, Terra medium
+when available, otherwise Sol low. Medium work with an open scope starts on the everyday model (Opus or Sol at medium),
+not the smaller one; inside a conversation a smaller model does it at high at most and the answer offers the stronger
+model once, with the existing row. Only spare quota or learning lifts frontier to summit (60/50,
+Fable high); visual work stops at hard (Opus or Sol at medium), and an ask for the best raises one effort inside the model
+that fits (R568); when quota keeps that model out, the answer says so under its header (`reason.pace.limit`). While Auto
+chooses, the answer shows a live Faber row (“choosing the model for this task…”) that the pick's row replaces; the header
+names only Auto meanwhile. Below high, a stronger answer raises effort first; from high it compares one more
+effort with the next stronger model's lowest sufficient effort, cheaper then faster. The [task guide and sources](../product/auto-task-guide.md)
+record both makers' recommendations, read 2026-11-11: [Anthropic tasks](https://claude.dev/blog/which-claude-model-should-you-build-with/),
+[cost guidance](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence),
+[OpenAI models](https://developers.openai.com/codex/models) and [reasoning](https://developers.openai.com/api/docs/guides/reasoning).
+The menu uses named groups and pressed buttons, native light dismissal, Escape with focus return, and arrow/Home/End
+navigation alongside ordinary Tab and Enter/Space. Folded models stay outside keyboard navigation. Effort stays inside
+the menu; the closed chip states both values.
+No motion, stored field, AI call or background process is added. The menu DOM exists only while open.
+Checks: `tests/ui/models.check.ts` (groups, folds, search, placement, keyboard, selection and locking), and
+`tests/ui/composer.check.ts` (the composer's single chip and unchanged warm/reset path).
+Screen scenarios choose models through this same chip and its menu buttons, including while account models load.
+
+The access chip keeps its place in the composer and uses Settings' `PickMenu`: each existing mode shows its name and
+plain description while choosing. The bounded, scrollable list opens above the chip and wraps long translations.
+The current mode is selected; arrows move, Enter or Space chooses, Escape dismisses without changing the mode and
+returns focus to the chip. A choice does not send a message. Captions, restricted mode lists and disabled controls
+remain supported. The list leaves the page after its existing exit; no background process or polling is added.
+`tests/ui/composer.check.ts` covers the descriptions in all five languages, wrapping, unchanged composer position,
+selection and Escape focus; the full Settings keyboard walk belongs to task 350's second slice.
+
+The attachment picker copies its selected files and immediately clears the native input. Removing a file and choosing
+the same one again therefore follows the ordinary attachment path in both areas, with no new UI or persistence rule
+(`tests/ui/composer.check.ts`: `composer: removing a picked file allows picking the same file again`).
+
+New attachments are limited to 8 MiB total per message, including inline text files and reads already in
+flight. The whole incoming selection is rejected before reading when it exceeds the bound. An unreadable file or
+an oversized selection reports a localized error naming the refused file and the limit beside the field, associated with the textarea and announced as
+an alert. Existing text and attachments remain available; choosing a valid file retries through the ordinary path.
+The existing image preview and individual removal controls are unchanged. `tests/ui/composer.check.ts` covers byte
+limits, concurrent drops, read failures and retry.
+Sending also checks older restored drafts, keeps oversized files visible for explicit removal and preserves the text.
+The cap leaves room below the Electron/host 16 MiB JSON boundary after base64 encoding, without widening transport
+limits. `scripts/attachment-limits.test.mjs` checks the shared UI/engine budget against both transport boundaries.
+This is UI admission; the shared file writer is bounded, but the combined image/file guard at engine turn admission
+is a follow-up, so programmatic host/CLI requests do not yet have the combined UI guarantee.
+
+Each image/file removal button uses the existing small-control size (`--h-sm`) and small-corner radius (`--r-xs`,
+capped at 6 px even with increased corner roundness), without scaling its hit area.
+A centered 24 CSS px square remains clickable, including near its rounded corners;
+file text reserves room for the control. Hover/focus disclosure and no-hover visibility stay on the existing path.
+The four-attachment composer check verifies the bounds and pointer hits with normal and increased corner roundness,
+as well as removing only the chosen file.
+
+## Unsent attachments
+
+When moving from the Windows Tauri app to Electron, unsent text and attachment bytes are imported before the screen starts. Existing Electron drafts and confirmed deletions win. If import fails, later text or attachment use remains recorded after sending or clearing, including fields import never reached. Startup rolls back an interrupted pending publication before reading the legacy profile, so a read failure cannot expose text without its attachments. Pending text stays hidden and screen writes cannot finalize it. Opening an untouched empty composer does not consume an unimported legacy draft; a later restart retries it. This adds no control, layout or motion. The original browser profile is kept intact (`electron/migration.test.mjs`).
+
+The same draft key keeps text and attachments. Text retains its synchronous small browser-storage write; image and
+file bytes use IndexedDB Blobs, with names and inline-text removal metadata. Typing does not rewrite attachment bytes.
+Only a draft with a saved marker or a pending write opens that store. No resident service or polling is added.
+
+Electron requests a DOMStorage flush after each text write or deletion and each attachment-marker change, instead of
+waiting for Chromium's delayed commit. Attachment bytes keep their existing IndexedDB transaction. The hidden native
+restart check verifies the text, marker and exact PNG/PDF bytes after forced process closure, then removal and send-once.
+This requests an immediate write; it is not a synchronous disk acknowledgement or a power-loss guarantee.
+
+Restoring bytes can be slower than restoring text. The person may type while they load; sending waits until the saved
+attachments are known, and hydration preserves the newer words. A load failure leaves the record intact and offers
+the existing Remove attachments action for explicit discard. A save failure retains the in-memory draft, keeps the
+update-restart protection through navigation, and offers Try again beside the field. These warnings use the existing
+quiet hint line, are associated with the textarea and announced as status; no modal, setting or motion is added.
+When the person edited away an inline file's text, recovery deletes its obsolete removal metadata as well. That
+cleanup preserves unrelated file reads still in flight; an explicit send, discard or conversation deletion cancels them.
+
+Closing the Electron window with pending reads or saves, or failed draft writes, hides it to the tray and keeps the
+renderer alive while pending saves flush and text writes retry once. Reopening recovers the same draft; after saving
+succeeds, a later close can release the renderer. Healthy saved drafts keep the ordinary close path. This adds no
+polling, timer, dialog or motion; memory is retained only at this unsafe close boundary.
+
+A successful save means the storage transaction completed; writes request the browser's strict durability hint.
+This is not a power-loss guarantee. A pending or failed write is not promised to survive a crash, and this draft store
+does not close the later send/engine-acknowledgement gap. The outgoing-intent work remains separate. Component restoration
+and storage-failure checks live in `tests/ui/composer.check.ts` and `tests/ui/unsent.check.ts`; the native restart scenario
+lives in `testkit/src/screen/draft_attachments.rs`.
+
+Removal has a durable intent too: removing attachments preserves newer typed words, while a confirmed conversation
+deletion clears its main and side drafts. An engine refusal leaves both intact. An interrupted removal is retried on
+the next opening; a failure uses the existing save-error toast and its Try again action. No retry loop or new screen.
+
+Sending first saves the message or queued intent. If that write fails, the existing save-error notice appears and the
+message returns through the same rejected-send draft restoration in Chat and Projects. Newer words stay first,
+followed by the refused message and its attachments; repeated refusal events never duplicate it. Retrying adds it once;
+no AI turn or steering begins before admission (`engine/src/engine/send_admission.rs`). Queued edits remain in memory when
+writing fails; Send now, automatic draining and handover at the end of an agent step must save their current words
+before sending them. A failed step handover keeps the edited queue intact and retries storage at the next handover. Files copied before
+admission may remain in the attachment folder after a refusal; the guard does not delete files.
+Refusal also preserves an archived conversation's date and follow-up choice, and its draft route. Research changes the
+shared permission mode only after its intent is saved. If that later Settings write fails, the message stays sent with
+an ordinary failed reply; Keep going ends with its existing failure reason, leaving human queued messages untouched
+and scheduling no continuation. The composer stays empty for this accepted message (`tests/ui/save-error.check.ts`).
+
+The native refused-send scenario in `testkit/src/screen/draft_attachments.rs` blocks only its conversation's atomic
+write with a fixture-owned empty temporary directory. It checks saved history, draft PNG/PDF bytes and native retry
+once after ordinary warmup, then reports the complete flow's app-tree memory and CPU separately from idle overhead.
+It removes only that empty blocker; copied attachments and GPU cache cleanup remain outside this proof.
+
+## Completion list and earlier messages
+
+- `@` in a conversation with a working folder lists matching files and folders over the box, on the context menu's
+  surface, left-aligned with the text, with no motion; the entry the arrows reach is highlighted and kept in view, and a
+  long path ends in an ellipsis. `/` at the start opens the same list for the agent's commands and skills (`/btw` and
+  `/recap` first in an open conversation); a pick inserts the CLI's spelling without sending. Faber's `/recap` is
+  labelled "Recap" and instead opens the quick question and asks at once, inserting nothing (R266).
+  Both lists follow the caret and ignore
+  older answers and non-main mouse buttons. A pending request or populated list keeps its arrow keys; a completed
+  file or command request with no results releases Up to history, even while its unmatched token remains in the box.
+- `/research` in that same list starts web research in Chat or Projects, with either AI or Auto. Picking it inserts
+  `/research ` without sending or changing Auto; the person adds their question. It is absent when web search is off
+  or no AI is connected; account or installed-tool limitations are left to the CLI to explain. Sending switches to
+  the shared Plan mode and asks for a short numbered research plan, without searching yet. The existing plan card
+  offers Keep planning (then write edits in this composer) or Approve and run with its ordinary permission choice.
+  Approval starts one normal turn, paced by Auto, whose report is the reply's usual Markdown with linked claims and
+  a Sources list ([conversation.md](conversation.md#answers)). No new surface, motion, timer, setting or research loop
+  (`tests/ui/research.check.ts`, `engine/tests/engine.rs`: `research_claude_plan_edit_approve_report`, `research_codex_plan_edit_approve_report`).
+- In both areas, Up in an empty box or with the caret on its first visual line recalls earlier messages, unless an `@` or `/`
+  list is open. A temporary mirror copies the textarea's typography, wrapping and content width (excluding its scrollbar);
+  the browser's text range measures the caret's line. It is removed in the same call, with no cache or idle work.
+  The open conversation comes first, then conversations in the same area (and project), most recently active first;
+  messages within each are newest first, deduplicated, at most 200. Faber's own messages and side questions stay out.
+  Sending waits for recall to finish; Enter while it loads sends nothing. Down past the newest, Escape or leaving the
+  box restores the draft and its caret; every content edit makes the current message the draft, including typing,
+  pasting, dropping or attaching a file, and removing an attachment. File reads append to the latest draft, so typing
+  while a file loads is preserved; Escape cannot undo the addition. Clicking an editing control keeps focus until
+  it makes its change. Clicking Send keeps focus until
+  the recalled message has been sent, so the click cannot restore and send an unrelated draft.
+  Ctrl+R opens the same list, with the
+  box as its search field; typing filters, Enter inserts without sending, Escape or leaving the box restores the draft.
+  Empty results and a read failure use the list's quiet status line. No extra surface, motion, setting or stored value;
+  one blocking engine read, cached only during focus (`tests/ui/prompt-history.check.ts`, `engine/tests/prompt_history.rs`).
+- History uses the ready sidebar index's area, project and last-activity metadata to choose files before opening them.
+  While that index is still building, one directory listing orders files by modification time, with the open conversation
+  first; the bounded reader checks each file's own area and project before reading messages. Recall never waits for
+  indexing, and stops at 200 unique prompts. A buffered reader skips attachments and replies, checks cancellation on
+  each 8 KiB refill, and limits input to 16 MiB per file and 64 MiB per request, retaining at most 2 MiB of prompt text. Oversized
+  files and prompts are skipped intact. A newer request, Escape during a read, editing during recall, blur or unmount
+  cancels abandoned work; old cancellations never cancel a newer request. No prompt text lives in the sidebar index.
+- The 500-conversation measurements cover both states of that existing sidebar index. The warm check times the command
+  after the index is ready; the cold check starts sampling before engine initialization and asserts the index is still
+  building immediately before first Up. Both use the same valid saved files, with 10,000 prompts and 10,000 replies;
+  cold here describes the index, not an emptied operating-system disk cache.
+
+## Temporary Chat
+
+A temporary Chat adds one quiet, wrapping hint above the field: “Temporary chat: deleted when you leave it.” It is a status line, with no new motion, timer or setting. With no AI connected, the same line stays in the work area. Composer attachments and text, prompt edits, quick questions and queued edits remain in memory only; ordinary chats keep their existing saved drafts. The mark follows the conversation through its first send. `tests/ui/sidebar-exit.check.ts` covers starting, sending, private drafts, failed close and leaving.

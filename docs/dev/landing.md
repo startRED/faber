@@ -1,0 +1,100 @@
+# Landing work
+
+## Fast lane
+
+New work lands directly on `phase-1-base` and is checked after (R556). `node scripts/ship.mjs` (or `npm run ship`)
+refuses a dirty tree or a red base (`FABER_PUSH_ON_RED=1` ships the fix), squashes every commit ahead of
+`origin/phase-1-base` into one on its newest tip without touching the branch, numbers it (`numbers.mjs assign --amend`),
+runs the quick proofs that tree needs (lint, typecheck, docs, build, formatting; the script tests when `scripts/`
+changed; the command line's list test when the command table changed, the list check CI failed on most; Clippy with warnings denied when Rust changed, which a lane's own Clippy on the same files serves from the
+[results ledger](build-folders.md#the-build-coordinator); the docs check alone for words) and pushes it. When
+the base moved meanwhile, it squashes, numbers and proves again on the new tip (at most three tries), since a change in
+another file can still break this one. A branch with an open pull request gets a `Pull-request: #<n>` trailer, a comment with
+the landed commit and the pull request closed. `--dry-run` stops before the push.
+
+Each delivery uses a locked detached worktree under `.faber/verify/`, sharing Git objects instead of copying the whole
+repository. Its HEAD, index and fetched base ref are private; the caller's branch, index and configuration stay intact.
+Numbering takes that exact fetched base (`numbers.mjs assign --amend --base <full SHA>`), without fetching a different tip.
+Each retry proves its new combined tree. Success and failure remove only that worktree; a cleanup failure reports its
+path and fails, preserving it for inspection. Installed dependencies are linked from the caller, never copied or installed again.
+Proof subprocesses stop Git discovery at the verification folder, while their own test repositories stay independent.
+On the maintainer's PC (one run, 2026-11-07), preparing the same HEAD took 100.13 s with the old private clone and
+2.10 s with the worktree (97.9% less); the clone copied 1.08 GB of Git objects while the worktree added 139 KB of its own
+Git metadata. This measures preparation only, not proofs, network pushes or performance on another machine.
+
+The push starts `ci.yml` on `phase-1-base`, with a separate concurrency group for every run: no newer pending push
+replaces an untested commit. Pull requests and queue branches still cancel superseded runs. `main`, which updates installed copies,
+moves only to a commit whose `gate` is green (R127), so a red commit never reaches anyone's Faber. When the gate is red, `scripts/revert-red.mjs` reverts a confirmed required failure immediately if the parent gate passed and no later commit passed. It reads each required job's conclusion, runner ID and step conclusions from GitHub's jobs API. A cancelled, timed-out, unstarted or unconfirmed job holds the base instead; a failed job with a runner and failed step identifies a failure, though the API cannot prove its underlying cause. A revert or unavailable runner is left alone. Main still moves only after a green gate.
+
+The ship proof also runs the isolated unused-English-text test when the English locale changes or a removed source line contains an English key, a dynamic key prefix, or a template literal containing `${` under `ui/` outside `ui/locales/`. Other changes do not run it; the checks can conservatively select extra changes. On the maintainer PC (2026-11-09), a first run took 96.2 s including compilation, of which the test itself took 19.44 s.
+
+Main advances only by fast-forward; a competing promotion that already includes the checked commit is success.
+Test-app jobs and their warm caches build only `dist-test`; independent check jobs still build production assets.
+Electron jobs run its native installer after `npm ci`: its package has no install lifecycle script.
+
+Why (2026-11-05): through the queue a pull request took a median 6.7 h from opened to landed, p90 23.9 h, and 30% of
+queue runs were red; a direct landing waits only for its quick proofs while `main` keeps the same guarantee.
+
+## Merge on green
+
+The queue below stays only for pull requests queued before the fast lane; it goes once they have landed.
+
+`gate` (R173) is a job in `ci.yml` that is green only when `changes`, `check`, `app` and `screen` passed or were left
+out on purpose by the plan. `main` and the queue (R162) run after it, so the queue only pushes a commit whose gate
+passed. GitHub no longer requires it on `phase-1-base` (R186): a required check made GitHub refuse the land job's own
+push even with the gate green ("Required status check gate is expected", queue/pr-74 on 2026-10-17), and the queue
+already lets in only checked commits.
+
+Nobody waits on CI (R182). Right after opening a pull request, its lane runs `node scripts/land.mjs <number>`
+([Numbers](workflow.md#numbers)) and goes on to its next task. `land.mjs` puts a pending `queue` status on the pull request's head.
+When the queued commit's gate or its landing fails, the `report` job turns that status red and comments on the pull
+request with the run, which wakes the session that watches it (the app's auto-fix). The fix is pushed to the pull
+request and queued again with `land.mjs`; a push alone never lands, since the landing stops at a head it did not squash.
+`land.mjs` is the only way in (R186). Internal human pull requests keep the title check and leave CI to the queue,
+which checks the exact commit that lands. Fork and Dependabot pull requests keep their independent checks.
+Waiting queue riders run only planning and train dispatch; their train checks the documents and every required suite.
+Before retrying an old stacked pull request, compare its intended changes with landed descendants. Squashing a
+descendant can incorporate every change without closing the ancestor's pull request. If all implementation, checks,
+notes and documentation are already present, close the obsolete request as incorporated instead of restoring its old
+tree. Keep the landing and comparison evidence; a remaining code or research change still needs its own review.
+
+So a pull request is never merged with the button or `gh pr merge`: its green does not prove the queued commit. A
+Dependabot pull request still runs every suite on its own, until it lands through `land.mjs` too. Each push to a queue
+branch cancels the run before it, so a lane queues once, with its fix complete.
+
+Trains (R497, replacing the batches of R220). The queue checks one train at a time. A queued pull request's own run
+tests nothing (`changes` says `waits`); its `train` job sends a train when none runs. `land.mjs --train` takes the
+queued pull requests with the lowest numbers (one queued again keeps its place) still at the head that was squashed, at
+most three, squashes and numbers each on the one
+before it, moves each `queue/pr-<n>` there, points the branch `train` at the top one and starts one run on it. Green,
+the land job (`--land`) moves every rider's branch to its own commit and phase-1-base to the top, so all show merged,
+and sends the next train. Pull requests queued meanwhile wait instead of cancelling anything: with one run each, every
+landing sent all the others back to the start (2026-11-01: of 38 queue runs, 1 green, 6 red, 31 cancelled). A red
+train blames nobody yet: `--split` sends its first half again and keeps its second half next on the branch
+`train-then`, before any newcomer, and a red rider alone is the culprit, whose red `queue`
+status keeps it off trains until it is queued again. A rider pushed again or closed, or a base that moved, sends the
+next train with whoever stands. A cancelled run reports nothing. `queue.yml` sends a train every twenty minutes when
+none runs. A workflow change never rides: it is checked alone and landed with `--finish`.
+When its checks pass, the queue status asks for `--finish` and keeps the checked commit instead of splitting and checking
+it again; `--finish` still refuses an incompatible base or a changed pull request.
+If GitHub never acquired a runner, the gate stays red but the report retries the train once instead of splitting or
+blaming riders. Another capacity failure holds the train with an infrastructure summary; it never reports a code failure.
+Before the costly app builds and native suites, an Ubuntu preflight checks the combined tree's documentation and Rust
+formatting. A failure stops those jobs and leaves the gate red; the existing checks still run after a passing preflight.
+On run 41950963030, a formatting error had already failed while the gate waited another ten minutes for the other jobs.
+
+The PC checks before it queues (R190 V2). `land.mjs` runs, on the very commit it is about to queue, the suites CI would
+run for the change (`cargo t --suite <name>`, each whole), in one worktree it keeps for that
+(`faber-wt-landing` beside the main checkout, marked as its own and building into `target/landing`, one landing at a
+time, on Windows only, where the screen suite runs). First it runs the cheap checks the change needs: formatting and Clippy for Rust, lint and typecheck for the screen, and the docs check. CI still runs its own. When they pass, it
+posts the commit status `faber/verify` with the owner's own `gh` sign-in, saying the tree and the suites
+(`tree <hash> covers rust ui screen`), and only then pushes the queue branch. The `changes` job takes that status only
+from the repository's owner, only on a queue branch and only for the tree it names, and leaves those suites out: the
+lints still run, and a tree without it runs as before. So a lane runs `land.mjs` in the background (the suites take
+minutes). A failure there queues nothing and prints the failing tests; `--no-verify`, a run on CI (the land job's
+run again on a new base), no `cargo` on the PATH or another landing checking at the time queue without the status,
+and CI runs every suite. The status is only as trusted as the owner's PC: any program there can post it with the
+owner's sign-in, as the spec accepts, and the daily run on `main` catches a false green within a day. Every suite still runs on `main` once a day and before a commit becomes stable, which is also
+where macOS also runs its native suites. Trains and standalone queue checks run the scoped macOS Rust and UI suites
+inside the existing Mac lints job, sharing its runner and cache. A Windows PC's proof never skips these native suites.
+The existing Ubuntu documents job checks Linux engine and runner compilation whenever the queue needs lints.

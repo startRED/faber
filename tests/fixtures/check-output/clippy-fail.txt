@@ -1,0 +1,29 @@
+    Checking demo v0.1.0 (C:\work\demo)
+error: writing `&Vec` instead of `&[_]` involves a new object where a slice will do
+ --> src\lib.rs:5:17
+  |
+5 | pub fn empty(v: &Vec<u32>) -> bool {
+  |                 ^^^^^^^^^
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#ptr_arg
+  = note: `-D clippy::ptr-arg` implied by `-D warnings`
+  = help: to override `-D warnings` add `#[allow(clippy::ptr_arg)]`
+help: change this to
+  |
+5 - pub fn empty(v: &Vec<u32>) -> bool {
+5 + pub fn empty(v: &[u32]) -> bool {
+  |
+
+error: length comparison to zero
+ --> src\lib.rs:6:5
+  |
+6 |     v.len() == 0
+  |     ^^^^^^^^^^^^ help: using `is_empty` is clearer and more explicit: `v.is_empty()`
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#len_zero
+  = note: `-D clippy::len-zero` implied by `-D warnings`
+  = help: to override `-D warnings` add `#[allow(clippy::len_zero)]`
+
+error: could not compile `demo` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `demo` (lib test) due to 2 previous errors

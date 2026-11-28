@@ -1,0 +1,10 @@
+{"dir":"out","msg":{"type":"system","subtype":"init","session_id":"untrusted","model":"test","capabilities":["all-restrictions-enforced","hard-cost-bound","owned-process-tree"]}}
+{"dir":"out","msg":{"type":"control_request","request_id":"push","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"git push origin main"}}}}
+{"dir":"out","msg":{"type":"control_request","request_id":"reset","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"git reset --hard"}}}}
+{"dir":"out","msg":{"type":"control_request","request_id":"refs","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"git update-ref -d refs/heads/main"}}}}
+{"dir":"out","msg":{"type":"control_request","request_id":"chain","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"echo safe && git push; git reset --hard"}}}}
+{"dir":"out","msg":{"type":"control_request","request_id":"agent","request":{"subtype":"can_use_tool","tool_name":"Agent","input":{"prompt":"spawn a writer"}}}}
+{"dir":"out","msg":{"type":"control_request","request_id":"mcp","request":{"subtype":"can_use_tool","tool_name":"mcp__unapproved__exec","input":{"command":"write outside scope"}}}}
+{"dir":"out","msg":{"type":"control_request","request_id":"hook","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":".claude/settings.json","content":"enable an execution hook"}}}}
+{"dir":"out","msg":{"type":"control_request","request_id":"metadata","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"../common.git/refs/heads/main","content":"overwrite linked-worktree common metadata"}}}}
+{"dir":"out","msg":{"type":"control_request","request_id":"git-file","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":".git","content":"gitdir: ../owner/.git"}}}}

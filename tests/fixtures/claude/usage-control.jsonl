@@ -1,0 +1,4 @@
+{"dir":"in","msg":{"type":"control_request","request_id":"limits-init","request":{"subtype":"initialize"}}}
+{"dir":"out","msg":{"type":"control_response","response":{"subtype":"success","request_id":"limits-init","response":{}}}}
+{"dir":"in","msg":{"type":"control_request","request_id":"limits-usage","request":{"subtype":"get_usage","skip_behaviors":true}}}
+{"dir":"out","msg":{"type":"control_response","response":{"subtype":"success","request_id":"limits-usage","response":{"session":{"total_cost_usd":0,"model_usage":{}},"subscription_type":"max","rate_limits_available":true,"rate_limits":{"model_scoped":[],"five_hour":{"utilization":22,"resets_at":"2026-10-10T08:30:00Z"},"seven_day":{"utilization":31,"resets_at":"2026-10-15T08:00:00Z"},"extra_usage":{"is_enabled":false}},"behaviors":null}}}}
