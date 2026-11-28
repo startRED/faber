@@ -85,7 +85,7 @@ jobs:
           exit $LASTEXITCODE
       - name: Keep observations even when a proof fails
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: install-update-${{ matrix.scenario }}-${{ github.run_id }}
           path: ${{ runner.temp }}/install-update-evidence/
@@ -144,7 +144,7 @@ jobs:
         env:
           BUILT: ${{ steps.versions.outputs.built }}
       - run: npm run dist:electron
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: install-update-built-${{ github.run_id }}
           path: out/installer/Faber_${{ steps.versions.outputs.built }}_x64-setup.exe
@@ -194,7 +194,7 @@ jobs:
           exit $LASTEXITCODE
       - name: Keep observations even when a proof fails
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: install-update-${{ matrix.scenario }}-${{ github.run_id }}
           path: ${{ runner.temp }}/install-update-evidence/

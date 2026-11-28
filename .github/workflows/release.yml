@@ -156,7 +156,7 @@ jobs:
               gh release upload "$GITHUB_REF_NAME" "${files[0]}" out/installer/*.deb --clobber
               ;;
           esac
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: latest-${{ matrix.os }}
           path: ${{ runner.temp }}/entries/*.json
@@ -175,7 +175,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: latest-*
           path: entries
