@@ -257,20 +257,16 @@ pub(super) fn answers_pages(dir: &Path) -> BTreeMap<String, Vec<AnswerPage>> {
 /// Where the picture `call` names is kept in `dir` (a conversation's attachments): a browser call's picture, or an answer's
 /// before or after picture by its file name. Every folder and the file itself must be plain, never a link.
 pub(super) fn picture_path(dir: &Path, call: &str) -> Option<PathBuf> {
-    if !is_answer_picture(call) {
-        return tool_picture_path(dir, call, true);
-    }
     plain(dir, true)?;
-    let answers = dir.join(browser::ANSWER_PICTURES_DIR);
-    plain(&answers, true)?;
-    let path = answers.join(call);
+    let path = if is_answer_picture(call) {
+        let answers = dir.join(browser::ANSWER_PICTURES_DIR);
+        plain(&answers, true)?;
+        answers.join(call)
+    } else {
+        dir.join(browser::picture_name(call)?)
+    };
     plain(&path, false)?;
     Some(path)
-}
-
-pub(super) fn tool_picture_path(dir: &Path, call: &str, legacy_aliases: bool) -> Option<PathBuf> {
-    plain(dir, true)?;
-    browser::picture_file(dir, call, legacy_aliases)
 }
 
 /// Whether `name` is one of the pictures `keep` writes, so `site_picture` looks for it in the answers' folder.

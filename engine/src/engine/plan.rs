@@ -67,7 +67,6 @@ impl Core {
         let Some(c) = self.convs.get_mut(conv) else { return false };
         let plan = c.plan.get_or_insert_with(|| Plan {
             steps: vec![],
-            parts: vec![],
             size: PlanSize::Small,
             raised_because: None,
             contract: None,
@@ -440,16 +439,6 @@ impl Core {
                 let leads = siblings::offers(c.area) && c.started_by.is_none();
                 let estimate = progress::estimate(c.estimate, input, c.spent_cents())?;
                 let mut plan = progress::plan(c.plan.as_ref(), input, now())?;
-                if let Some(changes) = input["parts"].as_array() {
-                    for before in changes.iter().filter_map(|change| change["before"].as_str()) {
-                        if !self.has_part_picture(conv, before) {
-                            return Err(format!(
-                                "{}: use a browse call id with a saved picture in this conversation",
-                                progress::BAD_BEFORE
-                            ));
-                        }
-                    }
-                }
                 if let Some(had) = &c.plan {
                     progress::keep_workers(had, &mut plan)?;
                 }
@@ -473,11 +462,7 @@ impl Core {
                     ));
                 }
                 let c = self.convs.get_mut(conv).ok_or("The conversation is gone.")?;
-                let mut shown = plan.as_ref().map_or("The plan is cleared.".to_string(), |p| {
-                    if p.steps.is_empty() && !p.parts.is_empty() {
-                        return format!("The person sees the plan with {} parts.", p.parts.len());
-                    }
-                    let n = p.count();
+                let mut shown = plan.as_ref().map(|p| p.count()).map_or("The plan is cleared.".to_string(), |n| {
                     format!("The person sees the plan: {} of {} steps done.", n.done, n.total)
                 });
                 if let Some(p) = plan.as_ref().filter(|_| leads) {

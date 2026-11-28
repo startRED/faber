@@ -856,8 +856,6 @@ pub struct KeepProgress {
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
     pub steps: Vec<PlanStep>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub parts: Vec<PlanPart>,
     #[serde(default, skip_serializing_if = "PlanSize::is_small")]
     pub size: PlanSize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -954,36 +952,6 @@ pub struct PlanStep {
     /// The conversation Faber started for this step (`crate::progress::wave`), once it has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<StepWorker>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PlanPart {
-    pub id: String,
-    pub area: String,
-    pub name: String,
-    pub state: PartState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub example: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub why: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub evidence: Option<String>,
-    pub since: u64,
-    #[serde(default)]
-    pub removed: bool,
-    #[serde(default)]
-    pub pictures: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub before: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum PartState {
-    Missing,
-    Now,
-    Done,
-    Redo,
 }
 
 /// Where a plan step's conversation stands.

@@ -7,20 +7,17 @@ import { t } from './i18n.ts';
 /** "3 of 7": how far a plan has come, for the running column and the sidebar. */
 export const planWords = (n: PlanCount) => t('plan.count', { done: n.done, total: n.total });
 
-export function PlanNotice(props: { plan: Plan }) {
-  return <Show when={props.plan.raisedBecause}>{(reason) =>
-    <p class="note" role="status">{t('plan.raised', { size: t(`plan.size.${props.plan.size ?? 'small'}`), reason: t(`plan.boundary.${reason()}`) })}</p>
-  }</Show>;
-}
-
-/** The agent's plan starts closed in the thread and opens directly inside Technical details. */
-export function PlanList(props: { plan: Plan; now?: string; names?: Record<string, string>; onOpen?: (id: string) => void; inDetails?: boolean }) {
+/** The agent's plan under the newest reply (task 017): done steps checked and dimmed, the current one in ink with what the agent
+ * says it is doing now beside it, pending ones plain. A step another conversation does names it under the step's text, as a
+ * quiet link that opens it, with where it stands in a subagent row's words (task 040). It starts closed as one line, the count
+ * and the step under way, so a long plan never fills the thread; a click on that line shows the steps and what each left. */
+export function PlanList(props: { plan: Plan; now?: string; names?: Record<string, string>; onOpen?: (id: string) => void }) {
   const count = () => ({ done: props.plan.steps.filter((s) => s.state === 'done').length, total: props.plan.steps.length });
   const [open, setOpen] = createSignal(false);
   const current = () => props.plan.steps.find((s) => s.state === 'active') ?? props.plan.steps.find((s) => s.state === 'pending');
   return (
     <section class="plan" aria-label={t('plan.label')}>
-      <Show when={!props.inDetails && props.plan.steps.length}>
+      <Show when={props.plan.steps.length}>
         <button type="button" class="plan-head" aria-expanded={open()} onClick={() => setOpen(!open())}>
           <Icon name={open() ? 'down' : 'right'} small />
           <span>{t('plan.label')}</span>
@@ -28,8 +25,8 @@ export function PlanList(props: { plan: Plan; now?: string; names?: Record<strin
           <Show when={!open() && current()}>{(step) => <span class="plan-now">{step().text}</span>}</Show>
         </button>
       </Show>
-      <Show when={!props.inDetails}><PlanNotice plan={props.plan} /></Show>
-      <Collapse open={props.inDetails || open() || !props.plan.steps.length}>
+      <Show when={props.plan.raisedBecause}>{(reason) => <p class="note" role="status">{t('plan.raised', { size: t(`plan.size.${props.plan.size ?? 'small'}`), reason: t(`plan.boundary.${reason()}`) })}</p>}</Show>
+      <Collapse open={open() || !props.plan.steps.length}>
       <Show when={props.plan.contract}>
         {(contract) => (
           <div class="plan-contract">

@@ -60,12 +60,7 @@ impl Core {
             let text = "Faber's browser did not do it: no page of yours is open; open one with its address first.".to_string();
             return self.answer_browse(conv, sid, &call, false, text, Vec::new());
         };
-        let part = self.convs.get(conv).and_then(|c| c.plan.as_ref()).and_then(|plan| {
-            let mut active = plan.parts.iter().filter(|p| !p.removed && matches!(p.state, PartState::Now | PartState::Redo));
-            let first = active.next()?;
-            active.next().is_none().then(|| first.id.clone())
-        });
-        let (me, conv, data_dir) = (self.me.clone(), conv.to_string(), self.opts.data_dir.clone());
+        let (me, conv, dir) = (self.me.clone(), conv.to_string(), self.opts.data_dir.join("attachments").join(conv));
         self.opts.runtime.spawn(async move {
             let mut picked = None;
             let limit = if matches!(request, browser::Request::Steps(_)) { FLOW_TIMEOUT } else { OPEN_TIMEOUT };
@@ -81,83 +76,45 @@ impl Core {
                 *sizes = crate::screens::sizes_of(kind.screens());
                 picked = Some(kind);
             }
-            let result = tokio::time::timeout(limit, b.act(conv.clone(), tab, request)).await;
-            let Some(core) = me.upgrade() else { return };
-            if !core.lock().unwrap_or_else(|e| e.into_inner()).accepts_browse(&conv, sid) {
-                return;
-            }
-            let (ok, text, pictures, pending) = match result {
+            let (ok, text, pictures) = match tokio::time::timeout(limit, b.act(conv.clone(), tab, request)).await {
                 Ok(Ok(mut page)) => {
                     page.picked = picked;
-                    let call_for_stage = call.clone();
-                    let (page, pending) = tokio::task::spawn_blocking(move || {
-                        let pending = stage_browse_pictures(&data_dir, &call_for_stage, &page);
-                        (page, pending)
+                    // A picture that cannot be kept only leaves the card without one. Each size's picture is the call's
+                    // with the size's place after it (`<call>-s1`), so the screen asks for it like any other.
+                    let (owner, conversation, id) = (me.clone(), conv.clone(), call.clone());
+                    let saved = tokio::task::spawn_blocking(move || {
+                        if let Some(core) = owner.upgrade() {
+                            let core = core.lock().unwrap_or_else(|e| e.into_inner());
+                            if core.live.get(&conversation).is_some_and(|l| l.sid == sid) {
+                                let pictures = std::iter::once((id.clone(), page.shot.as_ref().or(page.picture.as_ref()))).chain(
+                                    page.looks.iter().enumerate().map(|(n, look)| (format!("{id}-s{}", n + 1), look.picture.as_ref())),
+                                );
+                                for (id, picture) in pictures {
+                                    if let (Some(picture), Some(name)) = (picture, browser::picture_name(&id)) {
+                                        let _ = keep_picture(&dir, &name, picture, true);
+                                    }
+                                }
+                            }
+                        }
+                        page
                     })
                     .await
                     .unwrap_or_default();
                     // The agent sees each size's picture too (the owner, 2026-10-19), in the order of its lines; a page that is
                     // the person's turn has none.
-                    (true, browser::result_text(&page), browser::look_pictures(&page), pending)
+                    (true, browser::result_text(&saved), browser::look_pictures(&saved))
                 }
-                Ok(Err(why)) => (false, format!("Faber's browser did not do it: {why}."), Vec::new(), Vec::new()),
+                Ok(Err(why)) => (false, format!("Faber's browser did not do it: {why}."), Vec::new()),
                 Err(_) => (
                     false,
                     format!("The page took longer than {} seconds; it stays in Faber's browser, without its text.", limit.as_secs()),
                     Vec::new(),
-                    Vec::new(),
                 ),
             };
-            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-            core.finish_browse_pictures(&conv, sid, &call, part.as_deref(), pending, browser::MAX_PICTURES_BYTES);
+            let Some(core) = me.upgrade() else { return };
             let text = if ok { text } else { browser::mask::mask(&text) };
-            core.answer_browse(&conv, sid, &call, ok, text, pictures);
+            core.lock().unwrap_or_else(|e| e.into_inner()).answer_browse(&conv, sid, &call, ok, text, pictures);
         });
-    }
-
-    fn accepts_browse(&self, conv: &str, sid: u64) -> bool {
-        self.live.get(conv).is_some_and(|l| l.sid == sid) && self.convs.get(conv).is_some_and(|c| !c.stopped)
-    }
-
-    fn finish_browse_pictures(&mut self, conv: &str, sid: u64, call: &str, part: Option<&str>, pending: PendingPictures, max: u64) {
-        if pending.is_empty() || !self.accepts_browse(conv, sid) {
-            return;
-        }
-        let dir = self.opts.data_dir.join("attachments").join(conv);
-        if std::fs::create_dir_all(&dir).is_err() {
-            return;
-        }
-        let Ok(max) = browser::tool_picture_budget(&dir, max) else { return };
-        // Publish, link and trim together under Core's lock. Other captures are still outside this directory.
-        let main = browser::picture_name(call);
-        let mut kept = false;
-        let mut primary = false;
-        for (name, bytes, picture) in pending {
-            if bytes <= max && picture.persist_noclobber(dir.join(&name)).is_ok() {
-                kept = true;
-                primary |= Some(&name) == main.as_ref();
-            }
-        }
-        if !kept {
-            return;
-        }
-        let parts = self.convs.get_mut(conv).and_then(|c| c.plan.as_mut()).map_or(&mut [][..], |p| p.parts.as_mut_slice());
-        let mut changed = false;
-        if primary
-            && let Some(part) = part.and_then(|id| parts.iter_mut().find(|p| p.id == id))
-            && !part.pictures.iter().any(|id| id == call)
-        {
-            part.pictures.push(call.to_string());
-            if part.pictures.len() > 8 {
-                part.pictures.remove(1);
-            }
-            changed = true;
-        }
-        changed |= browser::trim_pictures(&dir, max, parts);
-        if changed {
-            self.save(conv);
-            (self.emit)(AppEvent::Plan { conversation_id: conv.to_string(), plan: self.shown_plan(conv) });
-        }
     }
 
     /// The answer goes back only to the process that asked: a conversation that was stopped or moved on drops it.
@@ -182,11 +139,6 @@ impl Core {
         }
         tab
     }
-
-    pub(super) fn has_part_picture(&self, conv: &str, call: &str) -> bool {
-        browser::is_picture_call(call)
-            && super::pictures::tool_picture_path(&self.opts.data_dir.join("attachments").join(conv), call, false).is_some()
-    }
 }
 
 /// All browser picture writers hold Core's lock so the budget and conversation deletion cannot race a write.
@@ -202,162 +154,6 @@ pub(super) fn keep_picture(dir: &Path, name: &str, picture: &[u8], tool_picture:
     file.write_all(picture)?;
     file.persist(dir.join(name))?;
     Ok(true)
-}
-
-type PendingPictures = Vec<(String, u64, tempfile::TempPath)>;
-
-/// Write the JPEG bytes off-lock on the same volume, outside the directory trimming scans.
-fn stage_browse_pictures(dir: &Path, call: &str, page: &browser::Page) -> PendingPictures {
-    use std::io::Write as _;
-    let mut pending = Vec::new();
-    if !browser::is_picture_call(call) || browser::picture_name(call).is_none() {
-        return pending;
-    }
-    let stage = |id: &str, bytes: &[u8]| {
-        let name = browser::picture_name(id)?;
-        if bytes.is_empty() {
-            return None;
-        }
-        let mut picture = tempfile::NamedTempFile::new_in(dir).ok()?;
-        picture.write_all(bytes).ok()?;
-        Some((name, bytes.len() as u64, picture.into_temp_path()))
-    };
-    let mut primary = page.shot.as_deref().or(page.picture.as_deref()).and_then(|picture| stage(call, picture));
-    for (n, look) in page.looks.iter().enumerate() {
-        if let Some(picture) = &look.picture
-            && let Some(size) = stage(&format!("{call}-s{}", n + 1), picture)
-        {
-            pending.push(size);
-            // A sizes-only capture has one representative under the call id, independent of its size cards.
-            if primary.is_none() {
-                primary = stage(call, picture);
-            }
-        }
-    }
-    pending.extend(primary);
-    pending
-}
-
-#[cfg(test)]
-mod capture_tests {
-    use super::*;
-    use crate::engine::answer::tests::{engine, seed};
-
-    fn with_part() -> serde_json::Value {
-        serde_json::json!({"parts":[{"id":"a","area":"Search","name":"Find it","state":"now"}]})
-    }
-
-    fn page(bytes: u8) -> browser::Page {
-        browser::Page { picture: Some(vec![bytes; 100]), ..Default::default() }
-    }
-
-    #[tokio::test]
-    async fn plan_parts_a_replaced_or_stopped_session_cannot_save_or_trim_captures() {
-        let root = crate::workspace::TestRoot::new();
-        let (engine, _) = engine(&root);
-        let id = seed(&engine, Session::from_fn(|_| {}), &[("turn", &[])]);
-        let dir = root.path().join("attachments").join(&id);
-        let pending = stage_browse_pictures(root.path(), "late", &page(1));
-        engine.with(|core| {
-            core.live.get_mut(&id).unwrap().sid = 2;
-            core.write_progress(&id, crate::progress::PLAN_TOOL, &with_part()).unwrap();
-            core.finish_browse_pictures(&id, 2, "current", Some("a"), stage_browse_pictures(root.path(), "current", &page(2)), 200);
-            std::fs::write(dir.join("site-unlinked.jpg"), [9; 100]).unwrap();
-            core.finish_browse_pictures(&id, 1, "late", Some("a"), pending, 0);
-            core.convs.get_mut(&id).unwrap().stopped = true;
-            core.finish_browse_pictures(&id, 2, "stopped", Some("a"), stage_browse_pictures(root.path(), "stopped", &page(3)), 0);
-            assert_eq!(core.convs[&id].plan.as_ref().unwrap().parts[0].pictures, ["current"]);
-        });
-        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
-        assert!(dir.join("site-unlinked.jpg").is_file(), "stale calls cannot run trim");
-        assert_eq!(std::fs::read(engine.site_picture(&id, "current").unwrap()).unwrap(), vec![2; 100]);
-    }
-
-    #[tokio::test]
-    async fn plan_parts_one_completion_cannot_trim_another_pending_capture() {
-        let root = crate::workspace::TestRoot::new();
-        let (engine, _) = engine(&root);
-        let id = seed(&engine, Session::from_fn(|_| {}), &[("turn", &[])]);
-        let later = stage_browse_pictures(root.path(), "later", &page(2));
-        let first = stage_browse_pictures(root.path(), "first", &page(1));
-        engine.with(|core| {
-            core.write_progress(&id, crate::progress::PLAN_TOOL, &with_part()).unwrap();
-            core.finish_browse_pictures(&id, 1, "first", Some("a"), first, 100);
-            assert!(
-                super::super::pictures::picture_path(&root.path().join("attachments").join(&id), "later").is_none(),
-                "a pending capture is still outside the trim directory"
-            );
-            core.finish_browse_pictures(&id, 1, "later", Some("a"), later, 100);
-            assert_eq!(core.convs[&id].plan.as_ref().unwrap().parts[0].pictures, ["first", "later"]);
-        });
-        assert_eq!(std::fs::read(engine.site_picture(&id, "later").unwrap()).unwrap(), vec![2; 100]);
-    }
-
-    #[tokio::test]
-    async fn plan_parts_browser_captures_share_the_budget_with_answer_pictures() {
-        let root = crate::workspace::TestRoot::new();
-        let (engine, _) = engine(&root);
-        let id = seed(&engine, Session::from_fn(|_| {}), &[("turn", &[])]);
-        let dir = root.path().join("attachments").join(&id);
-        let answers = dir.join(browser::ANSWER_PICTURES_DIR);
-        std::fs::create_dir_all(&answers).unwrap();
-        let answer = answers.join("before-answer-1.jpg");
-        std::fs::write(&answer, [9; 60]).unwrap();
-        std::fs::write(dir.join("site-unlinked.jpg"), [8; 60]).unwrap();
-
-        engine.with(|core| {
-            core.write_progress(&id, crate::progress::PLAN_TOOL, &with_part()).unwrap();
-            let capture = |id| stage_browse_pictures(root.path(), id, &page(1));
-            core.finish_browse_pictures(&id, 1, "too-large", Some("a"), capture("too-large"), 159);
-            core.finish_browse_pictures(&id, 1, "fits", Some("a"), capture("fits"), 160);
-            assert_eq!(core.convs[&id].plan.as_ref().unwrap().parts[0].pictures, ["fits"]);
-        });
-        assert!(!dir.join("site-unlinked.jpg").exists());
-        assert!(engine.site_picture(&id, "too-large").is_none());
-        assert!(engine.site_picture(&id, "fits").is_some());
-        assert_eq!(std::fs::read(answer).unwrap(), [9; 60]);
-    }
-
-    #[tokio::test]
-    async fn plan_parts_link_exact_picture_ids_and_keep_legacy_cards_readable() {
-        let root = crate::workspace::TestRoot::new();
-        let (engine, _) = engine(&root);
-        let id = seed(&engine, Session::from_fn(|_| {}), &[("turn", &[])]);
-        let dir = root.path().join("attachments").join(&id);
-        std::fs::create_dir_all(&dir).unwrap();
-        let legacy = dir.join("site-ab.jpg");
-        std::fs::write(&legacy, [1; 100]).unwrap();
-        engine.with(|core| {
-            core.write_progress(&id, crate::progress::PLAN_TOOL, &with_part()).unwrap();
-            let before = |call| serde_json::json!({"parts":[{"id":"a","before":call}]});
-            assert!(
-                core.write_progress(&id, crate::progress::PLAN_TOOL, &before("a.b")).unwrap_err().starts_with(crate::progress::BAD_BEFORE)
-            );
-            core.write_progress(&id, crate::progress::PLAN_TOOL, &before("ab")).unwrap();
-            core.finish_browse_pictures(&id, 1, "a.b", Some("a"), stage_browse_pictures(root.path(), "a.b", &page(2)), 100);
-            assert_eq!(core.convs[&id].plan.as_ref().unwrap().parts[0].pictures, ["a.b"]);
-        });
-        assert_eq!(std::fs::read(&legacy).unwrap(), vec![1; 100]);
-        assert_eq!(std::fs::read(engine.site_picture(&id, "a.b").unwrap()).unwrap(), vec![2; 100]);
-    }
-
-    #[test]
-    fn plan_parts_size_variants_fit_for_the_longest_call_id() {
-        let dir = tempfile::tempdir().unwrap();
-        let call = "x".repeat(120);
-        let page = browser::Page {
-            looks: vec![browser::Look {
-                size: crate::screens::named("phone").unwrap(),
-                picture: Some(vec![1]),
-                wider: 0,
-                cut: vec![],
-                turn: None,
-            }],
-            ..Default::default()
-        };
-        let pending = stage_browse_pictures(dir.path(), &call, &page);
-        assert_eq!(pending.len(), 2, "a sizes-only call has both the size image and its representative");
-    }
 }
 
 /// What the person does to the tabs of a conversation's browser.

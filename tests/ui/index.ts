@@ -84,7 +84,6 @@ import './projects.check.ts';
 import './pace.check.ts';
 import './auto-learned.check.ts';
 import './plan.check.ts';
-import './plan-map.check.ts';
 import './question.check.ts';
 import './permissions.check.ts';
 import './selfchange.check.ts';
