@@ -836,11 +836,24 @@ pub(crate) struct ContainedWire {
     pub output: tokio::io::DuplexStream,
     pub tree: faber_engine::proc::OwnedTree,
     pub workers: Vec<u32>,
+    /// When each worker started, as Windows lists it; `None` elsewhere.
+    pub born: Vec<Option<u64>>,
     directory: tempfile::TempDir,
     _stdin: Box<dyn tokio::io::AsyncWrite + Send + Unpin>,
 }
 
 impl ContainedWire {
+    /// Whether worker `index` itself still runs. The engine sees a tree empty up to a second after a worker ended, and a
+    /// busy Windows runner can give the ended worker's number to a newer process meanwhile: there the start time decides.
+    pub fn worker_alive(&self, index: usize) -> bool {
+        let pid = self.workers[index];
+        #[cfg(windows)]
+        if let Some(born) = self.born[index] {
+            return faber_winproc::processes().unwrap_or_default().iter().any(|p| p.pid == pid && p.created == born);
+        }
+        process_alive(pid)
+    }
+
     pub fn release(&self, worker: usize) {
         std::fs::write(self.directory.path().join(format!("release-{worker}")), b"exit").unwrap();
     }
@@ -919,7 +932,14 @@ async fn contained_wire_with_descendant(workers: usize, separate_groups: bool, d
     .await
     .expect("the contained helper did not announce its workers");
     assert_eq!(ready["root"].as_u64().unwrap() as u32, tree.identity().pid);
-    let workers = ready["workers"].as_array().unwrap().iter().map(|pid| pid.as_u64().unwrap() as u32).collect();
+    let workers: Vec<u32> = ready["workers"].as_array().unwrap().iter().map(|pid| pid.as_u64().unwrap() as u32).collect();
+    #[cfg(windows)]
+    let born = {
+        let listed = faber_winproc::processes().unwrap_or_default();
+        workers.iter().map(|pid| listed.iter().find(|p| p.pid == *pid).map(|p| p.created)).collect()
+    };
+    #[cfg(not(windows))]
+    let born = vec![None; workers.len()];
     let (stdin, input) = tokio::io::duplex(65536);
     let (output, mut injected) = tokio::io::duplex(65536);
     let (stdout, mut forwarded) = tokio::io::duplex(65536);
@@ -940,9 +960,25 @@ async fn contained_wire_with_descendant(workers: usize, separate_groups: bool, d
         output,
         tree,
         workers,
+        born,
         directory,
         _stdin: real_stdin,
     }
+}
+
+/// A worker's number given to a newer process is not the worker: only the same number with the same start counts.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_worker_number_a_newer_process_took_is_not_the_worker() {
+    let mut wire = contained_wire(1).await;
+    assert!(wire.born[0].is_some() && wire.worker_alive(0));
+    let started = wire.born[0].unwrap();
+    wire.born[0] = Some(started + 1);
+    assert!(process_alive(wire.workers[0]) && !wire.worker_alive(0), "another start under the same number");
+    wire.born[0] = Some(started);
+    wire.release(0);
+    process_exited(wire.workers[0]).await;
+    assert!(!wire.worker_alive(0));
 }
 
 #[test]
@@ -2532,7 +2568,7 @@ async fn stalled_service_stops_native_workers(trigger: HealthTrigger) {
             match events.recv().await.unwrap() {
                 (id, EngineEvent::WriterExit { confirmed: true }) => {
                     assert!(!process_alive(wire.tree.identity().pid));
-                    assert!(wire.workers.iter().all(|&pid| !process_alive(pid)));
+                    assert!((0..wire.workers.len()).all(|i| !wire.worker_alive(i)), "{}", contained_diagnostics(&wire.tree));
                     assert!(released.insert(id));
                 }
                 (id, EngineEvent::Error { message, fatal: true }) => {
