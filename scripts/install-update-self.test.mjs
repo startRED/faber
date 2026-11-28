@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { runInNewContext } from 'node:vm';
-import { retained, sample, SETTINGS, packageVersion, previewVersion, NEXT } from './install-update-self.mjs';
+import { retained, sample, SETTINGS, packageVersion, previewVersion, NEXT, releaseVersion, builtVersion, REOPEN, WATCH, parseUpdateLog, reopenEvidence, expectReopen } from './install-update-self.mjs';
 
 test('the resumed recorded provider streams the answer text, not only its final metadata', () => {
   const source = readFileSync(new URL('./install-update-self.mjs', import.meta.url), 'utf8');
@@ -89,4 +89,79 @@ test('three disposable Windows jobs run only on dispatch or release, retaining f
   assert.match(script, /conversation-open-before/);
   assert.match(script, /packageVersion\(path.join\(folder, 'resources\/app.asar'\)\)/);
   assert.doesNotMatch(script, /call\('status'\)\.version ===/);
+});
+
+// Lines as `update/src/lib.rs` writes them: `<unix seconds> <stage> <detail>`, paths already cut to `<path>`.
+const log = (...lines) => lines.map((line, i) => `${1764300000 + i} ${line}\n`).join('');
+const reopened = log('installed in 8123 ms', 'reopened in 912 ms');
+
+test('update.log is read line by line, keeping only complete lines of its own shape', () => {
+  const entries = parseUpdateLog(`${log('install-wait Faber was still closing; 3 of its processes were ended', 'installed in 1 ms')}\r\nnot a line\n1764300009 reopened in 4`);
+  assert.deepEqual(entries.map((entry) => entry.stage), ['install-wait', 'installed']);
+  assert.equal(entries[0].detail, 'Faber was still closing; 3 of its processes were ended');
+  assert.equal(entries[1].at, 1764300001);
+  assert.deepEqual(parseUpdateLog(''), []);
+});
+
+test('every reopen scenario needs the install, then "reopened", and no failure', () => {
+  for (const scenario of ['reopen-window', 'reopen-tray']) expectReopen(scenario, reopenEvidence(parseUpdateLog(reopened)));
+  // Before task 101 the helper started Faber once and wrote nothing after the install.
+  assert.throws(() => expectReopen('reopen-window', reopenEvidence(parseUpdateLog(log('installed in 8123 ms')))), /reopened/);
+  assert.throws(() => expectReopen('reopen-tray', reopenEvidence(parseUpdateLog(log('installed in 1 ms', 'reopen-retry Faber exited before startup was confirmed', 'reopen-failed Faber exited before startup was confirmed')))), /failed/);
+  assert.throws(() => expectReopen('reopen-tray', reopenEvidence(parseUpdateLog(log('reopened in 3 ms')))), /install finished/);
+  // Only what follows the newest install counts: an earlier update's reopen proves nothing about this one.
+  assert.throws(() => expectReopen('reopen-tray', reopenEvidence(parseUpdateLog(`${reopened}${log('installed in 9 ms')}`))), /reopened/);
+  assert.throws(() => expectReopen('reopen-tray', reopenEvidence(parseUpdateLog(log('installed in 1 ms', 'reopened in a moment')))), /reopened/);
+  assert.throws(() => expectReopen('tauri', reopenEvidence(parseUpdateLog(reopened))));
+});
+
+test('a first start that exits at once must be started again', () => {
+  const retried = log('installed in 1 ms', 'reopen-retry Faber exited before startup was confirmed', 'reopened in 1450 ms');
+  const evidence = reopenEvidence(parseUpdateLog(retried));
+  assert.deepEqual(evidence.retried, ['Faber exited before startup was confirmed']);
+  expectReopen('first-start-exits', evidence);
+  assert.throws(() => expectReopen('first-start-exits', reopenEvidence(parseUpdateLog(reopened))), /retried/);
+  // Not a scenario: the old Faber ends about 0.3 s into the hand-off, before a proof can freeze it (run 46104395985).
+  assert.throws(() => expectReopen('held-past-wait', evidence));
+});
+
+test('the built Faber is a version just below the signed release it updates to', () => {
+  assert.equal(releaseVersion('v1.0.2'), '1.0.2');
+  assert.equal(releaseVersion('v1.0.2-preview.30'), '1.0.2-preview.30');
+  for (const tag of ['1.0.2', 'v1.0.2-alpha.0', 'v1.0.2; exit', 'v1.0', '']) assert.throws(() => releaseVersion(tag));
+  // Semver orders prerelease labels by their characters: alpha comes before preview and before the release itself.
+  assert.equal(builtVersion('1.0.2'), '1.0.2-alpha.0');
+  assert.equal(builtVersion('1.0.2-preview.30'), '1.0.2-alpha.0');
+  assert.ok('alpha' < 'preview');
+});
+
+test('the reopen jobs build Faber from the code under proof and run every new scenario', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/install-update-self.yml', import.meta.url), 'utf8');
+  assert.ok(workflow.includes(`scenario: [${REOPEN.join(', ')}]`));
+  assert.match(workflow, /npm run dist:electron/);
+  assert.match(workflow, /\^\[0-9a-f\]\{40\}\$/);
+  assert.match(workflow, /git checkout FETCH_HEAD -- update/);
+  assert.doesNotMatch(workflow, /run: .*\$\{\{ (inputs|steps)\./);
+  const desktop = readFileSync(new URL('./install-update-desktop.ps1', import.meta.url), 'utf8');
+  for (const scenario of REOPEN) assert.ok(desktop.split('\n')[0].includes(`'${scenario}'`), scenario);
+});
+
+test('the lock holder is the Unicode Chromium singleton window and waits only on the install folder', () => {
+  // An ANSI window procedure cut its title to one letter, so no start could find it (seen on 2026-11-28).
+  const imports = WATCH.match(/\[DllImport\("user32\.dll"[^\]]*\]/g);
+  assert.ok(imports.length >= 8);
+  for (const line of imports) assert.match(line, /CharSet=CharSet\.Unicode/);
+  assert.match(WATCH, /name = "Chrome_MessageWindow"/);
+  assert.match(WATCH, /new IntPtr\(-3\)/, 'a message-only window, as Chromium makes');
+  assert.match(WATCH, /file\.StartsWith\(folder \+ "\\\\"/);
+  assert.match(WATCH, /!file\.StartsWith\(cli/, 'the command line the proof calls is not the old Faber');
+});
+
+test('the watched scenario serves the update only once its watcher watches', () => {
+  // A watcher still compiling when the hand-off began missed it (run 46103155141).
+  assert.equal(WATCH.match(/Watching\(\);/g).length, 1);
+  assert.doesNotMatch(WATCH, /NtSuspendProcess|OpenProcess/, 'the proof freezes and ends nothing');
+  const script = readFileSync(new URL('./install-update-self.mjs', import.meta.url), 'utf8');
+  assert.match(script, /if \(!\['electron', 'first-start-exits'\]\.includes\(scenario\)\) releaseDownload\(\);/);
+  assert.match(script, /watch\?\.ready\.then\(releaseDownload\);/);
 });

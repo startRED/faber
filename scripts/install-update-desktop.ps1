@@ -1,4 +1,4 @@
-param([ValidateSet('tauri', 'clean', 'electron')][string]$Scenario)
+param([ValidateSet('tauri', 'clean', 'electron', 'reopen-window', 'reopen-tray', 'first-start-exits')][string]$Scenario)
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:FABER_SMOKE_DISPOSABLE -ne '1') {
     throw 'Only a disposable GitHub Windows runner may run this proof.'

@@ -92,7 +92,7 @@ deals the scenarios so the parts take about the same time: the slowest first, ea
 seconds of each scenario. A `costs` job reads them from the logs of the newest green runs (`scripts/screen-costs.mjs`) and
 hands every part the same table (`--costs`), so the dealing never ages; without those logs, and on a person's PC, the copy
 in `testkit/screen-costs.json` counts, and a scenario missing from it counts as 5 s. CI keeps the Windows screenshots as artifacts.
-Anything outside the page (tray, notifications, installer, updates) is checked through the operating system's accessibility layer and file versions.
+Anything outside the page (tray, notifications, installer, [updates](update-proof.md)) is checked through the operating system's accessibility layer and file versions.
 
 Test launches also pass the browser engine switches that turn off crash reports and SmartScreen address lookups, and the
 sandbox removes every `WEBVIEW2_*` override from the environment. That limits what a test sends; it is not a firewall.

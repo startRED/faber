@@ -14,6 +14,112 @@ export function previewVersion(tag) {
   assert.match(tag, /^v\d+\.\d+\.\d+-preview\.\d+$/);
   return tag.slice(1);
 }
+/** A published release tag, stable or preview: the target the reopen scenarios install. */
+export function releaseVersion(tag) {
+  assert.match(tag, /^v\d+\.\d+\.\d+(-preview\.\d+)?$/);
+  return tag.slice(1);
+}
+/** The version the reopen scenarios build Faber at from source: just below `to`, so the signed `to` is an update. */
+export function builtVersion(to) {
+  return `${to.replace(/-.*$/, '')}-alpha.0`;
+}
+
+// The reopen scenarios build Faber from the checked-out code, so its `update/` runs the hand-off (a published release
+// would test only its own, older helper). Window: the person's "Update ready, restart". Tray: the idle install of a Faber
+// started with `--autostart`. First start: something else holds the single-instance lock when the helper starts Faber, so
+// that start exits at once.
+export const REOPEN = ['reopen-window', 'reopen-tray', 'first-start-exits'];
+const TRAY = new Set(['tauri', 'reopen-tray', 'first-start-exits']);
+
+/** The complete lines of `update.log` (`<unix seconds> <stage> <detail>`), oldest first; a cut or foreign line is skipped. */
+export function parseUpdateLog(text) {
+  return text.split('\n').slice(0, -1).flatMap((line) => {
+    const found = /^(\d+) ([a-z][a-z-]*)(?: (.*))?$/.exec(line.replace(/\r$/, ''));
+    return found ? [{ at: Number(found[1]), stage: found[2], detail: found[3] ?? '' }] : [];
+  });
+}
+
+/** What the log says of the last finished install and the reopen after it. */
+export function reopenEvidence(entries) {
+  const from = entries.findLastIndex((entry) => entry.stage === 'installed');
+  const after = from < 0 ? [] : entries.slice(from + 1);
+  return {
+    installed: from >= 0,
+    retried: after.filter((entry) => entry.stage === 'reopen-retry').map((entry) => entry.detail),
+    reopened: after.some((entry) => entry.stage === 'reopened' && /^in \d+ ms$/.test(entry.detail)),
+    failed: after.find((entry) => entry.stage === 'reopen-failed')?.detail ?? null,
+  };
+}
+
+/** Throws unless the evidence is what `scenario` must leave once Faber came back. */
+export function expectReopen(scenario, evidence) {
+  assert.ok(REOPEN.includes(scenario));
+  assert.ok(evidence.installed, 'update.log must say the install finished');
+  assert.equal(evidence.failed, null, 'update.log must not say the reopen failed');
+  assert.ok(evidence.reopened, 'update.log must say Faber reopened after the install');
+  if (scenario === 'first-start-exits') assert.ok(evidence.retried.length > 0, 'The start that exited at once must be retried');
+}
+
+// A resident helper for the first-start scenario, compiled before Faber starts so it is ready the moment the update hand-off begins.
+// `Hold` waits until the old Faber has ended while the hand-off copy runs, then owns Chromium's single-instance window
+// (Electron's class below, titled with the profile folder) and lets go of it once one start notifies it: that start found
+// Faber "already running" and exited at once, as a start meeting a Faber not quite gone does.
+export const WATCH = `
+using System; using System.Collections.Generic; using System.Diagnostics; using System.IO;
+using System.Runtime.InteropServices; using System.Threading;
+public static class ProofWatch {
+ public delegate IntPtr WndProc(IntPtr hwnd, uint msg, IntPtr w, IntPtr l);
+ [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct WndClass {
+  public uint size, style; public WndProc proc; public int clsExtra, wndExtra;
+  public IntPtr instance, icon, cursor, background; public string menu, name; public IntPtr iconSmall; }
+ [StructLayout(LayoutKind.Sequential)] public struct Msg { public IntPtr hwnd; public uint message; public IntPtr w, l; public uint time; public int x, y; }
+ [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern ushort RegisterClassEx(ref WndClass c);
+ [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateWindowEx(uint ex, string cls, string title, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+ [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr DefWindowProc(IntPtr h, uint m, IntPtr w, IntPtr l);
+ [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern bool DestroyWindow(IntPtr h);
+ [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetMessage(out Msg m, IntPtr h, uint min, uint max);
+ [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr DispatchMessage(ref Msg m);
+ [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern void PostQuitMessage(int code);
+ [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern UIntPtr SetTimer(IntPtr h, UIntPtr id, uint ms, IntPtr proc);
+ [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern IntPtr GetModuleHandle(string name);
+ static WndProc keep; static bool notified;
+ static bool Running(string name) { var all = Process.GetProcessesByName(name); foreach (var p in all) p.Dispose(); return all.Length > 0; }
+ static List<int> Owned(string folder) {
+  var found = new List<int>(); var cli = Path.Combine(folder, "bin") + "\\\\";
+  foreach (var name in new[] { "faber", "faber-sidecar" }) foreach (var p in Process.GetProcessesByName(name)) {
+   try { var file = p.MainModule.FileName; if (file.StartsWith(folder + "\\\\", StringComparison.OrdinalIgnoreCase) && !file.StartsWith(cli, StringComparison.OrdinalIgnoreCase)) found.Add(p.Id); } catch { }
+   p.Dispose();
+  }
+  return found;
+ }
+ static bool WaitFor(Func<bool> check, int ms) {
+  var end = DateTime.UtcNow.AddMilliseconds(ms);
+  while (DateTime.UtcNow < end) { if (check()) return true; Thread.Sleep(10); }
+  return false;
+ }
+ static void Watching() { Console.Out.WriteLine("watching"); Console.Out.Flush(); }
+ public static string Hold(string folder, string title, int ms) {
+  Watching();
+  if (!WaitFor(() => Running("faber-update"), ms)) return "{\\"stage\\":\\"no-hand-off\\"}";
+  if (!WaitFor(() => Owned(folder).Count == 0, ms)) return "{\\"stage\\":\\"old-faber-stayed\\"}";
+  keep = (h, m, w, l) => {
+   if (m == 0x004A) { notified = true; PostQuitMessage(0); return new IntPtr(1); }
+   if (m == 0x0113) { PostQuitMessage(0); return IntPtr.Zero; }
+   return DefWindowProc(h, m, w, l);
+  };
+  var c = new WndClass { size = (uint)Marshal.SizeOf(typeof(WndClass)), proc = keep, instance = GetModuleHandle(null), name = "Chrome_MessageWindow" };
+  if (RegisterClassEx(ref c) == 0) return "{\\"stage\\":\\"no-class\\",\\"error\\":" + Marshal.GetLastWin32Error() + "}";
+  var hwnd = CreateWindowEx(0, c.name, title, 0, 0, 0, 0, 0, new IntPtr(-3), IntPtr.Zero, c.instance, IntPtr.Zero);
+  if (hwnd == IntPtr.Zero) return "{\\"stage\\":\\"no-window\\",\\"error\\":" + Marshal.GetLastWin32Error() + "}";
+  var began = DateTime.UtcNow;
+  SetTimer(hwnd, (UIntPtr)1, (uint)ms, IntPtr.Zero);
+  Msg msg;
+  while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) DispatchMessage(ref msg);
+  DestroyWindow(hwnd);
+  return "{\\"stage\\":\\"" + (notified ? "notified" : "never-notified") + "\\",\\"heldMs\\":" + (int)(DateTime.UtcNow - began).TotalMilliseconds + "}";
+ }
+}
+`;
 export const SETTINGS = { language: 'en', previews: true, setup: 'done', tutorialDone: true, appearance: { base: 'sala' } };
 export function sample() {
   return { id: ID, title: 'Self-update conversation', area: 'chat', createdAt: 1, updatedAt: 1,
@@ -52,7 +158,8 @@ export function packageVersion(file) {
 }
 
 async function main(scenario) {
-  assert.ok(['tauri', 'clean', 'electron'].includes(scenario));
+  assert.ok(['tauri', 'clean', 'electron', ...REOPEN].includes(scenario));
+  const reopen = REOPEN.includes(scenario);
   assert.equal(process.platform, 'win32');
   assert.equal(process.env.GITHUB_ACTIONS, 'true');
   assert.equal(process.env.FABER_SMOKE_DISPOSABLE, '1');
@@ -62,7 +169,7 @@ async function main(scenario) {
   const artifacts = path.join(process.env.RUNNER_TEMP, 'install-update-artifacts');
   const folder = path.join(process.env.RUNNER_TEMP, 'installed-faber');
   const from = previewVersion(process.env.FABER_PROOF_FROM ?? 'v0.3.18-preview.89');
-  const to = previewVersion(process.env.FABER_PROOF_TO ?? 'v0.3.18-preview.90');
+  const to = reopen ? releaseVersion(process.env.FABER_PROOF_REOPEN_TO ?? '') : previewVersion(process.env.FABER_PROOF_TO ?? 'v0.3.18-preview.90');
   process.env.FABER_PROOF_FOLDER = folder;
   const data = path.join(process.env.APPDATA, 'Faber');
   const ps = path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
@@ -142,7 +249,7 @@ $json = ConvertTo-Json -InputObject @($rows) -Depth 4 -Compress
   };
   const launch = (stage = 'launched-baseline') => {
     // WebView2 cannot start on CI's private desktop (testkit/src/contain.rs); the real autostart path needs no webview.
-    const args = scenario === 'tauri' ? ['--autostart'] : ['--force-renderer-accessibility'];
+    const args = TRAY.has(scenario) ? ['--autostart'] : ['--force-renderer-accessibility'];
     const stderr = openSync(path.join(out, 'app-stderr.log'), 'a');
     let app;
     try {
@@ -154,6 +261,68 @@ $json = ConvertTo-Json -InputObject @($rows) -Depth 4 -Compress
     record(stage, { pid: app.pid });
     return app;
   };
+  // Started without waiting. `ready` settles once it is compiled and watching (its first line, or its end), and the
+  // update is served only then: a hand-off begun before it watched would be missed (run 46103155141). `done` is its result.
+  const startWatch = (method) => {
+    const source = `$ProgressPreference='SilentlyContinue'; Add-Type -TypeDefinition @'\n${WATCH}\n'@; [ProofWatch]::${method}`;
+    const env = { ...process.env, FABER_PROOF_LOCK: path.join(data, 'webview') };
+    const child = spawn(ps, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')], { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });
+    let text = '';
+    let watching;
+    const ready = new Promise((resolve) => { watching = resolve; });
+    child.stdout.on('data', (chunk) => { text += chunk; if (text.includes('watching')) watching(); });
+    child.stderr.on('data', (chunk) => { text += chunk; });
+    record('watch-started', { pid: child.pid, method });
+    const done = new Promise((resolve) => child.once('close', (code) => {
+      let result;
+      try { result = JSON.parse(text.trim().split('\n').at(-1)); } catch { result = { stage: 'unreadable', code, text: text.slice(-2000) }; }
+      record('watch-ended', result);
+      watching();
+      resolve(result);
+    }));
+    return { ready: ready.then(() => record('watch-ready', true)), done };
+  };
+  const mainProcesses = () => JSON.parse(powershell(`$exe=Join-Path $env:FABER_PROOF_FOLDER 'faber.exe'; $owned=@(Get-CimInstance Win32_Process -Filter "Name='faber.exe'" | Where-Object { $_.ExecutablePath -eq $exe -and $_.CommandLine -notmatch ' --type=' } | Select-Object ProcessId,CommandLine); ConvertTo-Json -InputObject @($owned) -Compress`));
+  const updateLog = () => (existsSync(path.join(data, 'update.log')) ? readFileSync(path.join(data, 'update.log'), 'utf8') : '');
+  // Faber, built from this code, updates itself to the signed `to` and must come back by itself, the way it was opened.
+  async function reopenProof(watch) {
+    if (scenario === 'reopen-window') {
+      await until('The update is downloaded and waits for the button', () => call('update_status').phase === 'ready', 240000);
+      await until('The person presses "Update ready, restart"', () => {
+        const rows = ui();
+        if (rows.some((row) => row.type === 'ControlType.Window' && /What.s new/.test(row.name ?? ''))) { ui('Continue'); return false; }
+        if (!rows.some((row) => row.type === 'ControlType.Button' && row.name?.startsWith('Update ready, restart'))) return false;
+        ui('Update ready, restart');
+        record('old-app-update-restart-requested', true);
+        return true;
+      });
+    }
+    const asar = path.join(folder, 'resources/app.asar');
+    await until(`Faber installed ${to} by itself`, () => existsSync(asar) && packageVersion(asar) === to, 240000);
+    record('installed-package-version', to);
+    const open = await until('Faber is open again after the update', () => {
+      const running = mainProcesses();
+      return running.length === 1 && call('status') && running;
+    }, 150000).catch((error) => { record('faber-not-open', updateLog()); throw error; });
+    record('reopened-processes', open);
+    const tray = TRAY.has(scenario);
+    assert.equal(open[0].CommandLine.includes('--autostart'), tray, tray ? 'The idle install reopens Faber in the tray' : 'The button reopens the window');
+    if (!tray) {
+      const rows = await until('The reopened window is on screen', () => { const rows = ui(); return rows.some((row) => row.type === 'ControlType.Window') && rows; });
+      writeFileSync(path.join(out, 'window-after.json'), JSON.stringify(rows, null, 2));
+    }
+    const evidence = await until('update.log says how the reopen ended', () => {
+      const found = reopenEvidence(parseUpdateLog(updateLog()));
+      return (found.reopened || found.failed) && found;
+    }, 150000).catch((error) => { record('update-log', updateLog()); throw error; });
+    record('reopen-evidence', evidence);
+    expectReopen(scenario, evidence);
+    if (watch) {
+      const watched = await watch.done;
+      if (scenario === 'first-start-exits') assert.equal(watched.stage, 'notified', 'A start must have met the held single-instance lock');
+    }
+    assert.ok(observations.some((o) => o.stage === 'updater-request' && o.detail.endsWith('_x64-setup.exe')), 'Faber fetched the update itself');
+  }
   let server;
   let hostsBefore;
   let thumbprint;
@@ -162,7 +331,7 @@ $json = ConvertTo-Json -InputObject @($rows) -Depth 4 -Compress
     assert.ok(!existsSync(data), 'The runner must have no pre-existing Faber data');
     assert.ok(!process.env.FABER_HIDDEN && !process.env.FABER_DATA_DIR, 'Both overrides disable the Tauri self-updater');
     mkdirSync(folder);
-    const version = scenario === 'tauri' ? '0.3.17-preview.84' : scenario === 'electron' ? from : to;
+    const version = scenario === 'tauri' ? '0.3.17-preview.84' : scenario === 'electron' ? from : reopen ? builtVersion(to) : to;
     // The only installer we invoke is the baseline. The target of either update is fetched and installed by Faber itself.
     run(path.join(artifacts, `Faber_${version}_x64-setup.exe`), ['/S', `/D=${folder}`]);
     record('baseline-installed', version);
@@ -223,7 +392,8 @@ setInterval(()=>{},1000);
       const installerFile = path.join(artifacts, path.basename(installerUrl.pathname));
       let releaseDownload;
       const downloadAllowed = new Promise((resolve) => { releaseDownload = resolve; });
-      if (scenario === 'tauri') releaseDownload();
+      // The scenario with a watcher serves the update once it watches (`startWatch`).
+      if (!['electron', 'first-start-exits'].includes(scenario)) releaseDownload();
       server = createServer({ pfx: readFileSync(process.env.FABER_PROOF_CERT), passphrase: 'disposable-proof' }, async (req, res) => {
         record('updater-request', req.url);
         if (req.url === '/startRED/faber/releases/download/preview-channel/latest.json' || req.url === '/startRED/faber/releases/latest/download/latest.json') {
@@ -239,7 +409,10 @@ setInterval(()=>{},1000);
       hostsBefore = readFileSync(hosts);
       writeFileSync(hosts, Buffer.concat([hostsBefore, Buffer.from('\r\n127.0.0.1 github.com # disposable Faber proof\r\n')]));
       powershell('Clear-DnsClientCache');
+      const watch = scenario === 'first-start-exits' ? startWatch('Hold($env:FABER_PROOF_FOLDER, $env:FABER_PROOF_LOCK, 300000)') : null;
+      watch?.ready.then(releaseDownload);
       launch();
+      if (reopen) await reopenProof(watch);
       if (scenario === 'electron') {
         await until('The old app data API', () => call('conversation', { id: ID }));
         call('send', { req: { conversationId: ID, text: 'Continue this conversation after updating', area: 'chat', images: [], files: [], choice: sample().choice } });
@@ -279,7 +452,8 @@ setInterval(()=>{},1000);
       record('clean-first-run-screen', rows);
       record('limit', 'Observed the subscription connection screen; no real provider authentication or sent message.');
     }
-    if (scenario !== 'clean') {
+    // The reopen scenarios proved their part in `reopenProof`; keeping data across versions is the electron scenario's.
+    if (scenario !== 'clean' && !reopen) {
       if (scenario === 'tauri') {
         await until('The old updater installed the Electron payload', () =>
           ['resources/app.asar', 'resources/faber-sidecar.exe', 'bin/faber.exe'].every((name) => existsSync(path.join(folder, name))) && !readFileSync(path.join(folder, 'faber.exe')).equals(originalExe), 240000);

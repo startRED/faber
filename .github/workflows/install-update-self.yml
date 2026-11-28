@@ -11,6 +11,18 @@ on:
         description: Published preview tag to install
         default: v0.3.18-preview.90
         required: true
+      reopen_to:
+        description: Published release the reopen scenarios update to (empty for the newest)
+        default: ''
+        required: false
+      update_code:
+        description: Commit whose update/ folder the built Faber uses (empty for the checked-out one)
+        default: ''
+        required: false
+      reopen_only:
+        description: Run only the reopen scenarios
+        type: boolean
+        default: false
   release:
     types: [published]
   # Releases published with GITHUB_TOKEN do not emit another workflow's release event.
@@ -23,7 +35,7 @@ permissions:
 
 jobs:
   proof:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    if: (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') && !inputs.reopen_only
     name: ${{ matrix.scenario }}
     runs-on: windows-latest
     timeout-minutes: 15
@@ -64,6 +76,115 @@ jobs:
           gh release download $env:FABER_PROOF_TO --pattern latest.json --dir $artifacts
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Run installed applications on a private, never activated desktop
+        shell: pwsh
+        env:
+          FABER_SMOKE_DISPOSABLE: '1'
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          & scripts/install-update-desktop.ps1 -Scenario $env:SCENARIO
+          exit $LASTEXITCODE
+      - name: Keep observations even when a proof fails
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: install-update-${{ matrix.scenario }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/install-update-evidence/
+          if-no-files-found: warn
+
+  # Faber built from this code (its update/ from `update_code` when given), a version below the newest signed release, so
+  # the helper that hands off the install and reopens Faber is the code under proof.
+  build-reopen:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    outputs:
+      to: ${{ steps.versions.outputs.to }}
+      built: ${{ steps.versions.outputs.built }}
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: ''
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Use the update/ of another commit
+        if: inputs.update_code
+        shell: bash
+        env:
+          UPDATE_CODE: ${{ inputs.update_code }}
+        run: |
+          set -euo pipefail
+          [[ "$UPDATE_CODE" =~ ^[0-9a-f]{40}$ ]] || { echo "update_code must be a full commit hash"; exit 1; }
+          git fetch --no-tags --depth 1 origin "$UPDATE_CODE"
+          git rm -r -q update
+          git checkout FETCH_HEAD -- update
+          git status --short
+      - name: Pick the versions
+        id: versions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REOPEN_TO: ${{ inputs.reopen_to }}
+        run: |
+          set -euo pipefail
+          to="${REOPEN_TO:-$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName')}"
+          built=$(node --input-type=module -e "import { releaseVersion, builtVersion } from './scripts/install-update-self.mjs'; console.log(builtVersion(releaseVersion(process.argv[1])))" "$to")
+          echo "to=$to" >> "$GITHUB_OUTPUT"
+          echo "built=$built" >> "$GITHUB_OUTPUT"
+          echo "Faber $built from this code updates to $to"
+      - run: npm ci
+      - run: npm ci
+        working-directory: installer
+      - run: node node_modules/electron/install.js
+      - run: npm pkg set version="$env:BUILT"
+        env:
+          BUILT: ${{ steps.versions.outputs.built }}
+      - run: npm run dist:electron
+      - uses: actions/upload-artifact@v6
+        with:
+          name: install-update-built-${{ github.run_id }}
+          path: out/installer/Faber_${{ steps.versions.outputs.built }}_x64-setup.exe
+          if-no-files-found: error
+          retention-days: 3
+
+  reopen:
+    needs: build-reopen
+    name: ${{ matrix.scenario }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      FABER_PROOF_REOPEN_TO: ${{ needs.build-reopen.outputs.to }}
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [reopen-window, reopen-tray, first-start-exits]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Check the proof contract
+        run: node --test scripts/install-update-self.test.mjs
+      - uses: actions/download-artifact@v8
+        with:
+          name: install-update-built-${{ github.run_id }}
+          path: ${{ runner.temp }}/install-update-artifacts
+      - name: Download the signed release to update to
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $artifacts = Join-Path $env:RUNNER_TEMP 'install-update-artifacts'
+          if ($env:FABER_PROOF_REOPEN_TO -cnotmatch '^v\d+\.\d+\.\d+(-preview\.\d+)?$') { throw "Invalid release tag: $env:FABER_PROOF_REOPEN_TO" }
+          gh release download $env:FABER_PROOF_REOPEN_TO --pattern '*x64-setup.exe' --pattern latest.json --dir $artifacts
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Run the built Faber on a private, never activated desktop
         shell: pwsh
         env:
           FABER_SMOKE_DISPOSABLE: '1'
