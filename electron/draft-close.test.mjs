@@ -9,6 +9,7 @@ test('a renderer refusing unload hides to the tray without being destroyed', () 
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const source = main.slice(main.indexOf('function createWindow()'), main.indexOf('\n/**', main.indexOf('function createWindow()'))).replaceAll('import.meta.dirname', "'.'");
   let hidden = false;
+  let refused = 0;
   const contents = Object.assign(new EventEmitter(), {
     setWebRTCIPHandlingPolicy() {}, setWindowOpenHandler() {}, send() {}, session: { flushStorageData() {} },
   });
@@ -20,13 +21,14 @@ test('a renderer refusing unload hides to the tray without being destroyed', () 
     FRAME: '#101012', ORIGIN: 'faber://app', testmode: { testing: false, placement: {}, startPage: () => '' },
     guardVisualFrames() {}, pane: { watch() {} }, startup: { windowBuilt() {} },
     setTimeout() {}, clearTimeout() {}, REVEAL_FAILSAFE_MS: 3000,
-    closingForQuit: false,
+    closingForQuit: false, quitRefused() { refused++; },
   });
   create();
   let overrodeRefusal = false;
   contents.emit('will-prevent-unload', { preventDefault() { overrodeRefusal = true; } });
   assert.equal(hidden, true, 'the refused close must remove the window from the screen');
   assert.equal(overrodeRefusal, false, 'overriding beforeunload would destroy the only draft copy');
+  assert.equal(refused, 1, 'the refused close ends the Quit and any restart it carried');
 });
 
 test('Quit preserves the engine and tray until a draft-protected window actually closes', async () => {

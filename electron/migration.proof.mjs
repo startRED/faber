@@ -94,7 +94,7 @@ void app.whenReady().then(async () => { try {
     if (mode === 'close-dirty') {
       const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
       const guard = main.slice(main.indexOf("window.webContents.on('will-prevent-unload'"), main.indexOf('  // Closing frees'));
-      Function('window', stripTypeScriptTypes(`let closingForQuit = false; ${guard}`))(window);
+      Function('window', stripTypeScriptTypes(`let closingForQuit = false; const quitRefused = () => { closingForQuit = false; }; ${guard}`))(window);
       await window.webContents.executeJavaScript(readFileSync(path.join(dir, 'screen.js'), 'utf8'));
       await window.webContents.executeJavaScript(`
         window.addEventListener('beforeunload', draftScreen.protectDraftClose);
