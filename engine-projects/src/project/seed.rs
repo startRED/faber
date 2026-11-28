@@ -431,7 +431,9 @@ fn remove(path: &Path) -> io::Result<()> {
 
 /// Whether the copy at `copy` is being seeded or waits its turn, so the sweep leaves it in place.
 pub fn seeding(copy: &Path) -> bool {
-    SEEDING.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|p| same_path(p, copy))
+    // Marked by its canonical place: a short Windows name or a `..` on the way still names the same copy.
+    let copy = copy.canonicalize().unwrap_or_else(|_| copy.to_path_buf());
+    SEEDING.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|p| same_path(p, &copy))
 }
 
 /// Right before a folder is moved in: the copy is still where it was, reached without a link, and for `node_modules`
@@ -587,8 +589,11 @@ mod tests {
     /// tracked files. The project also has a member the copy's older commit lacks.
     fn fixture() -> Fixture {
         let dir = tempfile::tempdir().unwrap();
-        let data = dir.path().join("data");
-        let root = dir.path().join("project");
+        // macOS keeps temporary folders behind a link (`/var` is `/private/var`), and a copy reached through a link is
+        // never seeded.
+        let top = if cfg!(unix) { dir.path().canonicalize().unwrap() } else { dir.path().to_path_buf() };
+        let data = top.join("data");
+        let root = top.join("project");
         let copy = home(&data).join(ID);
         for top in [&root, &copy] {
             write(
@@ -857,6 +862,7 @@ mod tests {
         let f = fixture();
         let seeding_now = begin(plan(&f.data, ID, &f.root, &f.copy).unwrap());
         assert!(seeding(&f.copy), "the sweep leaves it alone before the thread runs");
+        assert!(seeding(&f.copy.join("src").join("..")), "another spelling of the copy's folder names it too");
         drop(seeding_now);
         assert!(!seeding(&f.copy));
     }
