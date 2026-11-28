@@ -46,7 +46,7 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   folder. General explains the rule and offers the folder choice.
 - General ends with *Storage*, one closed fold (`ui/StorageUse.tsx`). "Where new copies and tools go" shows the effective
   folder, opens the system folder picker with Change and offers Reset to default. A choice applies immediately to new
-  project copies and catalog installs, including audio runtimes. Existing items stay where they were created.
+  project copies and catalog installs, including audio runtimes. Existing project copies stay where they were created.
   `Faber-storage.json` beside the main data folder retains the choice. `FABER_DATA_DIR` overrides it. An unavailable
   choice at startup uses the default with a notice. If the record cannot be read, Faber keeps it and finds existing
   external copies through their saved paths. A drive lost during use stops a new copy or download with a notice.
@@ -55,6 +55,27 @@ How the Settings screen looks and behaves. The first run and the tutorial are in
   chosen drive are locked in Git, so making another copy while that drive is away never makes Git forget them.
   Accepted limits: a CLI in Full Access, or Antigravity (it runs without a sandbox), can change this record and the
   folder's owner mark like Faber's other records, and the chosen folder keeps the drive's own permissions.
+- With a chosen folder and installed catalog tools still in the main data folder, Storage says how many and how big, with
+  *Move here* (Electron shell only: the Tauri window opens after the host starts and could not show the move). A second
+  step says Faber closes and opens again; *Restart and move* saves `storage-move/request.json` (`storage_move_request`)
+  and restarts at once when no conversation works and no CLI or catalog install runs, else "Faber moves the tools the
+  next time it opens" stays with *Don't move*. The restart is the usual Quit: a draft that refuses the close cancels it,
+  and the new start opens once the host has stopped. Change or Reset cancels a waiting move.
+- The move runs in the host at the next start, before the engine exists; each host holds `storage-move/start.lock` for
+  its life, so no session, kit, install, storage change or other Faber meets a moving tool; the first frame shows "Moving your tools",
+  the item number and its bytes. It runs only for the folder still chosen, checked again as a new choice is, with none
+  of the chosen folder, its parent or `Faber-storage` in a project. Per tool (`engine-projects/src/tools/moving.rs` has
+  the order): copy to `move-staging` hashing and flushing every file and folder, publish, read the source again by
+  content, read the copy back where it lies following no link, set the original aside in `storage-move/old/<attempt>/`,
+  then write and flush `tools/locations/<id>.json`, the switch. A tool with an update half done, in two kinds, already at
+  the destination or whose place something else took stays; one that changed, was held open or did not match stays with
+  its reason; lost room (each needs its size plus 256 MB) or a lost drive stops the move. After a crash the next start
+  decides by each record as the disk has it (`storage-move/journal.json`): originals with no record go back and the
+  copies it published go (nothing else), copies a record names stay, and a copy on a drive that is away waits in `storage-move/leftovers.json` until
+  a start reaches it. Nothing new moves then, and a move never retries itself. Storage says what moved and what stayed.
+- *Old copies of moved tools* shows their size with *Remove* and a second confirm (`storage_move_remove`). The
+  originals are out of every folder a tool is found in, so removing them needs no lock and cannot reach a running tool.
+  The folder is renamed before it is deleted, so a cut removal still shows its size and finishes at the next one.
 - The fold measures the main data folder on opening and "Measure again" (`storage_usage`, bounded, at background priority).
   It shows total and free space, kinds by size and copies by project, including removed projects and loose copies.
   Unreadable sizes say "Unknown". A partial scan says sizes may be larger. Loading keeps old figures and announces

@@ -3,6 +3,13 @@
 .store .btn[aria-disabled='true'] { opacity: 0.4; cursor: default; }
 .store-total { font-size: var(--fs-sm); color: var(--ink); }
 .store-note { padding: 10px 16px; }
+.store-note > p { margin: 0; }
+.store-note > p + p { margin-top: 4px; }
+.store-move > * + * { border-top: 1px solid var(--line); }
+.store-move .btn[aria-disabled='true'] { opacity: 0.4; cursor: default; }
+.store-ask { display: grid; gap: 10px; padding: 10px 16px 12px; }
+.store-ask > p { margin: 0; }
+.store-ask-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .store-copies > .store-note { padding-top: 0; }
 .store-copies > .store-list, .store-head + .store-note { padding-top: 8px; }
 .store-head { margin: 0; padding: 12px 16px 0; font-size: var(--fs-xs); font-weight: 580; color: var(--ink-3); }

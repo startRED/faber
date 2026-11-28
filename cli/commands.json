@@ -2655,6 +2655,41 @@
     "reach": "person"
   },
   {
+    "name": "storage_move_request",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "Asks for the tools to move at the next start; true when Faber restarts for it now."
+  },
+  {
+    "name": "storage_move_cancel",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "storage_move_remove",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "Deletes the originals that moves kept in the main data folder."
+  },
+  {
     "name": "save_settings",
     "args": [
       [

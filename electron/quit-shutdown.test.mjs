@@ -224,3 +224,40 @@ test('a runtime process error keeps pending calls and does not schedule a replac
     await stopping;
   }
 });
+
+test('a tool move restart opens Faber again only after the host stopped, and a refused draft close cancels it', async () => {
+  const source = stripTypeScriptTypes(main.slice(main.indexOf('let stopping = false;'), main.indexOf('void app.whenReady()')));
+  const shell = (win) => {
+    const app = new EventEmitter();
+    const seen = { opened: [], released: 0, finish: null };
+    app.quit = () => { app.emit('before-quit', { preventDefault() {} }); };
+    app.relaunch = (options) => { seen.opened.push(options.args); };
+    app.releaseSingleInstanceLock = () => { seen.released++; };
+    const context = {
+      app, win, HOST_STOP_MS: patience, release() {}, apps: { closeAll() {} }, pane: { closeAll() {}, async stopExtensions() {} },
+      host: { stop: () => new Promise((resolve) => { seen.finish = resolve; }) }, process: { argv: ['faber', '--autostart', 'x'] },
+    };
+    runInNewContext(source, context);
+    return { app, context, seen };
+  };
+  // A draft refuses the window's close: Faber stays in the tray, and a later Quit never opens it again.
+  const window = { closed: 0, close() { this.closed++; } };
+  const refused = shell(window);
+  refused.context.restart();
+  assert.equal(window.closed, 1, 'the restart closes the window first, as Quit does');
+  refused.context.quitRefused();
+  refused.context.win = null;
+  refused.app.emit('before-quit', { preventDefault() {} });
+  refused.seen.finish();
+  await settle();
+  assert.deepEqual(refused.seen.opened, [], 'a refused restart is not armed for the next Quit');
+  // Accepted: nothing opens until the host has stopped, then the lock is let go and Faber opens with a window.
+  const accepted = shell(null);
+  accepted.context.restart();
+  await settle();
+  assert.deepEqual(accepted.seen.opened, [], 'nothing opens while the host still stops');
+  accepted.seen.finish();
+  await settle();
+  assert.equal(accepted.seen.released, 1);
+  assert.deepEqual(accepted.seen.opened, [['x']]);
+});

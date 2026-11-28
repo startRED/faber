@@ -230,7 +230,7 @@ function createWindow(): BrowserWindow {
   window.on('hide', seen(false));
   window.on('minimize', seen(false));
   // A failed or pending draft save lives in this renderer; honour its beforeunload refusal without a dialog.
-  window.webContents.on('will-prevent-unload', () => { closingForQuit = false; window.hide(); });
+  window.webContents.on('will-prevent-unload', () => { quitRefused(); window.hide(); });
   window.on('close', () => window.webContents.session.flushStorageData());
   // Closing frees the screen (its renderer and its memory); the host keeps running answers in the background.
   const clearMedia = () => { if (win === window) void host?.call('media_clear', {}).catch(() => {}); };
@@ -385,6 +385,20 @@ app.on('window-all-closed', () => {});
 // Quitting waits for the engine's own shutdown, including slow saves; the minute bound covers a hung host.
 let stopping = false;
 let closingForQuit = false;
+/** Set by a tool move's restart (host/src/storage_choice/storage_move.rs): this Quit opens Faber again once it is done. */
+let relaunching = false;
+
+/** Quits the usual way, drafts and the host's stop included, and opens again only after both, with the lock free. */
+function restart(): void {
+  relaunching = true;
+  app.quit();
+}
+
+/** A draft refused the close: Faber stays, in the tray, and the restart is off; the move waits for the next start. */
+function quitRefused(): void {
+  closingForQuit = false;
+  relaunching = false;
+}
 app.on('before-quit', (event) => {
   if (!host) return;
   event.preventDefault();
@@ -398,9 +412,14 @@ app.on('before-quit', (event) => {
     apps.closeAll();
     await pane.stopExtensions().catch(() => console.error('faber: extension profile cleanup failed; the next start will retry.'));
     pane.closeAll();
+    if (relaunching) {
+      app.releaseSingleInstanceLock();
+      app.relaunch({ args: process.argv.slice(1).filter((arg) => arg !== '--autostart') });
+    }
     app.quit();
   }, (failure) => {
     stopping = false;
+    relaunching = false;
     console.error('faber: the host could not stop; Quit can retry:', failure);
   });
 });
@@ -433,6 +452,7 @@ void app.whenReady().then(async () => {
     show,
     parent: () => win,
     answer: (picked: Picked) => host?.note(picked),
+    restart,
     hidden,
   };
   host = startHost(window);

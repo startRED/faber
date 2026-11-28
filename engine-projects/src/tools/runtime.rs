@@ -106,7 +106,7 @@ fn relative(path: &str) -> bool {
     !path.is_empty() && path.split('/').all(|part| portable_name(part) && !matches!(part, "." | ".."))
 }
 
-fn pin(hash: &str) -> bool {
+pub(super) fn pin(hash: &str) -> bool {
     hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())
 }
 

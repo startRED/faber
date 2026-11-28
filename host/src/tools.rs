@@ -322,7 +322,7 @@ pub(crate) async fn tools_list(h: &Host) -> Res<Vec<ToolRow>> {
 /// Downloads a skill from its own repository, or a server's package from npm, and installs it. New sessions receive the changed store; moving files may also affect an existing session.
 pub(crate) async fn tools_install(h: &Host, id: String) -> Res<()> {
     // An update never ends the process in the middle of an install: the shell holds it off until this is dropped.
-    let _running = h.shell.hold_install()?;
+    let _running = h.hold_install()?;
     let item = find(&id).ok_or("error.tools.unknown")?.clone();
     let store = h.engine.tool_store();
     // FABER_SETUP_SOURCE (tests): the archive comes from that loopback server, as the CLI installs do.
@@ -363,7 +363,7 @@ pub(crate) async fn tools_prepare_replacement(h: &Host, id: String) -> Res<Prepa
 
 /// Revalidates the confirmed snapshot before downloading and again under the publication lock.
 pub(crate) async fn tools_replace(h: &Host, plan: faber_engine::tools::ReplacementPlan) -> Res<()> {
-    let _running = h.shell.hold_install()?;
+    let _running = h.hold_install()?;
     let data = h.data_dir.clone();
     let store = tokio::task::spawn_blocking(move || Store::new(&data)).await.map_err(|_| "error.tools.install".to_string())?;
     let source = std::env::var("FABER_SETUP_SOURCE").ok().map(|s| s.trim_end_matches('/').to_string());

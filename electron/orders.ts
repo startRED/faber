@@ -27,6 +27,8 @@ type Order =
   | { kind: 'awake'; on: boolean }
   | { kind: 'autostart'; on: boolean }
   | { kind: 'reveal'; path: string }
+  | { kind: 'storageMove'; progress: unknown }
+  | { kind: 'relaunch' }
   | { kind: 'quit' };
 
 /** The answer to a dialog, as the host reads it (`ShellNote::Picked`). */
@@ -42,11 +44,13 @@ export type Window = {
   parent: () => BrowserWindow | null;
   /** Gives the host a dialog's answer. */
   answer: (picked: Picked) => void;
+  /** Quits the usual way and opens again, unless a draft refuses the close. */
+  restart: () => void;
   /** A test run shows nothing outside its window and changes nothing on the system. */
   hidden: boolean;
 };
 
-const KINDS = new Set(['tray', 'notify', 'awake', 'autostart', 'pick', 'reveal', 'quit']);
+const KINDS = new Set(['tray', 'notify', 'awake', 'autostart', 'pick', 'reveal', 'storageMove', 'relaunch', 'quit']);
 
 let tray: Tray | null = null;
 let blocker: number | null = null;
@@ -162,6 +166,14 @@ export function apply(value: unknown, window: Window): void {
       break;
     case 'reveal':
       if (!window.hidden) shell.showItemInFolder(value.path);
+      break;
+    case 'storageMove':
+      // Before the host answers anything: the screen shows it over its first frame (ui/MovingTools.tsx).
+      window.parent()?.webContents.send('faber:event', { type: 'storageMove', progress: value.progress });
+      break;
+    case 'relaunch':
+      // A tool move waits for the next start. Quit takes the usual way, drafts and the host's stop included.
+      window.restart();
       break;
     case 'quit':
       // The self-update is about to replace this program: it ends now, not after the usual wait for the host to stop

@@ -2,13 +2,14 @@ import { createEffect, createSignal, Show } from 'solid-js';
 import { Portal, render } from 'solid-js/web';
 import './fonts.css';
 import './styles.css';
-import { type AppEvent, api, failureOf } from './api.ts';
+import { type AppEvent, api, failureOf, type StorageMoveProgress } from './api.ts';
 import { App } from './App.tsx';
 import { ContextMenuHost } from './ContextMenu.tsx';
 import { installContextMenu } from './contextmenu.ts';
 import { applyLook } from './appearance.ts';
 import { createFrameFeed } from './frame.ts';
 import { createInbox } from './inbox.ts';
+import { MovingTools } from './MovingTools.tsx';
 import { StartFailed } from './StartFailed.tsx';
 import { createHold, onQuiet, watchGames } from './quiet.ts';
 import { store } from './running.ts';
@@ -42,11 +43,17 @@ const inbox = createInbox<AppEvent>();
 const [stopped, setStopped] = createSignal<string>();
 type HostStopped = { type: 'hostStopped'; code: string };
 const isHostStopped = (e: unknown): e is HostStopped => (e as { type?: unknown } | null)?.type === 'hostStopped';
+// A tool move the person asked for runs while the host starts (host/src/storage_choice/storage_move.rs): its progress comes
+// before the snapshot can, and only the shells send it.
+const [moving, setMoving] = createSignal<StorageMoveProgress>();
+type StorageMoveEvent = { type: 'storageMove'; progress: StorageMoveProgress };
+const isStorageMove = (e: unknown): e is StorageMoveEvent => (e as { type?: unknown } | null)?.type === 'storageMove';
 // Events reach the screen once per frame, together (ui/frame.ts), and while a game is in front (ui/quiet.ts) they wait folded
 // into one and land together when the person comes back.
 const frame = createFrameFeed<AppEvent>((e) => {
   const raw: unknown = e;
   if (isHostStopped(raw)) setStopped(raw.code);
+  else if (isStorageMove(raw)) setMoving(raw.progress.done ? undefined : raw.progress);
   else if (e.type === 'running') store.offer({ revision: e.revision, items: e.items });
   else inbox.push(e);
 });
@@ -69,6 +76,9 @@ async function boot() {
   return { state, update };
 }
 let booted: Awaited<ReturnType<typeof boot>> | undefined;
+// Over the first frame while a tool move holds the start; gone once the screen has its snapshot.
+const movingRoot = document.body.appendChild(document.createElement('div'));
+const stopMoving = render(() => <Show when={moving()}>{(progress) => <MovingTools progress={progress()} />}</Show>, movingRoot);
 for (let tries = 1; !booted && stopped() === undefined; tries++) {
   try {
     booted = await boot();
@@ -78,6 +88,8 @@ for (let tries = 1; !booted && stopped() === undefined; tries++) {
     else await new Promise((done) => setTimeout(done, tries < 40 ? 250 : 1000));
   }
 }
+stopMoving();
+movingRoot.remove();
 const state = booted?.state;
 const update = booted?.update;
 if (state) {

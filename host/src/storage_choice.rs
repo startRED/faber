@@ -7,6 +7,12 @@ use std::fs;
 use std::io::{self, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
+mod storage_move;
+pub use storage_move::Progress as MoveProgress;
+pub(crate) use storage_move::{
+    Status as MoveStatus, at_start, cancel as cancel_move, remove_old as remove_old_copies, request as request_move, status as move_status,
+};
+
 const FALLBACK: &str = "reason.storage.default";
 const UNREADABLE: &str = "reason.storage.unreadable";
 const CHANGE_UNREADABLE: &str = "error.storage.unreadable";
@@ -370,6 +376,8 @@ pub(crate) async fn change(h: &Host, reset: bool) -> Res<Option<Status>> {
     let root = choice.save_folder(&h.data_dir, folder).inspect_err(|error| choice.fall_back_on_read_error(h, error))?;
     choice.publish_roots(h.shell.as_ref());
     h.engine.set_new_storage(root, choice.saved.roots.clone());
+    // A move asked for the old choice is not one for the new.
+    let _ = storage_move::cancel(&h.data_dir);
     Ok(Some(choice.status()))
 }
 
