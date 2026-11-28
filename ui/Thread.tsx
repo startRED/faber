@@ -21,6 +21,7 @@ import { keep, kept, recoverQueuedDraft, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { ActorMark, StateGlyph, ToolGlyph, stateKind, toolKind } from './icons/kinds.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
+import { SignInCard } from './SignInCard.tsx';
 import { StallNote } from './StallNote.tsx';
 import { ResultsNote } from './Results.tsx';
 import { ChecksLine, DetailsLine, FollowLine } from './Details.tsx';
@@ -773,6 +774,7 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
       <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor), other: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}</p>}</Show>
       <Show when={m().mode}><p class="pace">{fromEngine(m().mode)}</p></Show>
       <QuotaCard id={props.conversationId} m={m()} usage={props.usage ?? []} />
+      <SignInCard m={m()} />
       <Show when={hasKit()}>
         <details class="kit disclosure">
           <summary>{t('kit.details')}</summary>

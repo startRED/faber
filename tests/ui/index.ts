@@ -102,6 +102,7 @@ import './worklog.check.ts';
 import './quota.check.ts';
 import './recents.check.ts';
 import './setup.check.ts';
+import './sign-in-card.check.ts';
 import './start-failed.check.ts';
 import './styles.check.ts';
 import './grammar.check.ts';

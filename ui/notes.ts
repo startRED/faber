@@ -59,9 +59,11 @@ export function grouped(notes: readonly Note[]): Array<{ kind: Kind; notes: Note
 }
 
 /**
- * A first install has no data at all: nothing saved in the settings and no conversation. An install that has either is an
- * existing one, even when it never saved an appearance (an old version) or never saw an entry: it is shown the newest ones.
+ * A first install has its first run still ahead (`setup` unset) and no conversation. The engine sends every switch with its
+ * value (`Settings::shown`), so a fresh install's settings are never empty: reading them as "used" showed every new person
+ * the whole list (2026-11-27). An install with either is an existing one, even when it never saw an entry: it is shown the
+ * newest ones.
  */
 export function isFirstInstall(settings: object | undefined, conversations: readonly unknown[]): boolean {
-  return conversations.length === 0 && Object.values(settings ?? {}).every((value) => value === undefined);
+  return conversations.length === 0 && (settings as { setup?: unknown } | undefined)?.setup === undefined;
 }

@@ -160,7 +160,11 @@ check('notes: after Esc the whole screen is gone from the page', () =>
 check('notes: only an install with no data at all is a first install', () => {
   ok(isFirstInstall({}, []), 'no settings, no conversation');
   ok(isFirstInstall(undefined, []));
-  equal(isFirstInstall({ language: 'en' }, []), false, 'a saved choice means the app was used');
+  // What a fresh install's screen really receives: the engine sends every switch with its value, before any first run.
+  const fresh = { userHooks: false, permissions: 'full', notifications: true, notificationSound: true, keepAwake: false, resumeInterrupted: true, autostart: false, strongerWhenStuck: true, seeOtherWindows: false, programsOutOfReach: [], grantsEpoch: 'e1', permissionsRevision: 'e1' };
+  ok(isFirstInstall(fresh, []), 'the switches the engine always sends are not use');
+  deepEqual(whatsNew(LIST, undefined, isFirstInstall(fresh, [])), { show: [], remember: 4 }, 'a new person is never shown the list');
+  equal(isFirstInstall({ ...fresh, setup: 'skipped' }, []), false, 'a finished first run means the app was used');
   equal(isFirstInstall({}, [{ id: 'c1' }]), false, 'so does a conversation');
   // The install that stayed on 0.3.14: it finished the first run long ago but never saved an appearance with a base.
   const old = { setup: 'done', tutorialDone: true, userName: 'Erick' };
