@@ -133,7 +133,7 @@ async fn rewind_real_contained_edit_only_turn_keeps_an_unreported_descendant_unt
                         blocked = true;
                     }
                     if done && active.is_empty() && !unknown {
-                        assert!(!process_alive(wire.workers[0]), "result cannot release an unreported OS writer");
+                        assert!(!wire.worker_alive(0), "result cannot release an unreported OS writer");
                     }
                 }
                 EngineEvent::Text(text) if text == "after-result barrier" => break,
