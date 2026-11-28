@@ -21,12 +21,13 @@
 #first { position: fixed; inset: 0; z-index: 100; display: grid; place-content: center; background: #08080a; color: #f3f2ee; }
 #first svg { width: 64px; height: 64px; opacity: 0.5; }
 @media (prefers-color-scheme: light) { #first { background: #e9ede7; color: #1c2924; } }
-/* A tool move at start (ui/MovingTools.tsx): below the first frame's mark, in its colours, before any theme is known. */
-.moving-tools { position: fixed; inset: auto 0 18vh; z-index: 101; display: grid; justify-items: center; gap: 6px; padding: 0 24px; text-align: center; color: #f3f2ee; font: 14px/1.45 system-ui, sans-serif; }
+/* A tool move at start (ui/MovingTools.tsx): below the first frame's mark, in its colours, before any theme is known; the
+   size tokens are not written yet, so each falls back to a size relative to the system's own text size. */
+.moving-tools { position: fixed; inset: auto 0 18vh; z-index: 101; display: grid; justify-items: center; gap: 6px; padding: 0 24px; text-align: center; color: #f3f2ee; font-family: system-ui, sans-serif; font-size: var(--fs-ui, .875rem); line-height: 1.45; }
 .moving-tools p { margin: 0; max-width: 46ch; }
-.moving-tools-title { font-size: 16px; font-weight: 600; }
+.moving-tools-title { font-size: var(--fs-lead, 1rem); font-weight: 500; }
 .moving-tools-line { font-variant-numeric: tabular-nums; opacity: 0.85; }
-.moving-tools-note { font-size: 13px; opacity: 0.65; }
+.moving-tools-note { font-size: var(--fs-sm, .8125rem); opacity: 0.65; }
 @media (prefers-color-scheme: light) { .moving-tools { color: #1c2924; } }
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--frame); color: var(--ink); font-family: var(--font-ui); font-stretch: var(--ui-stretch); font-size: var(--fs-ui); line-height: 1.45; overflow: hidden; }
