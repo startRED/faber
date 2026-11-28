@@ -6,20 +6,20 @@
 //! event 10006 "'Faber' could not be shut down" in the same second). Now Faber keeps the installer it downloaded (its signature
 //! was checked) in a new temporary folder, puts a copy of the running program (the sidecar) beside it, starts that copy with
 //! `--faber-update-install`, and ends. The copy (`finish`) waits until neither the installed `faber.exe` nor its sidecar
-//! runs, then runs the installer into the same folder, and opens Faber again in every case: the new version when the
-//! install worked, the same version when it did not, so the person never has to guess whether to open it. The installer is
-//! always silent (`/S`, `installer_line`): it shows no window, so none ever covers a game.
+//! runs, then runs the installer into the same folder. Once the installer has stopped, the copy opens Faber and checks
+//! that it came back. The installer is always silent (`/S`, `installer_line`): it shows no window, so none covers a game.
 //!
 //! No shell runs: the installer is started directly. Its `/D=<folder>` must be last and unquoted (NSIS), so the line is
 //! written as is; `install_dir_arg` already refused a folder with a quote in it.
 
 use crate::FOLDER;
-use std::ffi::OsString;
-use std::io::{Read, Seek, SeekFrom};
+use crate::flow::{self, Clock, poll};
+use std::ffi::{OsStr, OsString};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 /// The first argument of the copy that finishes an install.
@@ -38,7 +38,7 @@ const AUTOSTART: &str = "--autostart";
 const CLOSE_WAIT: Duration = Duration::from_secs(10);
 /// How long the copy waits once more after ending what was left.
 const ENDED_WAIT: Duration = Duration::from_secs(5);
-/// An installer still running after this is left to finish on its own, and Faber opens anyway.
+/// An installer whose exit cannot be confirmed by then is left alone, with Faber closed.
 const INSTALL_WAIT: Duration = Duration::from_secs(300);
 /// Windows: start the process without a console window.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -72,6 +72,36 @@ pub fn relaunch(install_dir: &OsString, data_dir: &Path, tray: bool) -> Result<(
     spawn_copy(&temp, std::ffi::OsStr::new(""), "", "", install_dir, data_dir, tray)
 }
 
+/// Runs the reopen hand-off from the installed host when the temporary copy could not start. The old host must exit
+/// before Faber can reopen: until then it owns the channel's named pipe.
+pub(crate) fn relaunch_direct(install_dir: &OsString, data_dir: &Path, tray: bool) -> Result<(), String> {
+    let exe = install_folder(install_dir).ok_or("no install folder")?.join(APP);
+    let runner = std::env::current_exe().map_err(|error| error.to_string())?;
+    handoff_command(&runner, [OsStr::new(""); 3], &exe, data_dir, tray, std::process::id())
+        .spawn()
+        .map(drop)
+        .map_err(|error| format!("could not start the installed reopen helper: {error}"))
+}
+
+fn relaunch_direct_with<P>(
+    data: &Path,
+    clock: &impl Clock,
+    previous: (impl Fn() -> bool, impl Fn() -> Option<bool>),
+    end: impl FnOnce() -> usize,
+    launch: impl FnMut() -> io::Result<P>,
+    alive: impl FnMut(&mut P) -> io::Result<bool>,
+    read_startup: impl FnMut() -> io::Result<String>,
+) -> bool {
+    let (host_ended, shell_stopped) = previous;
+    let free = || if host_ended() { shell_stopped() } else { Some(false) };
+    if !leftovers(data, clock, [CLOSE_WAIT, ENDED_WAIT], || free() == Some(true), end) && free() == Some(false) {
+        crate::log(data, "reopen-failed", "could not confirm the previous Faber closed");
+        return false;
+    }
+    // Reopening does not replace files. If the old host exited and the shell is unqueryable, let the app try its lock.
+    flow::reopen(data, clock, || free() != Some(false), launch, alive, read_startup)
+}
+
 fn spawn_copy(
     temp: &Path,
     installer: &std::ffi::OsStr,
@@ -88,70 +118,133 @@ fn spawn_copy(
     let copy = temp.join(COPY);
     copy_new(&exe, &copy).map_err(|e| e.to_string())?;
     let _verified = verify_copy(&exe, &copy).map_err(|e| e.to_string())?;
-    Command::new(copy)
-        .arg(FLAG)
-        .arg(installer)
-        .arg(signature)
-        .arg(version)
-        .arg(folder.join(APP))
-        .arg(data_dir)
-        .arg(if tray { "tray" } else { "window" })
-        .creation_flags(CREATE_NO_WINDOW)
+    handoff_command(&copy, [installer, OsStr::new(signature), OsStr::new(version)], &folder.join(APP), data_dir, tray, std::process::id())
         .spawn()
         .map(drop)
         .map_err(|e| e.to_string())
 }
 
-/// The copy's work: `[installer, signature, version, installed faber.exe, data folder, "window" | "tray"]`, the installer empty to only open Faber
-/// again (`relaunch`). Returns the exit code.
+fn handoff_command(runner: &Path, update: [&OsStr; 3], exe: &Path, data: &Path, tray: bool, host: u32) -> Command {
+    let mut command = Command::new(runner);
+    command
+        .arg(FLAG)
+        .args(update)
+        .arg(exe)
+        .arg(data)
+        .arg(if tray { "tray" } else { "window" })
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW);
+    if update[0].is_empty() {
+        command.arg(host.to_string());
+    }
+    command
+}
+
+/// The helper's work: `[installer, signature, version, installed faber.exe, data folder, "window" | "tray"]`.
+/// To only reopen Faber, the installer fields are empty and the old host's PID follows. Returns the exit code.
 pub fn finish(args: &[OsString]) -> i32 {
-    let [installer, signature, version, exe, data, reopen] = args else { return 1 };
+    let [installer, signature, version, exe, data, reopen, extra @ ..] = args else { return 1 };
     let (exe, data) = (PathBuf::from(exe), PathBuf::from(data));
     let Some(folder) = exe.parent() else { return 1 };
     let sidecar = folder.join(SIDECAR[0]).join(SIDECAR[1]);
-    leftovers(
-        &data,
-        [CLOSE_WAIT, ENDED_WAIT],
-        || is_free(&exe) && is_free(&sidecar),
-        || faber_winproc::end_programs(&[&exe, &sidecar]).unwrap_or(0),
-    );
-    if !installer.is_empty() {
-        // The programs are kept in this copy's own folder, made new for this install.
-        match std::env::current_exe().ok().and_then(|copy| copy.parent().map(Path::to_path_buf)) {
-            Some(here) => {
-                let sidecar = folder.join(SIDECAR[0]).join(SIDECAR[1]);
-                install_or_put_back(&[&exe, &sidecar], &here, &data, || run_installer(installer, signature, version, folder, &data));
-            }
-            None => crate::log(&data, "install-failed", "no folder to keep Faber in"),
+    let clock = SystemClock(Instant::now());
+    let end = || faber_winproc::end_programs(&[&exe, &sidecar]).unwrap_or(0);
+    let startup = data.join(crate::STARTUP_LOG);
+    let launch = || launch_app(&exe, reopen == "tray");
+    let alive = |child: &mut Child| child.try_wait().map(|status| status.is_none());
+    let read = || read_startup(&startup);
+    if installer.is_empty() {
+        let [old_host] = extra else { return 1 };
+        let Some(pid) = old_host.to_str().and_then(|pid| pid.parse::<std::num::NonZeroU32>().ok()) else { return 1 };
+        if !signature.is_empty() || !version.is_empty() || pid.get() == std::process::id() {
+            return 1;
         }
+        let previous = (|| faber_winproc::process_ended(pid.get()), || programs_stopped(&[&exe], faber_winproc::processes));
+        return i32::from(!relaunch_direct_with(&data, &clock, previous, end, launch, alive, read));
     }
-    // Back in every case: the new version, or the same one when the install did not happen.
-    let mut again = Command::new(&exe);
-    if reopen == "tray" {
-        again.arg(AUTOSTART);
-    }
-    if let Err(error) = again.spawn() {
-        crate::log(&data, "relaunch-failed", &error.to_string());
+    if !extra.is_empty() {
         return 1;
     }
-    0
+    let free = || programs_stopped(&[&exe, &sidecar], faber_winproc::processes) == Some(true);
+    if !leftovers(&data, &clock, [CLOSE_WAIT, ENDED_WAIT], free, end) {
+        crate::log(&data, "reopen-failed", "could not confirm the previous Faber closed");
+        return 1;
+    }
+    // The programs are kept in this copy's own folder, made new for this install.
+    let installed = match std::env::current_exe().ok().and_then(|copy| copy.parent().map(Path::to_path_buf)) {
+        Some(here) => install_or_put_back(&[&exe, &sidecar], &here, &data, || run_installer(installer, signature, version, folder, &data)),
+        None => {
+            crate::log(&data, "install-failed", "no folder to keep Faber in");
+            Installed::NotRun
+        }
+    };
+    // After the install an unanswered process query no longer blocks: the new programs are in place, and leaving Faber
+    // closed is worse than starting it beside a program that is about to end.
+    let free = || programs_stopped(&[&exe, &sidecar], faber_winproc::processes) != Some(false);
+    finish_open(installed, &data, || flow::reopen(&data, &clock, free, launch, alive, read))
+}
+
+fn finish_open(installed: Installed, data: &Path, reopen: impl FnOnce() -> bool) -> i32 {
+    let reason = match installed {
+        Installed::StillRunning => "the installer was still running",
+        Installed::Unknown => "could not confirm the installer stopped",
+        Installed::Done | Installed::Failed | Installed::NotRun => return i32::from(!reopen()),
+    };
+    crate::log(data, "reopen-failed", reason);
+    1
+}
+
+fn launch_app(exe: &Path, tray: bool) -> io::Result<Child> {
+    let mut command = Command::new(exe);
+    if tray {
+        command.arg(AUTOSTART);
+    }
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).creation_flags(CREATE_NO_WINDOW).spawn()
+}
+
+fn read_startup(path: &Path) -> io::Result<String> {
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(error) => return Err(error),
+    };
+    let limit = crate::LOG_MAX as u64;
+    let start = file.metadata()?.len().saturating_sub(limit);
+    let mut tail = Vec::new();
+    // Include the preceding byte so a record that starts exactly at the boundary is kept.
+    file.seek(SeekFrom::Start(start.saturating_sub(1)))?;
+    file.take(limit + u64::from(start > 0)).read_to_end(&mut tail)?;
+    let tail = if start > 0 { tail.iter().position(|byte| *byte == b'\n').map_or(&[][..], |newline| &tail[newline + 1..]) } else { &tail };
+    Ok(String::from_utf8_lossy(tail).into_owned())
+}
+
+struct SystemClock(Instant);
+
+impl Clock for SystemClock {
+    fn now(&self) -> Duration {
+        self.0.elapsed()
+    }
+
+    fn sleep(&self, duration: Duration) {
+        std::thread::sleep(duration);
+    }
 }
 
 /// Waits for the old Faber to end; one still running after `CLOSE_WAIT` is ended (`end` returns how many processes), since
 /// both what comes next (the installer, or opening Faber again) need it gone. The person asked for the restart, or nobody
-/// was looking: its work was already saved and stopped before the hand-off.
-fn leftovers(data: &Path, waits: [Duration; 2], mut free: impl FnMut() -> bool, end: impl FnOnce() -> usize) {
-    if wait_until(waits[0], &mut free) {
-        return;
+/// was looking: its work was already saved and stopped before the hand-off. If it remains, the hand-off stops.
+fn leftovers(data: &Path, clock: &impl Clock, waits: [Duration; 2], mut free: impl FnMut() -> bool, end: impl FnOnce() -> usize) -> bool {
+    if poll(clock, waits[0], &mut free, |free| *free) {
+        return true;
     }
     let ended = end();
     crate::log(data, "install-wait", &format!("Faber was still closing; {ended} of its processes were ended"));
-    if !wait_until(waits[1], free) {
-        crate::log(data, "install-wait", "Faber still runs; the installer is tried anyway");
-    }
+    poll(clock, waits[1], free, |free| *free)
 }
 
-/// How the installer ended. Only `Failed` can have left the installed programs broken; one still running is left alone.
+/// How the installer ended. Only a confirmed failure allows putting the kept programs back.
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Installed {
     Done,
@@ -159,6 +252,7 @@ enum Installed {
     /// It did not start (a bad signature, no such file): nothing was touched.
     NotRun,
     StillRunning,
+    Unknown,
 }
 
 /// Runs `install` only once the installed programs are kept in `dir`, and puts them back when it fails and left them
@@ -321,30 +415,31 @@ fn run_installer(installer: &OsString, signature: &OsString, version: &OsString,
     let spawned = Command::new(installer).raw_arg(installer_line(folder)).creation_flags(CREATE_NO_WINDOW).spawn();
     drop(verified);
     match spawned {
-        Ok(mut child) => {
-            let mut status = None;
-            wait_until(INSTALL_WAIT, || {
-                status = child.try_wait().ok().flatten();
-                status.is_some()
-            });
-            match status {
-                Some(status) if status.success() => {
-                    crate::log(data, "installed", &format!("in {} ms", began.elapsed().as_millis()));
-                    Installed::Done
-                }
-                Some(status) => {
-                    crate::log(data, "install-failed", &format!("installer exit code {}", status.code().unwrap_or(-1)));
-                    Installed::Failed
-                }
-                None => {
-                    crate::log(data, "install-slow", "the installer still runs; Faber opens anyway");
-                    Installed::StillRunning
-                }
-            }
-        }
+        Ok(mut child) => wait_for_installer(data, &SystemClock(began), || child.try_wait()),
         Err(error) => {
             crate::log(data, "install-failed", &error.to_string());
             Installed::NotRun
+        }
+    }
+}
+
+fn wait_for_installer(data: &Path, clock: &impl Clock, query: impl FnMut() -> io::Result<Option<ExitStatus>>) -> Installed {
+    match poll(clock, INSTALL_WAIT, query, |status| matches!(status, Ok(Some(_)))) {
+        Ok(Some(status)) if status.success() => {
+            crate::log(data, "installed", &format!("in {} ms", clock.now().as_millis()));
+            Installed::Done
+        }
+        Ok(Some(status)) => {
+            crate::log(data, "install-failed", &format!("installer exit code {}", status.code().unwrap_or(-1)));
+            Installed::Failed
+        }
+        Ok(None) => {
+            crate::log(data, "install-slow", "the installer was still running at the deadline");
+            Installed::StillRunning
+        }
+        Err(error) => {
+            crate::log(data, "install-unknown", &format!("could not check the installer: {error}"));
+            Installed::Unknown
         }
     }
 }
@@ -438,7 +533,7 @@ fn installer_line(folder: &Path) -> String {
     format!("/S /UPDATE /D={}", folder.display())
 }
 
-/// No process runs `exe`: Windows refuses to open a running program for writing. Nothing is written.
+/// Windows refuses to open a running program for writing. Nothing is written.
 fn is_free(exe: &Path) -> bool {
     match std::fs::OpenOptions::new().write(true).open(exe) {
         Ok(_) => true,
@@ -446,28 +541,187 @@ fn is_free(exe: &Path) -> bool {
     }
 }
 
-fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> bool {
-    let began = Instant::now();
-    loop {
-        if done() {
-            return true;
-        }
-        if began.elapsed() >= limit {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(100));
+fn programs_stopped(programs: &[&Path], processes: impl FnOnce() -> io::Result<Vec<faber_winproc::ProcessInfo>>) -> Option<bool> {
+    let blocked: Vec<_> = programs.iter().filter(|exe| !is_free(exe)).map(|exe| exe.file_name().unwrap_or(exe.as_os_str())).collect();
+    // A file can also be read-only or held by an antivirus. Check the image names before assuming Faber is still running.
+    if blocked.is_empty() {
+        return Some(true);
     }
+    let list = processes().ok()?;
+    Some(!list.iter().any(|process| blocked.iter().any(|name| name.eq_ignore_ascii_case(OsStr::new(&process.name)))))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        COPY, Installed, KEPT, copy_new, finish, hold_folders, install_folder, install_or_put_back, installer_line, is_free, is_plain,
-        is_program, leftovers, relaunch, start, sweep_in, verify_copy, wait_until,
+        COPY, Installed, KEPT, copy_new, finish, finish_open, handoff_command, hold_folders, install_folder, install_or_put_back,
+        installer_line, is_free, is_plain, is_program, leftovers, programs_stopped, read_startup, relaunch, relaunch_direct_with, start,
+        sweep_in, verify_copy, wait_for_installer,
     };
-    use std::ffi::OsString;
+    use crate::flow::{Clock, FakeClock, poll};
+    use std::cell::Cell;
+    use std::ffi::{OsStr, OsString};
+    use std::io;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
+
+    #[test]
+    fn relaunch_waits_then_ends_a_hung_shell_before_launching() {
+        let data = tempfile::tempdir().unwrap();
+        let clock = FakeClock::default();
+        let ended = Cell::new(false);
+        let launched = Cell::new(false);
+        let released = super::CLOSE_WAIT + Duration::from_secs(1);
+        assert!(relaunch_direct_with(
+            data.path(),
+            &clock,
+            (|| true, || Some(ended.get() && clock.now() >= released)),
+            || {
+                assert_eq!(clock.now(), super::CLOSE_WAIT);
+                ended.set(true);
+                1
+            },
+            || {
+                assert_eq!(clock.now(), released);
+                launched.set(true);
+                Ok(())
+            },
+            |_| Ok(true),
+            || Ok(if launched.get() { "123 host ready\n" } else { "" }.into()),
+        ));
+        assert!(log(data.path()).contains("reopened in 0 ms"));
+    }
+
+    #[test]
+    fn relaunch_waits_for_the_old_host_and_retries_an_early_exit() {
+        let data = tempfile::tempdir().unwrap();
+        let clock = FakeClock::default();
+        let host_closed = Duration::from_secs(2);
+        let launches = Cell::new(0);
+        assert!(relaunch_direct_with(
+            data.path(),
+            &clock,
+            (|| clock.now() >= host_closed, || Some(true)),
+            || panic!("the old host should close on its own"),
+            || {
+                assert!(clock.now() >= host_closed);
+                launches.set(launches.get() + 1);
+                Ok(launches.get())
+            },
+            |attempt| Ok(*attempt == 2),
+            || Ok(if launches.get() == 2 { "123 host ready\n" } else { "" }.into()),
+        ));
+        assert_eq!(launches.get(), 2);
+        assert_eq!(clock.now(), host_closed);
+        let log = log(data.path());
+        assert!(log.contains("reopen-retry") && log.contains("reopened"));
+    }
+
+    #[test]
+    fn relaunch_still_tries_when_the_shell_cannot_be_queried() {
+        let data = tempfile::tempdir().unwrap();
+        let clock = FakeClock::default();
+        let launched = Cell::new(false);
+        assert!(relaunch_direct_with(
+            data.path(),
+            &clock,
+            (|| true, || if clock.now() < super::CLOSE_WAIT { Some(false) } else { None }),
+            || 1,
+            || {
+                assert_eq!(clock.now(), super::CLOSE_WAIT + super::ENDED_WAIT);
+                launched.set(true);
+                Ok(())
+            },
+            |_| Ok(true),
+            || Ok(if launched.get() { "123 host ready\n" } else { "" }.into()),
+        ));
+        assert!(log(data.path()).contains("reopened"));
+    }
+
+    #[test]
+    fn relaunch_reports_a_process_that_will_not_close() {
+        for host_ended in [false, true] {
+            let data = tempfile::tempdir().unwrap();
+            let clock = FakeClock::default();
+            assert!(!relaunch_direct_with::<()>(
+                data.path(),
+                &clock,
+                (
+                    || host_ended,
+                    || {
+                        assert!(host_ended, "the old host still owns the channel");
+                        Some(false)
+                    }
+                ),
+                || 0,
+                || panic!("the previous process is still running"),
+                |_| panic!("no app was launched"),
+                || panic!("no app was launched"),
+            ));
+            assert_eq!(clock.now(), super::CLOSE_WAIT + super::ENDED_WAIT);
+            assert!(log(data.path()).contains("reopen-failed could not confirm the previous Faber closed"));
+        }
+    }
+
+    #[test]
+    fn relaunch_reports_when_both_launches_fail() {
+        let data = tempfile::tempdir().unwrap();
+        let mut launches = 0;
+        assert!(!relaunch_direct_with::<()>(
+            data.path(),
+            &FakeClock::default(),
+            (|| true, || Some(true)),
+            || panic!("Faber already closed"),
+            || {
+                launches += 1;
+                Err(io::Error::other("launch denied"))
+            },
+            |_| panic!("no app was launched"),
+            || Ok(String::new()),
+        ));
+        assert_eq!(launches, 2);
+        assert!(log(data.path()).contains("reopen-failed could not start Faber: launch denied"));
+    }
+
+    #[test]
+    fn startup_reads_the_newest_complete_lines_even_when_the_log_is_oversized() {
+        let data = tempfile::tempdir().unwrap();
+        let path = data.path().join(crate::STARTUP_LOG);
+        assert_eq!(read_startup(&path).unwrap(), "");
+        let host = "123 host engine=3ms\n";
+        std::fs::write(&path, host).unwrap();
+        assert_eq!(read_startup(&path).unwrap(), host);
+        let filler = "x".repeat(crate::LOG_MAX - "\n".len() - host.len() - 1);
+        // The byte window starts inside a multibyte character in the dropped line.
+        std::fs::write(&path, format!("{}é{filler}\n{host}", "old".repeat(crate::LOG_MAX))).unwrap();
+        assert!(read_startup(&path).unwrap() == host);
+        let rest = "x".repeat(crate::LOG_MAX - host.len());
+        std::fs::write(&path, format!("old\n{host}{rest}")).unwrap();
+        assert!(read_startup(&path).unwrap().starts_with(host));
+    }
+
+    #[test]
+    fn the_installed_helper_gets_the_old_host_pid_only_for_reopening() {
+        let runner = Path::new(r"C:\Faber\resources\faber-sidecar.exe");
+        let exe = Path::new(r"C:\Faber\faber.exe");
+        let data = Path::new(r"C:\Faber Data");
+        let reopen = handoff_command(runner, [OsStr::new(""); 3], exe, data, true, 42);
+        assert_eq!(reopen.get_program(), runner);
+        assert!(reopen.get_args().eq([super::FLAG, "", "", "", exe.to_str().unwrap(), data.to_str().unwrap(), "tray", "42"]));
+
+        let install = handoff_command(runner, ["setup.exe", "sig", "1.2.3"].map(OsStr::new), exe, data, false, 42);
+        assert!(install.get_args().eq([super::FLAG, "setup.exe", "sig", "1.2.3", exe.to_str().unwrap(), data.to_str().unwrap(), "window"]));
+    }
+
+    #[test]
+    fn finish_refuses_an_invalid_reopen_pid_or_install_with_a_pid() {
+        for (installer, signature, version, host) in
+            [("", "", "", "bad"), ("", "", "", "0"), ("", "", "", ""), ("", "sig", "", "42"), ("setup.exe", "sig", "1.2.3", "42")]
+        {
+            let args = [installer, signature, version, r"C:\Faber\faber.exe", r"C:\Faber Data", "tray", host].map(OsString::from);
+            assert_eq!(finish(&args), 1);
+        }
+    }
 
     #[test]
     fn the_installer_lands_in_the_same_folder_with_d_last_and_unquoted() {
@@ -487,13 +741,33 @@ mod tests {
     }
 
     #[test]
+    fn a_file_held_by_another_program_does_not_look_like_faber_running() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let data = tempfile::tempdir().unwrap();
+        let exe = data.path().join("faber.exe");
+        std::fs::write(&exe, b"MZ").unwrap();
+        let _held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&exe).unwrap();
+        assert!(!is_free(&exe));
+        assert_eq!(programs_stopped(&[&exe], || Ok(vec![])), Some(true));
+        assert_eq!(programs_stopped(&[&exe], || Err(std::io::Error::other("query denied"))), None);
+        let running = faber_winproc::ProcessInfo { pid: 12, parent: 0, name: "FABER.EXE".into(), created: 0, cpu: 0, private_bytes: 0 };
+        assert_eq!(programs_stopped(&[&exe], || Ok(vec![running])), Some(false));
+    }
+
+    #[test]
     fn the_wait_ends_when_the_program_is_free_or_the_limit_passes() {
         let mut calls = 0;
-        assert!(wait_until(Duration::from_secs(5), || {
-            calls += 1;
-            calls == 3
-        }));
-        assert!(!wait_until(Duration::from_millis(150), || false));
+        let clock = FakeClock::default();
+        assert!(poll(
+            &clock,
+            Duration::from_secs(5),
+            || {
+                calls += 1;
+                calls == 3
+            },
+            |free| *free,
+        ));
+        assert!(!poll(&clock, Duration::from_millis(150), || false, |free| *free));
     }
 
     #[test]
@@ -709,13 +983,27 @@ mod tests {
 
     #[test]
     fn a_finished_or_running_install_is_never_undone() {
-        for outcome in [Installed::Done, Installed::StillRunning] {
+        for outcome in [Installed::Done, Installed::StillRunning, Installed::Unknown] {
             let (_root, exe, sidecar, data, here) = installed();
             install_or_put_back(&[&exe, &sidecar], &here, &data, || {
                 std::fs::write(&exe, b"MZ new program").unwrap();
                 outcome
             });
             assert_eq!(std::fs::read(&exe).unwrap(), b"MZ new program", "{outcome:?}");
+        }
+    }
+
+    #[test]
+    fn a_running_or_unqueryable_installer_blocks_reopening() {
+        for (result, outcome, stage) in
+            [(Ok(None), Installed::StillRunning, "install-slow"), (Err("query denied"), Installed::Unknown, "install-unknown")]
+        {
+            let data = tempfile::tempdir().unwrap();
+            let outcome_seen = wait_for_installer(data.path(), &FakeClock::default(), || result.map_err(std::io::Error::other));
+            assert_eq!(outcome_seen, outcome);
+            assert_eq!(finish_open(outcome_seen, data.path(), || panic!("installer may still replace files")), 1);
+            let log = log(data.path());
+            assert!(log.contains(stage) && log.contains("reopen-failed"));
         }
     }
 
@@ -749,20 +1037,22 @@ mod tests {
         let short = [Duration::from_millis(150), Duration::from_secs(2)];
         // 2026-11-04: the window never closed, so the installer met it and failed. Now it is ended after the wait.
         let ended = std::cell::Cell::new(false);
-        leftovers(
+        let clock = FakeClock::default();
+        assert!(leftovers(
             data.path(),
+            &clock,
             short,
             || ended.get(),
             || {
                 ended.set(true);
                 3
             },
-        );
+        ));
         assert!(ended.get());
         assert!(log(data.path()).contains("3 of its processes were ended"));
         // A Faber that closes by itself is never ended.
         let data = tempfile::tempdir().unwrap();
-        leftovers(data.path(), short, || true, || panic!("nothing is ended when Faber closed in time"));
+        assert!(leftovers(data.path(), &clock, short, || true, || panic!("nothing is ended when Faber closed in time")));
         assert_eq!(log(data.path()), "");
     }
 

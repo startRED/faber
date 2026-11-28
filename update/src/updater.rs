@@ -247,20 +247,40 @@ impl Release for Live {
         }
     }
 
-    /// Opens Faber again when the install did not start, and ends this process. The engine was shut down for an install that
-    /// did not happen, so this process is no good any more; the new one starts clean with the same data.
+    /// Opens Faber again when the install did not start: the engine has already shut down.
     fn relaunch(&self) {
         #[cfg(windows)]
         {
-            if let Err(error) = crate::handoff::relaunch(&self.inner.install_dir, &self.inner.data_dir, self.reopen == Reopen::Tray) {
-                self.inner.note("relaunch-failed", &error);
-            }
+            let inner = &self.inner;
+            let tray = self.reopen == Reopen::Tray;
+            self.relaunch_with(
+                || crate::handoff::relaunch(&inner.install_dir, &inner.data_dir, tray),
+                || crate::handoff::relaunch_direct(&inner.install_dir, &inner.data_dir, tray),
+                || std::process::exit(0),
+            );
         }
+        #[cfg(not(windows))]
         self.end();
     }
 }
 
 impl Live {
+    #[cfg(windows)]
+    fn relaunch_with(
+        &self,
+        helper: impl FnOnce() -> Result<(), String>,
+        direct: impl FnOnce() -> Result<(), String>,
+        exit: impl FnOnce() + Send + 'static,
+    ) {
+        if let Err(error) = helper() {
+            self.inner.note("reopen-helper-failed", &error);
+            if let Err(error) = direct() {
+                self.inner.note("reopen-failed", &error);
+            }
+        }
+        self.end_with(exit);
+    }
+
     /// The app ends at once, then this process: the copy of the program that runs the installer waits for both.
     fn end(&self) {
         self.end_with(|| std::process::exit(0));
@@ -269,22 +289,27 @@ impl Live {
     fn end_with(&self, finish: impl FnOnce() + Send + 'static) {
         let closed = lock(&self.closed).take();
         let inner = self.inner.clone();
-        finish_after_flush(self.inner.app.quit(), move |result| {
-            let _closed = closed;
-            if let Err(error) = result {
-                inner.note("quit-not-flushed", &error.to_string());
-            }
-            finish();
-        });
+        let app = inner.app.clone();
+        finish_after_flush(
+            move || app.quit(),
+            move |result| {
+                let _closed = closed;
+                if let Err(error) = result {
+                    inner.note("quit-not-flushed", &error.to_string());
+                }
+                finish();
+            },
+        );
     }
 }
 
 fn finish_after_flush(
-    flushed: std::sync::mpsc::Receiver<()>,
+    quit: impl FnOnce() -> std::sync::mpsc::Receiver<()> + Send + 'static,
     finish: impl FnOnce(Result<(), std::sync::mpsc::RecvTimeoutError>) + Send + 'static,
 ) {
-    std::thread::spawn(move || {
-        finish(flushed.recv_timeout(QUIT_GRACE));
+    // The runtime waits for this task even if the closing shell's EOF ends the host's main loop.
+    tokio::task::spawn_blocking(move || {
+        finish(quit().recv_timeout(QUIT_GRACE));
     });
 }
 
@@ -427,6 +452,7 @@ mod tests {
     struct Fake {
         told: Mutex<Vec<Status>>,
         visible: AtomicBool,
+        quit_called: AtomicBool,
     }
 
     #[cfg(windows)]
@@ -442,6 +468,7 @@ mod tests {
         }
         fn shut_down(&self, _: bool) {}
         fn quit(&self) -> std::sync::mpsc::Receiver<()> {
+            self.quit_called.store(true, Ordering::SeqCst);
             std::sync::mpsc::channel().1
         }
         fn emit(&self, status: Status) {
@@ -466,9 +493,12 @@ mod tests {
             writer.store(true, Ordering::SeqCst);
             let _ = sent.send(());
         });
-        finish_after_flush(flushed, move |_| {
-            finished.send(wrote.load(Ordering::SeqCst)).unwrap();
-        });
+        finish_after_flush(
+            move || flushed,
+            move |_| {
+                finished.send(wrote.load(Ordering::SeqCst)).unwrap();
+            },
+        );
         tokio::task::yield_now().await;
         for _ in 0..20 {
             if let Ok(wrote) = done.try_recv() {
@@ -480,8 +510,8 @@ mod tests {
         panic!("the writer must flush before the process ends");
     }
 
-    #[test]
-    fn live_end_waits_for_quit_acknowledgement() {
+    #[tokio::test]
+    async fn live_end_waits_for_quit_acknowledgement() {
         struct PendingQuit(Mutex<Option<std::sync::mpsc::Receiver<()>>>);
         impl App for PendingQuit {
             fn previews(&self) -> bool {
@@ -533,6 +563,34 @@ mod tests {
             let log = std::fs::read_to_string(data.path().join("update.log")).unwrap();
             assert!(log.contains("quit-not-flushed"));
             std::fs::remove_file(data.path().join("update.log")).unwrap();
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_failed_copy_starts_the_installed_helper_before_requesting_quit() {
+        for fails in [false, true] {
+            let app = Arc::new(Fake::default());
+            let (updater, data, _program) = updater(&app);
+            let live = Live::new(&updater.0, Reopen::Tray);
+            let (sent, received) = std::sync::mpsc::channel();
+            let direct = sent.clone();
+            let host = app.clone();
+            live.relaunch_with(
+                || Err("the update helper could not start".into()),
+                move || {
+                    direct.send(!host.quit_called.load(Ordering::SeqCst)).unwrap();
+                    if fails { Err("the installed helper could not start".into()) } else { Ok(()) }
+                },
+                move || sent.send(false).unwrap(),
+            );
+            assert!(received.recv_timeout(Duration::from_secs(2)).unwrap(), "the installed helper must start before quit");
+            assert!(!received.recv_timeout(Duration::from_secs(2)).unwrap());
+            assert!(app.quit_called.load(Ordering::SeqCst));
+            let log = std::fs::read_to_string(data.path().join("update.log")).unwrap();
+            assert!(log.contains("reopen-helper-failed the update helper could not start"));
+            assert_eq!(log.contains("reopen-failed the installed helper could not start"), fails);
+            assert!(!log.contains("reopened"), "starting the helper does not prove the app reopened");
         }
     }
 

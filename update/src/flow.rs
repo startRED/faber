@@ -2,6 +2,8 @@
 
 use crate::{Phase, gate::Who};
 use std::time::Duration;
+#[cfg(any(windows, test))]
+use std::{io, path::Path};
 use tokio::time::timeout;
 
 pub(crate) fn fetch_succeeded(found: bool, downloaded: bool) -> bool {
@@ -40,7 +42,7 @@ pub enum Start {
     Installed,
     /// Work began, or the person started typing, during the download: the update waits for the idle install.
     Waits,
-    /// The installer did not start; Faber was relaunched.
+    /// The installer did not start; reopening Faber was requested.
     Failed,
 }
 
@@ -101,7 +103,7 @@ pub enum Idle {
     /// Not idle, or something is running: nothing was touched.
     Waited,
     Installed,
-    /// The installer did not start; Faber was relaunched.
+    /// The installer did not start; reopening Faber was requested.
     Failed,
 }
 
@@ -124,6 +126,114 @@ pub fn idle_install(
             relaunch();
             Idle::Failed
         }
+    }
+}
+
+#[cfg(any(windows, test))]
+pub(crate) trait Clock {
+    fn now(&self) -> Duration;
+    fn sleep(&self, duration: Duration);
+}
+
+/// Returns the last observation, including when the deadline passes.
+#[cfg(any(windows, test))]
+pub(crate) fn poll<T>(clock: &impl Clock, limit: Duration, mut query: impl FnMut() -> T, done: impl Fn(&T) -> bool) -> T {
+    let began = clock.now();
+    loop {
+        let result = query();
+        let left = limit.saturating_sub(clock.now() - began);
+        if done(&result) || left.is_zero() {
+            return result;
+        }
+        clock.sleep(left.min(Duration::from_millis(250)));
+    }
+}
+
+#[cfg(any(windows, test))]
+const REOPEN_WAIT: Duration = Duration::from_secs(60);
+#[cfg(any(windows, test))]
+const REOPEN_CLOSE_WAIT: Duration = Duration::from_secs(5);
+
+#[cfg(any(windows, test))]
+pub(crate) fn reopen<P>(
+    data: &Path,
+    clock: &impl Clock,
+    free: impl Fn() -> bool,
+    mut launch: impl FnMut() -> io::Result<P>,
+    mut alive: impl FnMut(&mut P) -> io::Result<bool>,
+    mut read_startup: impl FnMut() -> io::Result<String>,
+) -> bool {
+    let began = clock.now();
+    let mut attempt = || {
+        if !poll(clock, REOPEN_CLOSE_WAIT, &free, |free| *free) {
+            return Err("could not confirm the previous Faber closed".to_string());
+        }
+        let before = read_startup().ok();
+        let mut child = launch().map_err(|error| format!("could not start Faber: {error}"))?;
+        let (running, host_started) = poll(
+            clock,
+            REOPEN_WAIT,
+            || {
+                let running = alive(&mut child);
+                let host_started = !matches!(running, Ok(false))
+                    && before.as_deref().is_some_and(|prior| read_startup().is_ok_and(|log| new_host_line(prior, &log)));
+                (running, host_started)
+            },
+            |(running, host_started)| *host_started || matches!(running, Ok(false)),
+        );
+        match running {
+            // If the log is unavailable, a child still running at the deadline survived single-instance startup.
+            Ok(true) => Ok(()),
+            Ok(false) => Err("Faber exited before startup was confirmed".into()),
+            Err(_) if host_started => Ok(()),
+            Err(error) => Err(format!("could not check whether Faber reopened: {error}")),
+        }
+    };
+    match attempt().or_else(|error| {
+        crate::log(data, "reopen-retry", &error);
+        attempt()
+    }) {
+        Ok(()) => {
+            crate::log(data, "reopened", &format!("in {} ms", (clock.now() - began).as_millis()));
+            true
+        }
+        Err(error) => {
+            crate::log(data, "reopen-failed", &error);
+            false
+        }
+    }
+}
+
+/// Compare complete records across log trimming and same-second starts with identical text.
+#[cfg(any(windows, test))]
+fn new_host_line(before: &str, after: &str) -> bool {
+    if before == after {
+        return false;
+    }
+    let Some(latest) = host_lines(after).last() else { return false };
+    host_lines(after).filter(|line| *line == latest).count() > host_lines(before).filter(|line| *line == latest).count()
+}
+
+#[cfg(any(windows, test))]
+fn host_lines(log: &str) -> impl Iterator<Item = &str> {
+    log.split_inclusive('\n').filter(|line| {
+        line.ends_with('\n')
+            && line.split_once(" host ").is_some_and(|(secs, _)| !secs.is_empty() && secs.bytes().all(|b| b.is_ascii_digit()))
+    })
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct FakeClock(std::cell::Cell<Duration>);
+
+#[cfg(test)]
+impl Clock for FakeClock {
+    fn now(&self) -> Duration {
+        self.0.get()
+    }
+
+    fn sleep(&self, duration: Duration) {
+        self.0.set(self.now() + duration);
     }
 }
 
@@ -222,6 +332,109 @@ mod tests {
 
     async fn start(release: &Fake) -> Start {
         update_on_start(release, WAIT, WAIT).await
+    }
+
+    fn update_log(data: &Path) -> String {
+        std::fs::read_to_string(data.join("update.log")).unwrap()
+    }
+
+    #[test]
+    fn an_app_that_exits_at_once_is_started_again_after_it_releases_its_files() {
+        let data = tempfile::tempdir().unwrap();
+        let clock = FakeClock::default();
+        let launches = Cell::new(0);
+        let released_after = Duration::from_millis(750);
+        assert!(reopen(
+            data.path(),
+            &clock,
+            || launches.get() == 0 || clock.now() >= released_after,
+            || {
+                let attempt = launches.get() + 1;
+                launches.set(attempt);
+                Ok(attempt)
+            },
+            |attempt| Ok(*attempt == 2),
+            || {
+                let old = "1700000000 host engine=12ms\n";
+                // The second start writes the same host line in the same second.
+                Ok(if launches.get() == 2 { old.repeat(2) } else { old.into() })
+            },
+        ));
+        assert_eq!(launches.get(), 2);
+        let log = update_log(data.path());
+        assert!(log.contains("reopen-retry Faber exited before startup was confirmed"));
+        assert!(log.contains("reopened in 750 ms"));
+    }
+
+    #[test]
+    fn without_startup_proof_the_helper_logs_failure_after_one_retry() {
+        let data = tempfile::tempdir().unwrap();
+        let clock = FakeClock::default();
+        let mut launches = 0;
+        assert!(!reopen(
+            data.path(),
+            &clock,
+            || true,
+            || {
+                launches += 1;
+                Ok(())
+            },
+            |_| Err(io::Error::other("query denied")),
+            || Ok("1700000000 host engine=12ms\n".into()),
+        ));
+        assert_eq!(launches, 2);
+        assert_eq!(clock.now(), 2 * REOPEN_WAIT);
+        let log = update_log(data.path());
+        assert!(log.contains("reopen-failed could not check whether Faber reopened: query denied"));
+        assert!(!log.contains("reopened in"));
+    }
+
+    #[test]
+    fn a_new_host_line_logs_reopened_without_waiting_for_the_deadline() {
+        let data = tempfile::tempdir().unwrap();
+        let clock = FakeClock::default();
+        let started_at = Duration::from_millis(500);
+        let mut launches = 0;
+        assert!(reopen(
+            data.path(),
+            &clock,
+            || true,
+            || {
+                launches += 1;
+                Ok(())
+            },
+            |_| Ok(true),
+            || {
+                let log = if clock.now() >= started_at {
+                    "1700000001 host engine=14ms\n"
+                } else {
+                    "1699999980 shown saved=2ms\n1700000000 host engine=12ms\n"
+                };
+                Ok(log.into())
+            },
+        ));
+        assert_eq!(launches, 1);
+        assert!(update_log(data.path()).contains("reopened in 500 ms"));
+    }
+
+    #[test]
+    fn an_old_or_partial_host_line_does_not_prove_startup() {
+        let data = tempfile::tempdir().unwrap();
+        let clock = FakeClock::default();
+        assert!(reopen(
+            data.path(),
+            &clock,
+            || true,
+            || Ok(()),
+            |_| Ok(true),
+            || {
+                let old = "1699999999 host engine=27ms\n";
+                let log = if clock.now().is_zero() { format!("{old}1700000000 host engine=12ms\n") } else { old.into() };
+                Ok(log + "1700000001 host engine=14ms")
+            },
+        ));
+        assert_eq!(clock.now(), REOPEN_WAIT, "only the process surviving to the deadline proves startup");
+        assert!(update_log(data.path()).contains("reopened in 60000 ms"));
     }
 
     #[tokio::test]
