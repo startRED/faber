@@ -26,7 +26,7 @@ const glyphs: Record<string, GlyphName> = {
   design: 'palette', plan: 'list', database: 'database', payments: 'card', platform: 'cloud', auth: 'lock', measure: 'gauge',
   mobile: 'phone', documents: 'sheet', marketing: 'megaphone', games: 'gamepad', 'game-design': 'dice', code: 'terminal', services: 'cloud',
 };
-type Filter = 'all' | 'skills' | 'plugins' | 'servers' | 'runtimes' | 'pipelines' | 'installed';
+type Filter = 'all' | 'skills' | 'plugins' | 'servers' | 'runtimes' | 'pipelines' | 'installed' | 'updates';
 const words = (key: string, fallback: string) => key in en ? t(key as Key) : fallback;
 const plugin = (row: ToolRow) => !!row.pluginParts?.length;
 const needsNode = (row: ToolRow) => (row.server || row.requiresNode) && row.nodeAvailable === false;
@@ -47,8 +47,13 @@ const tone = (row: ToolRow) => row.status || unavailable(row) ? 'warn' : !row.in
 const mine = (row: ToolRow) => row.installed || !!row.status;
 const hasCopy = (row: ToolRow) => row.hasCopy ?? !!(row.installed || row.status);
 const removedCopy = (row: ToolRow) => typeof row.removedEnabled === 'boolean';
-type Batch = 'install' | 'on' | 'off' | 'remove';
+// An installed copy whose checked pin moved: only versions Faber checked are ever offered (R33).
+const outdated = (row: ToolRow) => hasCopy(row) && row.status === 'error.tools.update' && !removedCopy(row);
+type Batch = 'install' | 'on' | 'off' | 'remove' | 'update';
+// The actions that replace or delete files ask once for the whole selection.
+type Asked = 'remove' | 'update';
 const fits = (row: ToolRow, action: Batch) => action === 'install' ? !unavailable(row) && !hasCopy(row) && !removedCopy(row)
+  : action === 'update' ? outdated(row)
   : action === 'remove' ? row.installed : row.installed && !row.status && (row.enabled === false) === (action === 'on');
 const partsSummary =(row: ToolRow) => (['skill', 'command', 'agent', 'server'] as const).flatMap((kind) => {
   const n = row.pluginParts?.filter((part) => part.kind === kind).length ?? 0;
@@ -93,8 +98,12 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
   const [revision, setRevision] = createSignal(0);
   const [picked, setPicked] = createSignal<string[]>([]);
   const [progress, setProgress] = createSignal<{ done: number; total: number }>();
-  const [confirmingBatch, setConfirmingBatch] = createSignal(false);
+  const [confirmingBatch, setConfirmingBatch] = createSignal<Asked>();
   const [batchError, setBatchError] = createSignal<{ text: string; action: Batch }>();
+  // Stop asked during a batch: the item in hand finishes, the rest stay selected.
+  const [stopping, setStopping] = createSignal(false);
+  // "Check for updates": what the one look found, shown until the next press or the next batch.
+  const [looked, setLooked] = createSignal<{ busy?: boolean; updates?: number; app?: boolean; error?: string }>();
   const [projectChoice, setProjectChoice] = createSignal(props.projectId ?? '');
   // The open shelf: public directories, asked only when the person submits the search, never on open or while typing.
   const [found, setFound] = createSignal<{ query: string; hits?: OpenHit[]; error?: string }>();
@@ -163,7 +172,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     }
     if (!event.defaultPrevented && event.key === 'Escape' && selected()) { event.preventDefault(); if (replacement()) { setReplacement(undefined); ++preparation; queueMicrotask(focusDetail); } else if (confirming()) setConfirming(false); else back(); }
     // The search field keeps its own Escape, which clears what was typed.
-    else if (!event.defaultPrevented && event.key === 'Escape' && event.target !== search && chosen().length && !busy()) { event.preventDefault(); if (confirmingBatch()) setConfirmingBatch(false); else setPicked([]); }
+    else if (!event.defaultPrevented && event.key === 'Escape' && event.target !== search && chosen().length && !busy()) { event.preventDefault(); if (confirmingBatch()) setConfirmingBatch(undefined); else setPicked([]); }
   };
   window.addEventListener('keydown', key);
   onCleanup(() => { gone = true; stop?.(); window.removeEventListener('keydown', key); });
@@ -185,6 +194,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
       && (filter() !== 'runtimes' || !!row.runtime)
       && (filter() !== 'plugins' || plugin(row))
       && (filter() !== 'installed' || row.installed || row.status)
+      && (filter() !== 'updates' || outdated(row))
       && (!text || `${row.id} ${catalogName(row.id)} ${row.repo} ${words(`tools.${row.id}`, row.id)} ${words(`catalog.job.${row.job}`, row.job)} ${words(`catalog.job.${job(row)}`, job(row))}`.toLocaleLowerCase().includes(text)));
     // One list pages both shelves, so each item shows once: what the person has first, then the rest of Faber Kit.
     return [...found.filter(mine), ...found.filter((row) => !mine(row))];
@@ -239,11 +249,11 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
   const site = (row: ToolRow) => void api.openLink(row.home).catch((e) => setError(failureText(e)));
   // Rows the engine no longer lists drop out of the selection by themselves.
   const chosen = createMemo(() => rows.filter((row) => picked().includes(row.id)));
-  const pick = (id: string, on: boolean) => { setConfirmingBatch(false); setBatchError(undefined); setPicked((list) => on ? [...list, id] : list.filter((x) => x !== id)); };
+  const pick = (id: string, on: boolean) => { setConfirmingBatch(undefined); setBatchError(undefined); setPicked((list) => on ? [...list, id] : list.filter((x) => x !== id)); };
   const allShown = () => visible().length > 0 && visible().every((row) => picked().includes(row.id));
   const pickShown = () => {
     const ids = visible().map((row) => row.id), all = allShown();
-    setConfirmingBatch(false); setBatchError(undefined);
+    setConfirmingBatch(undefined); setBatchError(undefined);
     setPicked((list) => all ? list.filter((id) => !ids.includes(id)) : [...new Set([...list, ...ids])]);
   };
   const focusCard = (id: string) => queueMicrotask(() => [...document.querySelectorAll<HTMLElement>('[data-catalog-card]')].find((el) => el.dataset.catalogCard === id)?.focus());
@@ -253,16 +263,30 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
     const ids = chosen().filter((row) => fits(row, action)).map((row) => row.id);
     if (busy() || !ids.length) return;
     ++read;
-    setBusy(true); setError(undefined); setRetry(undefined); setBatchError(undefined); setConfirmingBatch(false);
+    setBusy(true); setError(undefined); setRetry(undefined); setBatchError(undefined); setConfirmingBatch(undefined); setStopping(false); setLooked(undefined);
     // Undo keeps only the latest single removal: a group removal says so in its question, and any group action on the
     // item waiting for Undo makes that Undo stale.
     if (action === 'remove' || ids.includes(removed()?.id ?? '')) setRemoved(undefined);
     const done: string[] = [];
     let reason = '';
+    let stopped = 0;
     for (const [index, id] of ids.entries()) {
       if (gone) return;
+      if (stopping()) { stopped = ids.length - index; break; }
       setProgress({ done: index + 1, total: ids.length });
       try {
+        // An update is the single item's review and replacement in one step: a fresh plan each time, never a stale one,
+        // and each item through its own journal, so a failure or a crash never undoes the items already done.
+        if (action === 'update') {
+          const plan = await api.toolsPrepareReplacement(id);
+          // Already at the checked pin (the agent updated it meanwhile): replacing again would only overwrite its backup.
+          if (plan.from !== plan.to) await api.toolsReplace(plan.plan);
+          if (gone) return;
+          done.push(id);
+          const at = rows.findIndex((r) => r.id === id);
+          if (at >= 0) setRows(at, { installed: true, hasCopy: true, enabled: plan.enabled, status: undefined, version: plan.to });
+          continue;
+        }
         if (action === 'install') await api.toolsInstall(id);
         else if (action === 'remove') await api.toolsRemove(id);
         else await api.toolsSetEnabled(id, action === 'on');
@@ -275,14 +299,41 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
       } catch (err) { reason = failureText(err); }
     }
     if (gone) return;
-    const failed = ids.length - done.length;
-    setProgress(undefined);
+    const failed = ids.length - done.length - stopped;
+    setProgress(undefined); setStopping(false);
     setPicked((list) => list.filter((id) => !done.includes(id)));
     if (failed) setBatchError({ text: `${t('catalog.batchFailed', { n: failed })} ${reason}`, action });
+    else if (stopped) setBatchError({ text: t('catalog.batchStopped', { n: stopped }), action });
+    else if (action === 'update' && filter() === 'updates') queueMicrotask(() => search?.focus());
     else focusCard(ids[0]);
     setRevision((v) => v + 1);
     setBusy(false);
     if (refreshAfterAction) { refreshAfterAction = false; void refresh(); }
+  };
+  // One look: the inventory read again against the checked pins, and the app's own update check, which brings newer
+  // checked pins with it. Nothing downloads from an item's source here.
+  const lookForUpdates = async () => {
+    if (busy() || looked()?.busy) return;
+    setLooked({ busy: true }); setError(undefined); setRetry(undefined);
+    const current = ++read;
+    const app = api.updateCheck().then((status) => status.phase === 'ready', () => false);
+    try {
+      const list = await api.toolsList();
+      const ready = await app;
+      // A batch that started meanwhile changes what this look found: its answer is dropped, never shown stale.
+      if (gone || busy()) { if (!gone) setLooked(undefined); return; }
+      if (current === read) { setRows(reconcile(list)); rememberRemoved(list); setRevision((v) => v + 1); }
+      const updates = list.filter(outdated).length;
+      setLooked({ updates, app: ready });
+      if (updates) { setFilter('updates'); setPage(0); }
+    } catch (err) { if (!gone) setLooked({ error: failureText(err) }); }
+  };
+  const updateAll = () => {
+    if (busy()) return;
+    setBatchError(undefined);
+    setPicked(rows.filter(outdated).map((row) => row.id));
+    setConfirmingBatch('update');
+    queueMicrotask(() => cancelBatch?.focus());
   };
   const focusDetail = () => {
     detail?.focus({ preventScroll: true });
@@ -381,7 +432,7 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
               <RuntimeInfo row={row} />
               <span class="catalog-state">{state(row)}</span>
             </button>
-            <input type="checkbox" class="catalog-pick" aria-label={t('catalog.pick', { name: catalogName(row.id) })} checked={picked().includes(row.id)} onChange={(e) => pick(row.id, e.currentTarget.checked)} />
+            <input type="checkbox" class="catalog-pick" disabled={!!progress()} aria-label={t('catalog.pick', { name: catalogName(row.id) })} checked={picked().includes(row.id)} onChange={(e) => pick(row.id, e.currentTarget.checked)} />
             <button class="iconbtn catalog-site" aria-label={t('catalog.openSite', { repo: row.repo })} title={t('catalog.openSite', { repo: row.repo })} onClick={() => site(row)}><Icon name="external" small /></button>
             <Show when={fits(row, 'install')}><button class="btn secondary catalog-quick" aria-label={t('catalog.installName', { name: catalogName(row.id) })} onClick={() => void change(row.id, 'install').then((done) => done && focusCard(row.id))}><Icon name="download" small />{t('catalog.install')}</button></Show>
             <Show when={needsUv(row)}><button class="link catalog-quick" onClick={() => void api.openLink('https://docs.astral.sh/uv/getting-started/installation/').catch((e) => setError(failureText(e)))}>{t('catalog.getUv')}</button></Show>
@@ -408,17 +459,28 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
           </header>
           <div class="catalog-bar">
             <div class="catalog-filters" role="group" aria-label={t('catalog.filter')}>
-              <For each={['all', 'skills', ...(rows.some(plugin) ? ['plugins' as const] : []), 'servers', ...(rows.some((row) => row.runtime) ? ['runtimes' as const] : []), 'pipelines', 'installed'] as const}>{(kind) => <button class="pill" data-pipeline-filter={kind === 'pipelines' ? '' : undefined} aria-pressed={filter() === kind} onClick={() => { setFilter(kind); setPage(0); }}>{t(`catalog.${kind}`)}</button>}</For>
+              <For each={['all', 'skills', ...(rows.some(plugin) ? ['plugins' as const] : []), 'servers', ...(rows.some((row) => row.runtime) ? ['runtimes' as const] : []), 'pipelines', 'installed', ...(rows.some(outdated) || filter() === 'updates' ? ['updates' as const] : [])] as const}>{(kind) => <button class="pill" data-pipeline-filter={kind === 'pipelines' ? '' : undefined} data-updates-filter={kind === 'updates' ? '' : undefined} aria-pressed={filter() === kind} onClick={() => { setFilter(kind); setPage(0); }}>{kind === 'updates' ? t('catalog.updates', { n: rows.filter(outdated).length }) : t(`catalog.${kind}`)}</button>}</For>
             </div>
+            <button class="btn" data-catalog-check disabled={busy() || !!looked()?.busy || loading()} onClick={() => void lookForUpdates()}><Show when={looked()?.busy} fallback={<Icon name="retry" small />}><StateGlyph state="working" small /></Show>{t(looked()?.busy ? 'catalog.checking' : 'catalog.checkUpdates')}</button>
           </div>
+          <Show when={looked() && !looked()!.busy ? looked() : undefined}>{(seen) => <p class="catalog-check-state" role="status" data-catalog-looked>
+            {seen().error ?? (seen().updates ? t('catalog.updatesFound', { n: seen().updates! }) : t('catalog.upToDate'))}
+            <Show when={seen().app}> {t('catalog.appUpdateReady')}</Show>
+          </p>}</Show>
+          <Show when={filter() === 'updates' && !loading()}><div class="catalog-updates" data-catalog-updates>
+            <p class="hint">{t('catalog.onlyChecked')}</p>
+            <Show when={rows.some(outdated)} fallback={<div class="catalog-empty" role="status"><Peek scene="catalogEmpty" /><p>{t('catalog.upToDate')}</p></div>}>
+              <button class="btn primary" data-catalog-update-all disabled={busy()} onClick={updateAll}>{t('catalog.updateAll', { n: rows.filter(outdated).length })}</button>
+            </Show>
+          </div></Show>
           <Show when={loading() && filter() !== 'pipelines'}><div class="catalog-empty" role="status"><Peek /><p>{t('catalog.loading')}</p></div></Show>
-          <Show when={!workflows().length && (filter() === 'pipelines' || (filter() !== 'installed' && !loading() && !matching().length && !error() && !shelf()?.hits?.length))}><div class="catalog-empty" role="status"><Peek scene={query().trim() ? 'noResults' : 'catalogEmpty'} /><p>{t(query().trim() ? 'catalog.noMatch' : 'catalog.empty')}</p></div></Show>
+          <Show when={!workflows().length && (filter() === 'pipelines' || (filter() !== 'installed' && filter() !== 'updates' && !loading() && !matching().length && !error() && !shelf()?.hits?.length))}><div class="catalog-empty" role="status"><Peek scene={query().trim() ? 'noResults' : 'catalogEmpty'} /><p>{t(query().trim() ? 'catalog.noMatch' : 'catalog.empty')}</p></div></Show>
           <Show when={workflows().length}><CatalogPipelineCards visible={workflows()} open={open} /></Show>
           <Show when={mineShown().length}><section class="catalog-shelf" data-shelf="mine"><h2>{t('catalog.shelf.mine')}</h2><p class="hint">{t('catalog.shelf.mineNote')}</p><div class="catalog-grid"><For each={mineShown()}>{tile}</For></div></section></Show>
           <Show when={groups().length}><section class="catalog-shelf" data-shelf="kit"><h2>{t('catalog.shelf.kit')}</h2><p class="hint">{t('catalog.shelf.kitNote')}</p>
             <For each={groups()}>{(group) => <section class="catalog-group"><h3><Show when={glyphs[group.job]}>{(name) => <Icon name={name()} small />}</Show>{group.name}</h3><div class="catalog-grid"><For each={group.rows}>{tile}</For></div></section>}</For>
           </section></Show>
-            <Show when={filter() !== 'installed' && visible().length}><button class="btn ghost" data-catalog-pick-shown onClick={pickShown}><Icon name="check" small />{t(allShown() ? 'catalog.unpickShown' : 'catalog.pickShown')}</button></Show>
+            <Show when={filter() !== 'installed' && visible().length}><button class="btn ghost" data-catalog-pick-shown disabled={!!progress()} onClick={pickShown}><Icon name="check" small />{t(allShown() ? 'catalog.unpickShown' : 'catalog.pickShown')}</button></Show>
           <Show when={matching().length > PAGE}><nav class="catalog-pages" aria-label={t('catalog.pages')}><button class="btn" disabled={!page()} onClick={() => setPage(page() - 1)}>{t('catalog.previous')}</button><span aria-live="polite">{t('catalog.page', { n: page() + 1, total: Math.ceil(matching().length / PAGE) })}</span><button class="btn" disabled={(page() + 1) * PAGE >= matching().length} onClick={() => setPage(page() + 1)}>{t('catalog.next')}</button></nav></Show>
           <Show when={filter() !== 'pipelines' && filter() !== 'installed' && shelf()}>{(answer) => <section class="catalog-shelf" data-shelf="open" aria-busy={!answer().hits && !answer().error}>
             <h2>{t('catalog.shelf.open')}</h2><p class="hint">{t('catalog.shelf.openNote')}</p>
@@ -434,17 +496,18 @@ export function Catalog(props: { projects: Project[]; projectId?: string; vendor
             </Show>
           </section>}</Show>
           <Show when={filter() === 'installed'}><CatalogInventory query={query()} catalogMatches={matching().length} status={status} serverStatus={serverStatus} available={available} revision={revision()} projectId={projectId()} projects={props.projects} onProject={setProjectChoice} onOpen={(id) => { if (rows.some((row) => row.id === id)) open(id, search!); }} /></Show>
-          <Show when={chosen().length && filter() !== 'pipelines'}><div class="catalog-batch" role="region" aria-label={t('catalog.selection')} data-catalog-batch>
+          <Show when={(chosen().length || progress()) && filter() !== 'pipelines'}><div class="catalog-batch" role="region" aria-label={t('catalog.selection')} data-catalog-batch>
             <Show when={batchError()}>{(failure) => <span class="catalog-batch-error" role="alert">{failure().text}<button class="btn" onClick={() => void runBatch(failure().action)}>{t('catalog.retry')}</button></span>}</Show>
             <span class="catalog-batch-count" aria-live="polite">{progress() ? t('catalog.batchWorking', { n: progress()!.done, total: progress()!.total }) : t('catalog.picked', { n: chosen().length })}</span>
-            <Show when={confirmingBatch()} fallback={<div class="catalog-batch-actions">
+            <Show when={progress()}><button class="btn" data-batch="stop" disabled={stopping()} onClick={() => setStopping(true)}>{t('catalog.batchStop')}</button></Show>
+            <Show when={!progress()}><Show when={confirmingBatch()} fallback={<div class="catalog-batch-actions">
               {/* Only the actions that apply to something selected. */}
               <For each={(['install', 'on', 'off'] as const).filter((action) => count(action))}>{(action) => <button class="btn" classList={{ primary: action === 'install' }} data-batch={action} onClick={() => void runBatch(action)}>{t(`catalog.batch.${action}`, { n: count(action) })}</button>}</For>
-              <Show when={count('remove')}><button class="btn" data-batch="remove" onClick={() => { if (!busy()) { setConfirmingBatch(true); queueMicrotask(() => cancelBatch?.focus()); } }}>{t('catalog.batch.remove', { n: count('remove') })}</button></Show>
+              <For each={(['update', 'remove'] as const).filter((action) => count(action))}>{(action) => <button class="btn" classList={{ primary: action === 'update' }} data-batch={action} onClick={() => { if (!busy()) { setConfirmingBatch(action); queueMicrotask(() => cancelBatch?.focus()); } }}>{t(`catalog.batch.${action}`, { n: count(action) })}</button>}</For>
               <button class="iconbtn" aria-label={t('catalog.unpick')} title={t('catalog.unpick')} onClick={() => setPicked([])}><Icon name="close" small /></button>
-            </div>}>
-              <div class="catalog-batch-actions"><span>{t('catalog.confirmRemoveMany', { n: count('remove') })}</span><button class="btn" ref={(el) => (cancelBatch = el)} onClick={() => setConfirmingBatch(false)}>{t('catalog.cancel')}</button><button class="btn danger" data-batch="confirm-remove" onClick={() => void runBatch('remove')}>{t('catalog.remove')}</button></div>
-            </Show>
+            </div>}>{(asked) =>
+              <div class="catalog-batch-actions"><span>{t(asked() === 'update' ? 'catalog.confirmUpdateMany' : 'catalog.confirmRemoveMany', { n: count(asked()) })}</span><button class="btn" ref={(el) => (cancelBatch = el)} onClick={() => setConfirmingBatch(undefined)}>{t('catalog.cancel')}</button><button class={asked() === 'update' ? 'btn primary' : 'btn danger'} data-batch={`confirm-${asked()}`} onClick={() => void runBatch(asked())}>{t(asked() === 'update' ? 'catalog.update' : 'catalog.remove')}</button></div>}
+            </Show></Show>
           </div></Show>
         </div>}>{(entry) => <CatalogPipelineDetail pipeline={entry()} back={back} heading={(el) => (detail = el)} />}</Show>}>
           {(row) => <article class="catalog-detail" aria-busy={busy()} data-tone={tone(row())}>

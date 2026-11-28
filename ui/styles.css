@@ -2070,6 +2070,10 @@ html:is(.hidden-win, .quiet-win) .ask.question { transition: none; }
 .catalog-search input { width: 100%; min-width: 0; background: transparent; border: 0; color: var(--ink); }
 .catalog-search kbd { white-space: nowrap; color: var(--ink-3); font-size: var(--fs-xs); }
 .catalog-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+.catalog-check-state { margin: -12px 0 20px; color: var(--ink-2); }
+.catalog-updates { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.catalog-updates .hint { margin: 0; }
+.catalog-updates .catalog-empty { flex-basis: 100%; }
 .catalog-filters { display: flex; flex-wrap: wrap; gap: 8px; }
 .catalog-filters button { border: 1px solid var(--line); background: var(--s1); }
 .catalog-filters button[aria-pressed='true'] { border-color: var(--accent-text); color: var(--accent-text); background: var(--s2); }

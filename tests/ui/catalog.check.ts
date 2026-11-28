@@ -434,6 +434,130 @@ check('catalog manual replacement: batch installation excludes existing and remo
   } finally { view.close(); }
 });
 
+// Two installed copies whose checked pins moved: ponytail is off, systematic-debugging is on.
+const moved = (): ToolRow[] => {
+  const rows = sample();
+  Object.assign(rows[0], { installed: true, hasCopy: true, enabled: true, status: 'error.tools.update' });
+  Object.assign(rows[1], { hasCopy: true, status: 'error.tools.update' });
+  return rows;
+};
+const checkUpdates = async (root: Element) => { await tap(root.querySelector<HTMLButtonElement>('[data-catalog-check]')!); await tick(); };
+
+check('catalog updates: one check lists the moved pins and Update all replaces each after one question', async () => {
+  const view = await panel({ rows: moved() });
+  const looks: number[] = [];
+  api.updateCheck = async () => { looks.push(1); return { phase: 'ready' }; };
+  try {
+    const reads = view.calls.list;
+    await checkUpdates(view.root);
+    equal(view.calls.list, reads + 1, 'the check reads the inventory again');
+    equal(looks.length, 1, 'and asks the app updater once, since newer checked pins come with a newer Faber');
+    const line = view.root.querySelector('[data-catalog-looked]')?.textContent ?? '';
+    ok(line.includes(t('catalog.updatesFound', { n: 2 })) && line.includes(t('catalog.appUpdateReady')), line);
+    equal(view.root.querySelector('[data-updates-filter]')?.getAttribute('aria-pressed'), 'true', 'the Updates filter opens by itself');
+    deepEqual(cards(view.root).map((card) => card.dataset.catalogCard).sort(), ['ponytail', 'systematic-debugging']);
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-catalog-update-all]')!);
+    ok(view.root.textContent?.includes(t('catalog.confirmUpdateMany', { n: 2 })), 'one question names what is replaced and what stays');
+    deepEqual(view.calls.prepare, []); deepEqual(view.calls.replace, [], 'nothing is replaced before the answer');
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-batch=confirm-update]')!); await tick();
+    deepEqual(view.calls.prepare.sort(), ['ponytail', 'systematic-debugging'], 'each item gets a fresh plan of its own');
+    equal(view.calls.replace.length, 2);
+    equal(view.store[1].enabled, false, 'the off choice stays');
+    ok(view.root.querySelector('[data-catalog-updates]')?.textContent?.includes(t('catalog.upToDate')));
+    equal(view.root.querySelector('[data-batch]'), null, 'done items leave the selection');
+    deepEqual(view.calls.install, []);
+  } finally { view.close(); }
+});
+
+check('catalog updates: a failed item stays selected with its retry and the others stay updated', async () => {
+  const view = await panel({ rows: moved() });
+  api.updateCheck = async () => ({ phase: 'none' });
+  const replace = api.toolsReplace;
+  api.toolsReplace = async (plan) => { if ((plan as { id: string }).id === 'ponytail') throw 'error.tools.install'; await replace(plan); };
+  try {
+    await checkUpdates(view.root);
+    ok(!view.root.querySelector('[data-catalog-looked]')?.textContent?.includes(t('catalog.appUpdateReady')));
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-catalog-update-all]')!);
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-batch=confirm-update]')!); await tick();
+    ok(view.root.querySelector('.catalog-batch-error')?.textContent?.includes(t('catalog.batchFailed', { n: 1 })));
+    equal(view.store[0].status, undefined, 'the item that succeeded is not undone');
+    equal(view.store[1].status, 'error.tools.update');
+    deepEqual(cards(view.root).map((card) => card.dataset.catalogCard), ['ponytail'], 'only the failed item is still waiting');
+    equal(view.root.querySelector<HTMLInputElement>('.catalog-pick')?.checked, true, 'and it stays selected');
+    api.toolsReplace = replace;
+    await tap(button(view.root, 'catalog.retry')); await tick();
+    equal(view.store[1].status, undefined);
+  } finally { view.close(); }
+});
+
+check('catalog updates: Stop lets the item in hand finish and keeps the rest selected', async () => {
+  const view = await panel({ rows: moved() });
+  api.updateCheck = async () => ({ phase: 'none' });
+  const prepare = api.toolsPrepareReplacement;
+  let release!: () => void;
+  api.toolsPrepareReplacement = async (id) => { if (!release) await new Promise<void>((resolve) => { release = resolve; }); return prepare(id); };
+  try {
+    await checkUpdates(view.root);
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-catalog-update-all]')!);
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-batch=confirm-update]')!);
+    const stop = view.root.querySelector<HTMLButtonElement>('[data-batch=stop]');
+    ok(stop, 'a running batch offers Stop');
+    ok([...view.root.querySelectorAll<HTMLInputElement>('.catalog-pick')].every((box) => box.disabled), 'the selection is held while it runs, so Stop never disappears');
+    await tap(stop!);
+    release(); await tick(); await tick();
+    equal(view.calls.replace.length, 1, 'the item in hand finishes; the next one never starts');
+    ok(view.root.querySelector('.catalog-batch-error')?.textContent?.includes(t('catalog.batchStopped', { n: 1 })));
+    equal(view.root.querySelectorAll('.catalog-pick:checked').length, 1, 'the one not reached stays selected');
+  } finally { view.close(); }
+});
+
+check('catalog updates: the check finds a pin that moved after the Catalog opened, and the selection bar updates it', async () => {
+  const view = await panel({ rows: sample() });
+  api.updateCheck = async () => ({ phase: 'none' });
+  try {
+    equal(view.root.querySelector('[data-updates-filter]'), null, 'nothing waits when the Catalog opens');
+    view.store[1].status = 'error.tools.update';
+    await checkUpdates(view.root);
+    equal(view.root.querySelector('[data-catalog-looked]')?.textContent?.trim(), t('catalog.updatesFound', { n: 1 }), 'the count comes from the new read');
+    ok(view.root.querySelector('[data-updates-filter]')?.textContent?.includes(t('catalog.updates', { n: 1 })));
+    await tap(view.root.querySelector<HTMLInputElement>('.catalog-pick')!);
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-batch=update]')!);
+    deepEqual(view.calls.replace, []);
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-batch=confirm-update]')!); await tick();
+    deepEqual(view.calls.prepare, ['ponytail']); equal(view.calls.replace.length, 1);
+    equal(view.store[1].enabled, false, 'the off choice stays');
+  } finally { view.close(); }
+});
+
+check('catalog updates: an item already at its checked pin is not replaced again, so its backup stays', async () => {
+  const view = await panel({ rows: moved() });
+  api.updateCheck = async () => ({ phase: 'none' });
+  const prepare = api.toolsPrepareReplacement;
+  api.toolsPrepareReplacement = async (id) => { const plan = await prepare(id); return id === 'ponytail' ? { ...plan, from: plan.to } : plan; };
+  try {
+    await checkUpdates(view.root);
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-catalog-update-all]')!);
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-batch=confirm-update]')!); await tick();
+    deepEqual(view.calls.replace.map((plan) => (plan as { id: string }).id), ['systematic-debugging']);
+    equal(view.root.querySelector('.catalog-batch-error'), null);
+    ok(view.root.querySelector('[data-catalog-updates]')?.textContent?.includes(t('catalog.upToDate')));
+  } finally { view.close(); }
+});
+
+check('catalog updates: with nothing moved the check says so and offers no update', async () => {
+  const rows = sample();
+  const view = await panel({ rows });
+  api.updateCheck = async () => { throw 'error.update.check'; };
+  try {
+    await checkUpdates(view.root);
+    equal(view.root.querySelector('[data-catalog-looked]')?.textContent?.trim(), t('catalog.upToDate'), 'a failed app check does not hide the catalog answer');
+    equal(view.root.querySelector('[data-updates-filter]'), null);
+    await tap(view.root.querySelector<HTMLButtonElement>('[data-catalog-pick-shown]')!);
+    equal(view.root.querySelector('[data-batch=update]'), null);
+    deepEqual(view.calls.prepare, []);
+  } finally { view.close(); }
+});
+
 check('catalog manual replacement: an explicitly missing copy installs afresh and keeps its off choice', async () => {
   const rows = sample(); rows[1].hasCopy = false; rows[1].installed = false; rows[1].status = 'error.tools.reinstall';
   const view = await panel({ rows });
