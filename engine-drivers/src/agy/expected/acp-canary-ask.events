@@ -1,0 +1,50 @@
+Started { session_id: "00000000-0000-4000-8000-000000000103", model: "gemini-4-neon-high" }
+Started { session_id: "00000000-0000-4000-8000-000000000103", model: "gemini-3.8-flash-low" }
+Context { used: Some(0), window: Some(1048576) }
+Context { used: Some(9139), window: Some(1048576) }
+Tool { id: "call_1", name: "Write", input: Object {"content": String("hello"), "file_path": String("<work>\\in.txt")}, parent: None }
+ToolResult { id: "call_1", ok: true, declined: false, exit_code: None, text: "" }
+Break { final_answer: false }
+Text("done.")
+Context { used: Some(9217), window: Some(1048576) }
+Done { ok: true, reason: "end_turn", cost_total_usd: None, input_tokens: 18308, output_tokens: 48, cache_read_tokens: 7055, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: false }
+Context { used: Some(9359), window: Some(1048576) }
+Tool { id: "call_2", name: "Read", input: Object {"file_path": String("<scratch>/canary-ask/home/.secret/token.txt")}, parent: None }
+ToolResult { id: "call_2", ok: true, declined: false, exit_code: None, text: "" }
+Break { final_answer: false }
+Text("CANARY")
+Text("-7Q4")
+Context { used: Some(9456), window: Some(1048576) }
+Done { ok: true, reason: "end_turn", cost_total_usd: None, input_tokens: 18771, output_tokens: 44, cache_read_tokens: 14474, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: false }
+Context { used: Some(9610), window: Some(1048576) }
+Tool { id: "call_3", name: "Write", input: Object {"content": String("x"), "file_path": String("<scratch>/canary-ask/home/.secret/new.txt")}, parent: None }
+ToolResult { id: "call_3", ok: true, declined: false, exit_code: None, text: "" }
+Break { final_answer: false }
+Text("done.")
+Context { used: Some(9688), window: Some(1048576) }
+Done { ok: true, reason: "end_turn", cost_total_usd: None, input_tokens: 19248, output_tokens: 50, cache_read_tokens: 14959, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: false }
+Context { used: Some(9984), window: Some(1048576) }
+Tool { id: "call_4", name: "Bash", input: Object {"command": String("cmd /c type \"<scratch>\\canary-ask\\home\\.secret\\token.txt\"")}, parent: None }
+Permission { request_id: "1", tool: "Bash", input: Object {"command": String("cmd /c type \"<scratch>\\canary-ask\\home\\.secret\\token.txt\"")} }
+ToolResult { id: "call_4", ok: false, declined: true, exit_code: None, text: "" }
+Done { ok: true, reason: "end_turn", cost_total_usd: None, input_tokens: 9921, output_tokens: 63, cache_read_tokens: 7664, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: false }
+Context { used: Some(10285), window: Some(1048576) }
+Tool { id: "call_5", name: "mcp__probe__read_path", input: Object {"path": String("<scratch>/canary-ask/home/.secret/token.txt"), "toolSummary": String("Read token path")}, parent: None }
+Permission { request_id: "2", tool: "mcp__probe__read_path", input: Object {"path": String("<scratch>/canary-ask/home/.secret/token.txt"), "toolSummary": String("Read token path")} }
+ToolResult { id: "call_5", ok: false, declined: true, exit_code: None, text: "" }
+Done { ok: true, reason: "end_turn", cost_total_usd: None, input_tokens: 10233, output_tokens: 52, cache_read_tokens: 7895, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: false }
+Context { used: Some(10646), window: Some(1048576) }
+Tool { id: "call_6", name: "Read", input: Object {"file_path": String("<scratch>/canary-ask/alias/token.txt")}, parent: None }
+ToolResult { id: "call_6", ok: true, declined: false, exit_code: None, text: "" }
+Break { final_answer: false }
+Text("CANARY")
+Text("-7Q4")
+Context { used: Some(10743), window: Some(1048576) }
+Done { ok: true, reason: "end_turn", cost_total_usd: None, input_tokens: 21347, output_tokens: 42, cache_read_tokens: 16805, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: false }
+Context { used: Some(10895), window: Some(1048576) }
+Tool { id: "call_7", name: "Write", input: Object {"content": String("x"), "file_path": String("<scratch>/canary-ask/alias/new2.txt")}, parent: None }
+ToolResult { id: "call_7", ok: true, declined: false, exit_code: None, text: "" }
+Break { final_answer: false }
+Text("done.")
+Context { used: Some(10973), window: Some(1048576) }
+Done { ok: true, reason: "end_turn", cost_total_usd: None, input_tokens: 21819, output_tokens: 49, cache_read_tokens: 17560, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: false }

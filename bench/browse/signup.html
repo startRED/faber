@@ -1,0 +1,24 @@
+<!doctype html><html lang="en"><body>
+<header><a href="#home">Acme Cloud</a> <nav><a href="#pricing">Pricing</a> <a href="#docs">Docs</a> <a href="#status">Status</a></nav></header>
+<main><h1>Create your workspace</h1>
+<p>Start a 14 day trial. No card needed. You can invite your team afterwards and change the plan at any time from the billing page.</p>
+<form id="f">
+  <label>Full name <input id="name" name="name" autocomplete="name"></label>
+  <label>Work email <input id="email" name="email" type="email" autocomplete="email"></label>
+  <label>Company <input id="company" name="company"></label>
+  <fieldset><legend>Plan</legend>
+    <label><input type="radio" name="plan" value="free"> Free</label>
+    <label><input type="radio" name="plan" value="team"> Team</label>
+    <label><input type="radio" name="plan" value="business"> Business</label></fieldset>
+  <label><input type="checkbox" id="terms" name="terms"> I accept the terms of service</label>
+  <button type="submit" id="go" disabled>Create workspace</button>
+  <button type="button" id="cancel">Cancel</button>
+</form>
+<div id="result" role="status"></div></main>
+<footer><a href="#privacy">Privacy</a> <a href="#terms">Terms</a> <a href="#contact">Contact</a></footer>
+<script>
+ const root = document.currentScript.parentNode, f = root.querySelector('#f'), go = root.querySelector('#go');
+ const ready = () => { go.disabled = !(f.name.value && f.email.value && f.terms.checked && f.plan.value); };
+ f.addEventListener('input', ready); f.addEventListener('change', ready);
+ f.addEventListener('submit', (e) => { e.preventDefault(); root.querySelector('#result').textContent = 'Workspace created for ' + f.email.value + ' on the ' + f.plan.value + ' plan.'; });
+</script></body></html>

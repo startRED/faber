@@ -1,0 +1,59 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Faber",
+  "version": "../package.json",
+  "identifier": "io.github.startred.faber",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run ui:dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self' 'sha256-OqD9rZ9UZGQqUOZZMHLYDUSUW8UkTyWyKLMPuNd+Ecs=' 'strict-dynamic'; frame-src faber-visual://localhost http://faber-visual.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: faber-media://localhost; font-src 'self' data:; media-src data: blob: faber-media://localhost",
+      "dangerousDisableAssetCspModification": [
+        "script-src"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "app",
+      "dmg",
+      "appimage",
+      "deb"
+    ],
+    "category": "Productivity",
+    "shortDescription": "The AI says done. Faber checks.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/16x16.png",
+      "icons/24x24.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZFN0Q4QTY3QzlFMEI1MjIKUldRaXRlREpaNHA5YmdtQ0ZoNHJoMnJpOGJBWWNIWEtDK3R1QXF4YmY2UGpYd2VhZk5OcENHOTYK",
+      "endpoints": [
+        "https://github.com/startRED/faber/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "quiet"
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{"dir":"in","msg":{"id":1,"method":"initialize"}}
+{"dir":"out","msg":{"id":1,"result":{}}}
+{"dir":"in","msg":{"method":"initialized"}}
+{"dir":"in","msg":{"id":2,"method":"thread/start"}}
+{"dir":"out","msg":{"id":2,"result":{"thread":{"id":"slash-thread","model":"test-model"}}}}
+{"dir":"in","msg":{"id":"faber-commands-1","method":"skills/list","params":{"cwds":["project"]}}}
+{"dir":"out","msg":{"id":"faber-commands-1","result":{"data":[{"cwd":"project","skills":[{"name":"garden-plan","description":"Plan a garden. Then plant it.","shortDescription":"Plan a garden","enabled":true,"path":"/example/skills/garden-plan/SKILL.md","scope":"user"},{"name":"tidy","description":"Tidy the folder. Keep its contents.","enabled":true,"path":"/example/skills/tidy/SKILL.md","scope":"repo"},{"name":"disabled","description":"Not available.","enabled":false,"path":"/example/skills/disabled/SKILL.md","scope":"user"}],"errors":[]}]}}}

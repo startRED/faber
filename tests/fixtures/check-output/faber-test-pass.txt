@@ -1,0 +1,4 @@
+pass  screen  memory: Faber idle after first run (31.4 s)  [312 MB]
+pass  screen  processor: Faber idle for 10 s (10.2 s)  [0.4%]
+
+486 passed, 0 failed, 0 not run, 0 skipped. Every line: C:\work\faber\target\faber-test\run.log

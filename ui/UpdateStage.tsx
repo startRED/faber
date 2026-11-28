@@ -1,0 +1,72 @@
+import { createEffect, createSignal, onMount, Show } from 'solid-js';
+import type { UpdateStatus } from './api.ts';
+import { Collapse } from './controls.tsx';
+import { StateGlyph } from './icons/kinds.tsx';
+import { t } from './i18n.ts';
+import { Mark } from './Mark.tsx';
+import { animateList } from './motion.ts';
+
+/** The words for where the install is: the download adds how far it is, a whole percent or, with no size, the megabytes. */
+export function updateText(status: UpdateStatus): string {
+  switch (status.phase) {
+    case 'checking':
+      return t('update.checking');
+    case 'downloading':
+      if (status.percent !== undefined) return t('update.downloadingPercent', { percent: status.percent });
+      if (status.mb !== undefined) return t('update.downloadingSize', { mb: status.mb });
+      return t('update.downloading');
+    case 'installing':
+      return t('update.installing');
+    default:
+      return '';
+  }
+}
+
+/** The sidebar's calm line while an update downloads or installs. Looking for one says nothing: it is over in a moment. */
+export function UpdateLine(props: { status: UpdateStatus }) {
+  const visible = () => props.status.phase === 'downloading' || props.status.phase === 'installing';
+  // The line grows in and shrinks away, so the rows under it never jump; it keeps its last words while it leaves.
+  const [held, setHeld] = createSignal('');
+  createEffect(() => {
+    if (visible()) setHeld(updateText(props.status));
+  });
+  return (
+    <Collapse open={visible()}>
+      <div class="upd busy" role="status">
+        <StateGlyph state="working" small />
+        {held()}
+      </div>
+    </Collapse>
+  );
+}
+
+/**
+ * The opening screen while Faber looks for an update, downloads it and installs it, so the window is never blank or
+ * looks stuck: the mark, the words for where it is and, when the size is known, a thin bar. It is drawn at once, with no
+ * entrance, because it is the first thing the person sees. Below the title bar, so the window's buttons stay in reach.
+ */
+export function UpdateStage(props: { status: UpdateStatus }) {
+  onMount(() => {
+    // Nothing behind can take typing: an update at open waits for the person who types, and no one is meant to here.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+  const percent = () => (props.status.phase === 'downloading' ? props.status.percent : undefined);
+  return (
+    <div class="ustage" data-surface="update">
+      <div class="ustage-col" ref={animateList}>
+        <Mark size={36} />
+        {/* Each phase fades in over the one before it; the percent inside a phase just counts. */}
+        <p class="ustage-text num" role="status" ref={animateList}>
+          <Show when={props.status.phase} keyed>
+            {(_phase) => <span><StateGlyph state="working" small />{updateText(props.status)}</span>}
+          </Show>
+        </p>
+        <Show when={percent() !== undefined}>
+          <div class="ubar" role="progressbar" aria-label={t('update.downloading')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent()}>
+            <span style={{ transform: `scaleX(${(percent() ?? 0) / 100})` }} />
+          </div>
+        </Show>
+      </div>
+    </div>
+  );
+}

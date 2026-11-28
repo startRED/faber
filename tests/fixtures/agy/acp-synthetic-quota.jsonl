@@ -1,0 +1,2 @@
+{"dir":"in","msg":{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"synthetic","prompt":[{"type":"text","text":"check quota"}]}}}
+{"dir":"stdout","msg":"{\"jsonrpc\":\"2.0\",\"id\":4,\"error\":{\"code\":-32000,\"message\":\"Request failed\",\"data\":{\"status\":\"RESOURCE_EXHAUSTED\"}}}"}

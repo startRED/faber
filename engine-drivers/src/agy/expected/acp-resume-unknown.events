@@ -1,0 +1,6 @@
+Started { session_id: "00000000-0000-4000-8000-000000000127", model: "gemini-4-neon-high" }
+Started { session_id: "11111111-2222-4333-8444-555555555555", model: "gemini-4-neon-high" }
+Error { message: "error.sessionLost", fatal: true }
+Error { message: "error.sessionLost", fatal: true }
+Reason("reason.fail.rejected")
+Done { ok: false, reason: "Session not found: 11111111-2222-4333-8444-555555555555", cost_total_usd: None, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: true }

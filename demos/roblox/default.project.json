@@ -1,0 +1,15 @@
+{
+  "name": "Star Salvage",
+  "tree": {
+    "$className": "DataModel",
+    "ServerScriptService": {
+      "Salvage": { "$path": "src/Salvage.server.luau" },
+      "Station": { "$path": "src/Station.luau" }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "SalvageHud": { "$path": "src/Hud.client.luau" }
+      }
+    }
+  }
+}

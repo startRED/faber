@@ -1,0 +1,7 @@
+{"dir":"out","msg":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"background-bash","name":"Bash","input":{"command":"node long-task.js","run_in_background":true}}]}}}
+{"dir":"out","msg":{"type":"system","subtype":"task_started","task_type":"local_bash","task_id":"background-task","tool_use_id":"background-bash"}}
+{"dir":"out","msg":{"type":"system","subtype":"task_progress","task_id":"background-task","tool_use_id":"background-bash"}}
+{"dir":"out","msg":{"type":"system","subtype":"task_notification","task_id":"background-task","tool_use_id":"background-bash","status":"stopped","output_file":"unused-by-faber"}}
+{"dir":"out","msg":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"natural-bash","name":"Bash","input":{"command":"node natural-task.js","run_in_background":true}}]}}}
+{"dir":"out","msg":{"type":"system","subtype":"task_started","task_type":"local_bash","task_id":"natural-task","tool_use_id":"natural-bash"}}
+{"dir":"out","msg":{"type":"system","subtype":"task_notification","task_id":"natural-task","tool_use_id":"natural-bash","status":"completed","output_file":"unused-by-faber"}}

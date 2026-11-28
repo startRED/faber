@@ -1,0 +1,130 @@
+name: triage
+
+# Many pull requests come from people and AI agents the maintainer does not know. This job sorts each new one by area and
+# sends an oversize change back politely. It never closes anything and never runs code from the pull request: it only reads
+# the file list and the description, and calls `gh` to add labels and post comments.
+on:
+  pull_request_target:
+    # Only when opened: a reopened pull request already has its labels and its comment.
+    types: [opened]
+    branches: [phase-1-base]
+
+# No token rights at the top level; the one job below asks for exactly what it writes.
+permissions: {}
+
+jobs:
+  triage:
+    # Skip bots and the maintainer's own team: they do not need a welcome or a size check.
+    if: >-
+      github.event.pull_request.user.type != 'Bot' &&
+      github.event.pull_request.author_association != 'OWNER' &&
+      github.event.pull_request.author_association != 'MEMBER' &&
+      github.event.pull_request.author_association != 'COLLABORATOR'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # Labels and comments on a pull request need nothing more than this.
+      pull-requests: write
+    steps:
+      # Labels show the area of each change, so the maintainer can sort the queue without opening every file list.
+      # Paths come from the pull request, so `jq` only compares them with fixed prefixes and prints a fixed label: no path
+      # ever reaches the shell.
+      - name: Label by area
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          area='.[].filename
+            | if startswith("ui/locales/") then "translation"
+              elif startswith("ui/") or startswith("tests/") then "area: screen"
+              elif test("^(engine|engine-core|engine-drivers|engine-projects|engine-store|host|sidecar|channel|cli|winproc|update)/") then "area: engine"
+              elif test("^(electron|src-tauri|installer)/") then "area: shell"
+              elif startswith("docs/") or test("^[^/]+[.]md$") then "documentation"
+              elif startswith(".github/") or startswith("scripts/") then "area: tooling"
+              else empty end'
+
+          # Every pull request from outside gets the first label, whatever it touches. One call adds them all; the labels
+          # endpoint needs only the rights this job has, where `gh pr edit` also asks for project access the token lacks.
+          fields=(-f "labels[]=outside contribution")
+          while IFS= read -r label; do
+            if [[ -n "$label" ]]; then fields+=(-f "labels[]=$label"); fi
+          done < <(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq "$area" | sort -u)
+          gh api --method POST "repos/$REPO/issues/$PR/labels" "${fields[@]}" > /dev/null
+
+      # A large change with no issue named goes back once, politely: the maintainer agrees to a feature before it is built.
+      # Lockfiles and translations do not count, since they are long by nature. The description is only matched with a
+      # fixed pattern, never run; any issue number passes, because the maintainer reads the link himself.
+      - name: Ask for an issue first on a large change
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          BODY: ${{ github.event.pull_request.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "commented=false" >> "$GITHUB_OUTPUT"
+
+          counted='.[]
+            | select(.filename | (endswith("package-lock.json") or endswith("Cargo.lock") or startswith("ui/locales/")) | not)
+            | .additions + .deletions'
+          total=0
+          while IFS= read -r lines; do
+            # Only digits are added, so nothing from the response is ever evaluated as code.
+            if [[ "$lines" =~ ^[0-9]+$ ]]; then total=$(( total + lines )); fi
+          done < <(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq "$counted")
+
+          # An issue reference is either "#123" or a link to /issues/123.
+          issue_ref='#[0-9]+|/issues/[0-9]+'
+
+          if (( total > 400 )) && ! [[ "$BODY" =~ $issue_ref ]]; then
+            gh api --method POST "repos/$REPO/issues/$PR/labels" -f "labels[]=needs: issue first" > /dev/null
+
+            # The comment text is fixed; the quoted heredoc keeps it from being expanded.
+            body_file=$(mktemp)
+            cat > "$body_file" <<'EOF'
+          Thanks for opening this pull request. This change is large, and no issue is linked to it.
+
+          Faber has one maintainer, so a new feature or a large change needs an issue he agreed to first. Please link the
+          issue, or split the change into smaller pull requests. This pull request stays open: once an issue is linked or
+          the change is split, it will be reviewed.
+
+          See [CONTRIBUTING.md](https://github.com/startRED/faber/blob/main/CONTRIBUTING.md#ai-assisted-contributions) for how AI-assisted contributions are handled.
+          EOF
+            gh api --method POST "repos/$REPO/issues/$PR/comments" -F "body=@$body_file" > /dev/null
+            rm -f "$body_file"
+            echo "commented=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A first-time contributor gets one short welcome, unless the size check above already wrote a comment.
+      - name: Welcome a first contribution
+        if: steps.issue.outputs.commented != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          ASSOC: ${{ github.event.pull_request.author_association }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$ASSOC" in
+            FIRST_TIME_CONTRIBUTOR|FIRST_TIMER|NONE) ;;
+            *) exit 0 ;;
+          esac
+
+          # The comment text is fixed; the quoted heredoc keeps it from being expanded.
+          body_file=$(mktemp)
+          cat > "$body_file" <<'EOF'
+          Thanks for your first contribution to Faber.
+
+          The checks run on your fork's pull request. Please fill in "What changed and why" and "Checks run" in the
+          description. If an AI tool helped, say which one, as [CONTRIBUTING.md](https://github.com/startRED/faber/blob/main/CONTRIBUTING.md) asks.
+
+          One maintainer reviews pull requests, so small focused changes go first.
+          EOF
+          gh api --method POST "repos/$REPO/issues/$PR/comments" -F "body=@$body_file" > /dev/null
+          rm -f "$body_file"

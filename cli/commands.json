@@ -1,0 +1,4280 @@
+[
+  {
+    "name": "asks",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "This conversation's requests and their current state."
+  },
+  {
+    "name": "answer_ask",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "allow",
+        "bool"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "allow": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "allow"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "Allow one identical retry, or decline the request."
+  },
+  {
+    "name": "conversations",
+    "args": [
+      [
+        "state",
+        "Option<Vec<ListState>>"
+      ],
+      [
+        "archived",
+        "Option<bool>"
+      ],
+      [
+        "projectId",
+        "Option<String>"
+      ],
+      [
+        "family",
+        "Option<String>"
+      ],
+      [
+        "query",
+        "Option<String>"
+      ],
+      [
+        "limit",
+        "Option<usize>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "archived": {
+          "type": "boolean"
+        },
+        "family": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "state": {
+          "items": {
+            "enum": [
+              "working",
+              "waiting",
+              "concluded",
+              "ended",
+              "interrupted",
+              "stopped",
+              "failed",
+              "new",
+              "idle",
+              "running"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The conversations, the running ones first, then pinned, then the newest, each with its state in plain words (`working`, `waiting`, `idle`). `state` can also select an exact ending (`concluded`, `ended`, `interrupted`, `stopped`, `failed`, `new`); matching rows show that state. `running` means working or waiting. `archived` true lists only archived ones and false every one; `family` keeps the family of a conversation (who started whom); `query` keeps titles holding its words. Uses list metadata, not message bodies."
+  },
+  {
+    "name": "conversation",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "last",
+        "Option<usize>"
+      ],
+      [
+        "from",
+        "Option<usize>"
+      ],
+      [
+        "limit",
+        "Option<usize>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "from": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "last": {
+          "type": "integer"
+        },
+        "limit": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "One conversation: its state (`concluded` only when its AI concluded the whole request), its last `last` messages (all when missing) with the tools each used, and the AI's latest conclusion. For numbered messages, pass `from` (first is 1) and optionally `limit` (1 to 10, default 1) instead of `last`. `count` always holds the total. Unlike opening it on the screen, reading leaves its done mark for the person."
+  },
+  {
+    "name": "conversation_headers",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "from",
+        "Option<usize>"
+      ],
+      [
+        "limit",
+        "Option<usize>"
+      ],
+      [
+        "role",
+        "Option<Role>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "from": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "role": {
+          "enum": [
+            "user",
+            "assistant"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "Message numbers, IDs, roles, times and statuses, without message bodies or tools. `from` starts at 1 and `limit` defaults to 20 (1 to 100). With `role`, `from` counts only that role. Pass each global `number` to `conversation` as `from`. `total` counts every message; `matching` counts the requested role, or every message with no filter."
+  },
+  {
+    "name": "conversation_steps",
+    "args": [
+      [
+        "by",
+        "Option<String>"
+      ],
+      [
+        "id",
+        "Option<String>"
+      ],
+      [
+        "from",
+        "usize"
+      ],
+      [
+        "limit",
+        "Option<usize>"
+      ],
+      [
+        "offset",
+        "Option<usize>"
+      ],
+      [
+        "tool",
+        "Option<String>"
+      ],
+      [
+        "failedOnly",
+        "Option<bool>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "failedOnly": {
+          "type": "boolean"
+        },
+        "from": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "Tool steps of one message in the caller's project. The caller must be an identified project agent. Number messages from 1. Omit `id` for the caller, and use `offset`, `limit` (1 to 50, default 10) or `failedOnly` to page steps. Or pass one `tool` ID to read a masked diagnostic of the caller or its direct child."
+  },
+  {
+    "name": "conversation_command_results",
+    "args": [
+      [
+        "by",
+        "Option<String>"
+      ],
+      [
+        "id",
+        "Option<String>"
+      ],
+      [
+        "tool",
+        "Option<String>"
+      ],
+      [
+        "limit",
+        "Option<usize>"
+      ],
+      [
+        "runningOnly",
+        "Option<bool>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "runningOnly": {
+          "type": "boolean"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "Recent background command endings in this Faber run, for an identified project agent's own conversation or direct child. Omit `id` for the caller. Page with `limit` (1 to 20, default 10) or select one execution `tool` ID for masked output. Set `runningOnly` to true for active command metadata without partial output."
+  },
+  {
+    "name": "projects",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The projects Faber knows, with their folders."
+  },
+  {
+    "name": "quota",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "Each vendor's quota windows (how much is used, when each resets) and what Faber has spent of them."
+  },
+  {
+    "name": "settings",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The settings as Settings shows them."
+  },
+  {
+    "name": "app_control_state",
+    "args": [
+      [
+        "by",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "own",
+    "conversation": "/by",
+    "about": "Read-only bootstrap for a session-owned app renderer; never resets the person's streaming feed."
+  },
+  {
+    "name": "app_control_open",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "A session renderer may open only its own conversation family, without screen privileges."
+  },
+  {
+    "name": "create_chat_group",
+    "args": [
+      [
+        "name",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "free"
+  },
+  {
+    "name": "save_chat_group",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "name",
+        "Option<String>"
+      ],
+      [
+        "instructions",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "instructions": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "add_chat_group_files",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "files",
+        "Vec<faber_engine::workspace::Attachment>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "files": {
+          "items": {
+            "description": "faber_engine::workspace::Attachment JSON value",
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "files"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "remove_chat_group_file",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "fileId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "fileId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "fileId"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "remove_chat_group",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "move_chat_to_group",
+    "args": [
+      [
+        "conversationId",
+        "String"
+      ],
+      [
+        "groupId",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "conversationId": {
+          "type": "string"
+        },
+        "groupId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversationId"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "free"
+  },
+  {
+    "name": "new_group_chat",
+    "args": [
+      [
+        "groupId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "groupId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "groupId"
+      ],
+      "type": "object"
+    },
+    "kind": "startsTurn",
+    "reach": "ask"
+  },
+  {
+    "name": "answer_plan",
+    "args": [
+      [
+        "vendor",
+        "Vendor"
+      ],
+      [
+        "plan",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "plan": {
+          "type": "string"
+        },
+        "vendor": {
+          "description": "Vendor JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "vendor",
+        "plan"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "approve_credits",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ],
+      [
+        "vendor",
+        "Vendor"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "vendor": {
+          "description": "Vendor JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "turnId",
+        "vendor"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "move_turn",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "wait_turn",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "Leave a recoverable reply queued for its turn; this is not the `faber wait` conversation command."
+  },
+  {
+    "name": "continue_closed",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "Go on with a reply Faber was closed under (R477): one fixed turn, refused once it is no longer the last."
+  },
+  {
+    "name": "wake_wait",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "since",
+        "u64"
+      ],
+      [
+        "until",
+        "u64"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "since": {
+          "type": "integer"
+        },
+        "until": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "since",
+        "until"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask",
+    "about": "Recheck an overdue saved project wait, using its observed `since` and `until` from `waitingOn`. Uses the existing automatic admission and receipt. No message or override can be supplied."
+  },
+  {
+    "name": "forget_auto_learned",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "interrupt",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "by",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "Stops a conversation's running turn. An AI may only stop a conversation it started; its own conversation, its parent and the person's conversations are refused."
+  },
+  {
+    "name": "results",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "What a conversation delivered (files, checks, commits, answers) and what it cost; none before its first reply."
+  },
+  {
+    "name": "project_results",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The same for a project: its total and each conversation's numbers, most spent first."
+  },
+  {
+    "name": "answer",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ],
+      [
+        "requestId",
+        "String"
+      ],
+      [
+        "allow",
+        "bool"
+      ],
+      [
+        "always",
+        "bool"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "allow": {
+          "type": "boolean"
+        },
+        "always": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId",
+        "requestId",
+        "allow",
+        "always"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "search_messages",
+    "args": [
+      [
+        "query",
+        "String"
+      ],
+      [
+        "area",
+        "Area"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "area": {
+          "description": "Area JSON value",
+          "type": "object"
+        },
+        "query": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "query",
+        "area"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "prompt_history",
+    "args": [
+      [
+        "requestId",
+        "String"
+      ],
+      [
+        "cancel",
+        "Option<bool>"
+      ],
+      [
+        "conversationId",
+        "Option<String>"
+      ],
+      [
+        "area",
+        "Area"
+      ],
+      [
+        "projectId",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "area": {
+          "description": "Area JSON value",
+          "type": "object"
+        },
+        "cancel": {
+          "type": "boolean"
+        },
+        "conversationId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "area"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "send",
+    "args": [
+      [
+        "req",
+        "SendRequest"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "req": {
+          "description": "SendRequest JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "req"
+      ],
+      "type": "object"
+    },
+    "kind": "startsTurn",
+    "reach": "own",
+    "conversation": "/req/conversationId"
+  },
+  {
+    "name": "cli_sessions",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The sessions started in a terminal in a project's folder (parity F5)."
+  },
+  {
+    "name": "pick_up",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "session",
+        "faber_engine::model::CliSession"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "session": {
+          "description": "faber_engine::model::CliSession JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "projectId",
+        "session"
+      ],
+      "type": "object"
+    },
+    "kind": "startsTurn",
+    "reach": "ask",
+    "about": "Opens a session started in a terminal as a project conversation, or the one already opened for it."
+  },
+  {
+    "name": "branch",
+    "args": [
+      [
+        "req",
+        "BranchRequest"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "req": {
+          "description": "BranchRequest JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "req"
+      ],
+      "type": "object"
+    },
+    "kind": "startsTurn",
+    "reach": "person",
+    "about": "Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money."
+  },
+  {
+    "name": "branch_here",
+    "args": [
+      [
+        "conversationId",
+        "String"
+      ],
+      [
+        "messageId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "conversationId": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversationId",
+        "messageId"
+      ],
+      "type": "object"
+    },
+    "kind": "startsTurn",
+    "reach": "person",
+    "about": "\"Branch from here\" on an answer: a new conversation with every message up to it, where nothing is sent yet. Person reach (R585): a new conversation outside the family is the person's to make."
+  },
+  {
+    "name": "versions",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The messages of a conversation that have other versions; the other conversations of its family are read from disk."
+  },
+  {
+    "name": "visual_answers",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "messageId",
+        "Option<String>"
+      ],
+      [
+        "block",
+        "Option<usize>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "block": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "Pages and drawings, with the versions already held in the conversation's saved replies."
+  },
+  {
+    "name": "visual_pieces",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "messageId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "messageId"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "save_piece_value",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "messageId",
+        "String"
+      ],
+      [
+        "block",
+        "usize"
+      ],
+      [
+        "value",
+        "Value"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "block": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "value": {
+          "description": "Value JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "messageId",
+        "block",
+        "value"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "approve_plan",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ],
+      [
+        "requestId",
+        "String"
+      ],
+      [
+        "mode",
+        "Option<faber_engine::model::Permissions>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "mode": {
+          "description": "faber_engine::model::Permissions JSON value",
+          "type": "object"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId",
+        "requestId"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "answer_question",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ],
+      [
+        "requestId",
+        "String"
+      ],
+      [
+        "answers",
+        "Value"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "answers": {
+          "description": "Value JSON value",
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId",
+        "requestId",
+        "answers"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "The person's choices for a question the agent asked: each question's text to the label picked."
+  },
+  {
+    "name": "rename",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "title",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "free"
+  },
+  {
+    "name": "remove",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "discard",
+        "Option<bool>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "discard": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "archive",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "on",
+        "bool"
+      ],
+      [
+        "by",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "on": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "on"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "free",
+    "about": "Archives a conversation, or brings an archived one back. An AI may only archive (`on: true`) a conversation of its own project that is not working, not waiting for the person and not pinned; unarchiving from an AI is refused."
+  },
+  {
+    "name": "start_conversation",
+    "args": [
+      [
+        "by",
+        "Option<String>"
+      ],
+      [
+        "title",
+        "String"
+      ],
+      [
+        "brief",
+        "String"
+      ],
+      [
+        "ai",
+        "Option<String>"
+      ],
+      [
+        "model",
+        "Option<String>"
+      ],
+      [
+        "effort",
+        "Option<String>"
+      ],
+      [
+        "keepGoing",
+        "Option<bool>"
+      ],
+      [
+        "step",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "ai": {
+          "type": "string"
+        },
+        "brief": {
+          "type": "string"
+        },
+        "by": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "keepGoing": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string"
+        },
+        "step": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "brief"
+      ],
+      "type": "object"
+    },
+    "kind": "startsTurn",
+    "reach": "free",
+    "about": "Starts a new conversation in the same project for an independent piece of work and returns its id (the CLI exposes it as `.childId`). `ai` is `same` (default), `auto`, `claude` or `codex`; `model` and `effort` (`low`, `medium`, `high`) apply to a named AI or `same`, never `auto`. Refused outside an AI's conversation, from a conversation another AI started, or when the project cap or account quota is reached."
+  },
+  {
+    "name": "message_conversation",
+    "args": [
+      [
+        "by",
+        "Option<String>"
+      ],
+      [
+        "id",
+        "String"
+      ],
+      [
+        "message",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "message"
+      ],
+      "type": "object"
+    },
+    "kind": "startsTurn",
+    "reach": "free",
+    "about": "Sends `message` to another unarchived conversation of the same project as a message from this AI. Refused outside an AI's conversation, for this conversation itself, for an archived conversation or for one in another project."
+  },
+  {
+    "name": "resume_conversation",
+    "args": [
+      [
+        "by",
+        "Option<String>"
+      ],
+      [
+        "id",
+        "String"
+      ],
+      [
+        "message",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "startsTurn",
+    "reach": "free",
+    "about": "Resumes a conversation this AI started that is stopped, cut off, failed or ended, sending `message` or the default continuation line. Refused outside an AI's conversation, for a conversation this AI did not start, or while the conversation is working, waiting for the person or archived."
+  },
+  {
+    "name": "mark_waiting",
+    "args": [
+      [
+        "by",
+        "Option<String>"
+      ],
+      [
+        "on",
+        "Option<Vec<String>>"
+      ],
+      [
+        "note",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "on": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "free",
+    "about": "Marks this AI's conversation as waiting for the conversations in `on` (all started by it, at most 12) and/or for `note` (at most 200 characters), so Faber wakes it when one of them reports and spares it from Keep going prods and auto-archive meanwhile. Refused outside an AI's conversation, when both `on` and `note` are empty, or for an `on` id this AI did not start."
+  },
+  {
+    "name": "pin",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "on",
+        "bool"
+      ],
+      [
+        "by",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "on": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "on"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "free",
+    "about": "Pins a conversation, or unpins it. An AI may pin but never unpin: the person pinned it to keep it."
+  },
+  {
+    "name": "move_to_project",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "projectId"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "keep_going",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "on",
+        "bool"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "on": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "on"
+      ],
+      "type": "object"
+    },
+    "kind": "startsTurn",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "follow_up",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "file",
+        "String"
+      ],
+      [
+        "dismiss",
+        "bool"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "dismiss": {
+          "type": "boolean"
+        },
+        "file": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "file",
+        "dismiss"
+      ],
+      "type": "object"
+    },
+    "kind": "startsTurn",
+    "reach": "person",
+    "about": "Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money."
+  },
+  {
+    "name": "remove_queued",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "edit_queued",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ],
+      [
+        "text",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId",
+        "text"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money."
+  },
+  {
+    "name": "send_queued",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "turnId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "kind": "startsTurn",
+    "reach": "person",
+    "about": "Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money."
+  },
+  {
+    "name": "child_words",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "callId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "callId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "callId"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "What a subagent wrote between its steps (R161 step 3), for its side chat while it is open. The screen's copy of a message carries only their length, so this is the one place they are read."
+  },
+  {
+    "name": "child_transcript",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "callId",
+        "String"
+      ],
+      [
+        "page",
+        "u64"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "callId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "page": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "callId",
+        "page"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "tell_helper",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "callId",
+        "String"
+      ],
+      [
+        "text",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "callId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "callId",
+        "text"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "mentions",
+    "args": [
+      [
+        "id",
+        "Option<String>"
+      ],
+      [
+        "projectId",
+        "Option<String>"
+      ],
+      [
+        "query",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "`@` in the composer (parity T4): the entries of the working folder that match `query`, at most 50. Git may run, off the async threads. One listing runs at a time, and a query that a newer one replaced while it waited gives up, so typing fast in a big repository never piles up git runs or their output."
+  },
+  {
+    "name": "commands",
+    "args": [
+      [
+        "id",
+        "Option<String>"
+      ],
+      [
+        "vendor",
+        "Option<Vendor>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "vendor": {
+          "description": "Vendor JSON value",
+          "type": "object"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The last advertised commands, read from memory without starting a CLI."
+  },
+  {
+    "name": "compact_now",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "\"Compact now\" in the context meter: the CLI's own compaction of the conversation's context."
+  },
+  {
+    "name": "context_parts",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The context meter opened: asks what fills the context; the parts come as an event. False when no CLI can say now."
+  },
+  {
+    "name": "background_commands",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "stop_background",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "changes",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "cursor",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "At most one git listing runs and one waits; a newer request replaces the waiting one."
+  },
+  {
+    "name": "change_patch",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "path",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "answer_changes",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "messageId",
+        "String"
+      ],
+      [
+        "offset",
+        "usize"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "messageId",
+        "offset"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "answer_change_patch",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "messageId",
+        "String"
+      ],
+      [
+        "path",
+        "String"
+      ],
+      [
+        "offset",
+        "usize"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "messageId",
+        "path",
+        "offset"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "rewind_points",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "rewind_redos",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "rewind_redo_preview",
+    "args": [
+      [
+        "request",
+        "faber_engine::rewind::RedoRequest"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "request": {
+          "description": "faber_engine::rewind::RedoRequest JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "rewind_recover",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "rewind_preview",
+    "args": [
+      [
+        "request",
+        "faber_engine::rewind::RestoreRequest"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "request": {
+          "description": "faber_engine::rewind::RestoreRequest JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "rewind_restore",
+    "args": [
+      [
+        "request",
+        "faber_engine::rewind::RestoreRequest"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "request": {
+          "description": "faber_engine::rewind::RestoreRequest JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "rewind_redo",
+    "args": [
+      [
+        "request",
+        "faber_engine::rewind::RedoRequest"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "request": {
+          "description": "faber_engine::rewind::RedoRequest JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "ask_aside",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "question",
+        "String"
+      ],
+      [
+        "model",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "question"
+      ],
+      "type": "object"
+    },
+    "kind": "startsTurn",
+    "reach": "person",
+    "about": "A quick question on the side of a conversation (R250); `model` is the tab's own pick, or the conversation's. Person reach (R585): it starts a turn outside the conversation's own, which spends the person's quota or money."
+  },
+  {
+    "name": "stop_aside",
+    "args": [
+      [
+        "asideId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "asideId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "asideId"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "clear_asides",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id"
+  },
+  {
+    "name": "asides",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "unfollow_pr",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "The person stops following the pull request a project conversation follows (R200)."
+  },
+  {
+    "name": "remove_project",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "storage_usage",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "Measures the data folder and the free space on its drive, in bytes."
+  },
+  {
+    "name": "storage_choose",
+    "args": [
+      [
+        "reset",
+        "bool"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "reset": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reset"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "save_settings",
+    "args": [
+      [
+        "patch",
+        "Settings"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "patch": {
+          "description": "Settings JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "patch"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask",
+    "about": "A theme file comes from other people, so an appearance is checked here before anything is saved."
+  },
+  {
+    "name": "save_theme",
+    "args": [
+      [
+        "appearance",
+        "Map<String, Value>"
+      ],
+      [
+        "name",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "appearance": {
+          "description": "Map<String, Value> JSON value",
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "appearance",
+        "name"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "conversation_markdown",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The same readable record as the file export, without writing a file."
+  },
+  {
+    "name": "export_conversation",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "words",
+        "faber_engine::export::Words"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "words": {
+          "description": "faber_engine::export::Words JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "words"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "open_theme",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "person"
+  },
+  {
+    "name": "add_project",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "repoint_project",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "path",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "open_log_folder",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "person"
+  },
+  {
+    "name": "dismiss_unclean_exit",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "free"
+  },
+  {
+    "name": "recents",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The recent folders and saved environments, judged now: a folder that is gone or refused carries a reason key."
+  },
+  {
+    "name": "open_folders",
+    "args": [
+      [
+        "paths",
+        "Vec<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "show_panel",
+    "args": [
+      [
+        "panel",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "panel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "panel"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask",
+    "about": "Open a panel on the person's screen to show them something: a Settings section (`general`, `projects`, `appearance`, `accounts`, `privacy`) or the Catalog (`catalog`). It changes nothing; the window decides how to open it."
+  },
+  {
+    "name": "forget_recent",
+    "args": [
+      [
+        "path",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "save_environment",
+    "args": [
+      [
+        "name",
+        "String"
+      ],
+      [
+        "folders",
+        "Vec<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "folders": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "folders"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "forget_environment",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "start_environment",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "Person reach (R585): it opens projects and their conversations for the person."
+  },
+  {
+    "name": "chat_folder",
+    "args": [
+      [
+        "id",
+        "Option<String>"
+      ],
+      [
+        "scratch",
+        "bool"
+      ],
+      [
+        "path",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "scratch": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "scratch"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "save_file",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "path",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "Copies a file from a chat workspace to wherever the user picks."
+  },
+  {
+    "name": "show_file",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "path",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "ask"
+  },
+  {
+    "name": "show_project",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "ask",
+    "about": "Shows a project's folder in the file manager. The saved path is checked first (folder.rs), and the folder is only revealed, never opened: if something else took its place, the file manager selects it and starts nothing."
+  },
+  {
+    "name": "read_file_at",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "path",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "A file a reply names, read only around its line (parity P2), from inside the conversation's folder."
+  },
+  {
+    "name": "read_image",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "path",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "An image from a chat workspace as a data URL, so the page never reads the disk itself."
+  },
+  {
+    "name": "site_tabs",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "A conversation's tabs in Faber's browser, kept in its file, so the pane opens the front one again."
+  },
+  {
+    "name": "site_picture",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "call",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "call": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "call"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "own",
+    "conversation": "/id",
+    "about": "The picture the browser took for a call, as a data URL, so the page never reads the disk itself."
+  },
+  {
+    "name": "answer_pictures",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The pages each project answer of a conversation pictured before and after it ran, by message id: each page's number and its two picture names, which `site_picture` shows."
+  },
+  {
+    "name": "project_rooms",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "A project conversation's rooms (its screens and major parts) with their recent changes, newest picture and the room the newest answer changed: one scan of the folder, read once per open of the map and per answer end."
+  },
+  {
+    "name": "open_terminal",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "open_link",
+    "args": [
+      [
+        "url",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask",
+    "about": "Links in answers open in the user's browser. Video cards and the reply link's pane action use a separate command."
+  },
+  {
+    "name": "project_copies",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "on",
+        "bool"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "on"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "Settings > Projects: whether each new conversation of this project works in a separate copy (R201). Person reach (R585): a project's setting is the person's."
+  },
+  {
+    "name": "project_goals",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "Settings > Projects and the project page's Goals fold: a project's standing goals, the switch and the day's limit."
+  },
+  {
+    "name": "project_goals_auto",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "on",
+        "bool"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "on"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "The project's switch for starting fixes by itself. Off until the person turns it on: Person reach (R585)."
+  },
+  {
+    "name": "project_goal_add",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "words",
+        "String"
+      ],
+      [
+        "check",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "check": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "words": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "words",
+        "check"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask",
+    "about": "Adds a goal: the person's words and one of the project's confirmed checks."
+  },
+  {
+    "name": "project_goal_add_crashes",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "words",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "words": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "words"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask",
+    "about": "Adds a goal that breaks when the installed Faber's crash file gets a new line: Faber's own repository only."
+  },
+  {
+    "name": "project_goal_remove",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "goalId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "goalId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "goalId"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "project_goal_resume",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "goalId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "goalId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "goalId"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask",
+    "about": "A paused goal, or one that needs the person, is checked again."
+  },
+  {
+    "name": "project_proof",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "project_memory",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "edit_project_memory",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "edit",
+        "faber_engine::project::memory::Edit"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "edit": {
+          "description": "faber_engine::project::memory::Edit JSON value",
+          "type": "object"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "edit"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "Edits or removes a memory entry, or keeps a decision as the person's (R16). The person's alone: a kept decision can be a \"never touch\" rule (R575), which is the agent's own permission (R585)."
+  },
+  {
+    "name": "project_proof_confirm",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "commands",
+        "Vec<String>"
+      ],
+      [
+        "setup",
+        "Vec<String>"
+      ],
+      [
+        "declared",
+        "Vec<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "commands": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "declared": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "setup": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "projectId",
+        "commands",
+        "setup",
+        "declared"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "The owner confirms the commands Faber checks a project's work with (R137): the project's declared list, or the edited one."
+  },
+  {
+    "name": "run_app_start",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "Find the app command in the conversation's project copy and start it if already confirmed."
+  },
+  {
+    "name": "run_app_confirm",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "seen",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "seen": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "seen"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "Confirm the displayed app command for the project and start it in the conversation's copy."
+  },
+  {
+    "name": "run_app_status",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "person",
+    "about": "Read the conversation's app status, local address or recent output if it stopped."
+  },
+  {
+    "name": "run_app_stop",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person",
+    "about": "Stop the app owned by this conversation."
+  },
+  {
+    "name": "update_status",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The screen's view of the update: its phase and the download's progress. Changes arrive as `faber:update`."
+  },
+  {
+    "name": "update_restart",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask",
+    "about": "\"Update ready, restart\": installs the kept update now. Work that runs is cut and goes on after the restart."
+  },
+  {
+    "name": "setup_check",
+    "args": [
+      [
+        "vendor",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "vendor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "vendor"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "setup_install",
+    "args": [
+      [
+        "vendor",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "vendor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "vendor"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "setup_sign_in",
+    "args": [
+      [
+        "vendor",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "vendor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "vendor"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "tools_list",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "tools_inventory",
+    "args": [
+      [
+        "projectId",
+        "Option<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "mcp_servers",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free"
+  },
+  {
+    "name": "set_mcp_server",
+    "args": [
+      [
+        "projectId",
+        "String"
+      ],
+      [
+        "name",
+        "String"
+      ],
+      [
+        "enabled",
+        "bool"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "name",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "tools_install",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "tools_prepare_replacement",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "ask"
+  },
+  {
+    "name": "tools_replace",
+    "args": [
+      [
+        "plan",
+        "faber_engine::tools::ReplacementPlan"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "plan": {
+          "description": "faber_engine::tools::ReplacementPlan JSON value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "plan"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "tools_remove",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "tools_set_enabled",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "enabled",
+        "bool"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "tools_restore",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "ask"
+  },
+  {
+    "name": "tools_clear_removed",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "write",
+    "reach": "person"
+  },
+  {
+    "name": "tools_in_use",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "read",
+    "reach": "free",
+    "about": "The catalog tools a conversation's agent has now, each with its job group, for the context meter's panel: read from the engine's memory when the panel opens; nothing is prepared, polled or started."
+  },
+  {
+    "name": "show_conversation",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "window",
+    "reach": "ask",
+    "about": "Bring the window to a conversation."
+  },
+  {
+    "name": "cookie_profiles",
+    "args": [],
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "kind": "window",
+    "reach": "person",
+    "about": "The Firefox profiles on this computer whose sign-ins the browser pane can bring over."
+  },
+  {
+    "name": "cookie_sites",
+    "args": [
+      [
+        "profile",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "profile": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile"
+      ],
+      "type": "object"
+    },
+    "kind": "window",
+    "reach": "person",
+    "about": "The sites with cookies in the profile `profile`, under a ticket the import names."
+  },
+  {
+    "name": "cookie_import",
+    "args": [
+      [
+        "id",
+        "String"
+      ],
+      [
+        "ticket",
+        "String"
+      ],
+      [
+        "sites",
+        "Vec<String>"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sites": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ticket": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "ticket",
+        "sites"
+      ],
+      "type": "object"
+    },
+    "kind": "window",
+    "reach": "person",
+    "about": "Brings the person's sign-ins on the sites they picked into conversation `id`'s pages; answers how many sites came over."
+  },
+  {
+    "name": "cookie_held",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "window",
+    "reach": "person",
+    "about": "The sites whose sign-ins conversation `id` holds."
+  },
+  {
+    "name": "cookie_forget",
+    "args": [
+      [
+        "id",
+        "String"
+      ]
+    ],
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "kind": "window",
+    "reach": "person",
+    "about": "Forgets the sign-ins conversation `id` holds and signs its page out of them."
+  }
+]

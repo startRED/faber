@@ -1,0 +1,59 @@
+name: I tried Faber on my computer
+description: Tell us whether Faber installed and started on your system
+labels: ["help wanted"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste API keys, sign-in tokens or session credentials** in this form, in logs or in screenshots.
+        A report that Faber worked, or failed, on your system is useful even when nothing else is wrong.
+  - type: dropdown
+    id: system
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: system_version
+    attributes:
+      label: System version
+      description: For example, Windows 11 24H2, macOS 15.4 or Ubuntu 24.04.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Faber version
+      description: Shown in Settings, or in the release file name.
+    validations:
+      required: true
+  - type: dropdown
+    id: installed
+    attributes:
+      label: Did it install?
+      options:
+        - "Yes"
+        - "No"
+    validations:
+      required: true
+  - type: dropdown
+    id: started
+    attributes:
+      label: Did it start?
+      options:
+        - "Yes"
+        - "No"
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: Each step you took and what you saw after it.
+    validations:
+      required: true

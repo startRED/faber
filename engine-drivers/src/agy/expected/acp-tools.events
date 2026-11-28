@@ -1,0 +1,21 @@
+Started { session_id: "00000000-0000-4000-8000-000000000130", model: "gemini-4-neon-high" }
+Started { session_id: "00000000-0000-4000-8000-000000000130", model: "gemini-3.8-flash-low" }
+Context { used: Some(0), window: Some(1048576) }
+Context { used: Some(11609), window: Some(1048576) }
+Tool { id: "call_1", name: "Read", input: Object {"file_path": String("<work>\\note.txt")}, parent: None }
+ToolResult { id: "call_1", ok: true, declined: false, exit_code: None, text: "" }
+Context { used: Some(11777), window: Some(1048576) }
+Tool { id: "call_2", name: "Write", input: Object {"content": String("ALPHA"), "file_path": String("<work>\\out.txt")}, parent: None }
+ToolResult { id: "call_2", ok: true, declined: false, exit_code: None, text: "" }
+Tool { id: "call_3", name: "Bash", input: Object {"command": String("cmd /c echo hello-from-cmd")}, parent: None }
+Permission { request_id: "1", tool: "Bash", input: Object {"command": String("cmd /c echo hello-from-cmd")} }
+ToolResult { id: "call_3", ok: true, declined: false, exit_code: Some(0), text: "hello-from-cmd\r\n" }
+Break { final_answer: false }
+Text("1. Read [note.txt](file://<work>/no")
+Text("te.txt) (`alpha`).\n2. Wrote its upp")
+Text("ercased content (`ALPHA`) to [out.t")
+Text("xt](file://<work>/out.txt).\n3. Ran ")
+Text("`cmd /c echo hello-from-cmd`.\n\n**Ou")
+Text("tput:**\n```\nhello-from-cmd\n```")
+Context { used: Some(12043), window: Some(1048576) }
+Done { ok: true, reason: "end_turn", cost_total_usd: None, input_tokens: 35213, output_tokens: 216, cache_read_tokens: 19184, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: false }

@@ -1,0 +1,3 @@
+{"msg":{"id":"future","method":"permissions/request","params":{"threadId":"t"}},"vendor":"codex"}
+{"msg":{"id":18,"method":"future/requestApproval","params":{"threadId":"t"}},"vendor":"codex"}
+{"msg":{"type":"control_request","request_id":"future","request":{"subtype":"future_permission"}},"vendor":"claude"}

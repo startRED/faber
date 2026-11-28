@@ -1,0 +1,177 @@
+# Catalog
+
+Stageshow's [optional demos](../product/frontend.md#evidence-and-limits) use More controls. The kit stays external.
+
+Faber's [frontend](../product/frontend.md), [media](../product/media.md) and workflow proof skills ride its guide without cards or switches.
+[Roblox pipeline](../product/roblox.md) cards appear in searches and their own filter, and copy requests for Projects.
+
+Installed browser tools match performance requests by intent within existing permission, project and on/off boundaries.
+
+Catalog is beside Chat and Projects (R344), replacing tool controls in Settings. It has no composer, project instructions or AI picker.
+
+## Audio runtimes
+
+Cards show licences, size, memory and uv needs. [Runtime contract](audio-runtimes.md): integrity, install,
+delivery and recovery.
+
+## Browsing
+
+Search comes first, with three shelves ([search and shelves](catalog-search.md)); Select all shown follows the results. Search is focused with the shared Ctrl+F (Command+F on macOS) from `ui/keys.ts`, also named in the
+shortcut sheet. All, Skills, Tool servers and Installed are native pressed buttons; Plugins joins them only when the
+catalog lists a plugin, so no pill leads to an empty list. The catalog has 117 skills, four servers and one plugin
+(`frontend-design`, one skill); rejected candidates have no placeholder cards. Good start offers debugging, simple code and interface design, plus general everyday skills.
+Its ten recommended-tier entries include the original debugging, test-driven development, ponytail and interface
+design entry points; area-specific tools and ponytail-debt stay under their job groups. Its picks move to the front before paging, so
+recommendations outside the first source page are reachable and no item repeats on a later page. The ten plain groups
+are code, interface design, planning, data, web services/payments, mobile apps, notes/research/writing, marketing,
+building games and game design. Legacy job identifiers stay intact; browsing merges their narrower groups. Each item appears
+once. Cards name the item, describe its job, name owner/repo and licence, and state whether it is installed/on/off or
+needs Node. Search includes the name, job, description and repository. Empty searches and first-run installs have calm
+plain words. Installed search matches personal/project skills, plugin records and reported servers as well as catalog
+cards; its empty state waits for the full selected snapshot. Download failures keep a retry beside the error; browsing
+uses the local catalog even offline. The sidebar keeps New conversation in place while Catalog is open, so tabs never
+jump under the pointer. The command box includes Go to Catalog and calls the same navigation as the sidebar. Its running
+action returns to the previous work area and shows the column, including when it was already open behind Catalog.
+When removal empties the last Installed page, the list returns to its last remaining page instead of leaving a blank list.
+
+Each card shows a drawing for its job (`ui/Glyphs.tsx`; plugins a puzzle piece, servers a globe) tinted with the accent while the item is on, and a dot before its state words. Beside the card, outside its button (one control): a select box (top right), the source page in the system browser, and Install or the on/off switch (bottom right), which save through the same store calls as the detail. The select box and source link are hidden at rest; they show on hover, keyboard focus, every card once anything is selected, and always without hover. A selection survives filters, search and pages; Select all shown adds or removes the visible cards. While anything is selected a bar floats at the bottom of the list with the count and only the actions that fit the selection (Install, Turn on, Turn off, Remove, each with its count), run in turn with "Working on 2 of 5". Removing several asks first and says they can be installed again (Undo keeps one removal). Items that fail stay selected and the notice offers Try again. Escape leaves the question, then clears the selection.
+
+The card switch uses the shared small-control hit area without native margins. Its centre follows the ordinary
+quick-action centre using the two height tokens, rather than a fixed offset that shifts when the hit area changes.
+`tests/ui/grammar.check.ts` checks the alignment.
+
+Cards use the look's surface, ink, line and radius tokens. Hover changes surface and border only; press changes the same
+properties, with no travel, scaling or blur. Reduced/no motion removes the transition. At 720 px cards become one column,
+filters wrap, and long names, pins and paths wrap. The ordinary narrow sidebar remains a modal dialog with its existing
+focus trap and Escape close. Heading focus enters the same-tab detail without the browser scrolling it behind Back;
+opening or returning focus to a detail resets its reading surface to the top. The focused title remains below Back at
+720×480, including enlarged text and every language. Back and Escape return focus to the original card.
+The same Back button stays visible near the top while the detail scrolls, in an opaque bar across the reading column
+so no fragments of the scrolling text show beside it. It adds no motion or second navigation control.
+
+## Detail and actions
+
+Detail opens with a large drawing, the name, the job and the state, and Open the source page. "What you get" holds the item's description; the actions come next; "How it works in Faber" lists installing, when the agent uses it and what it can reach, each with its drawing. Detail names what the item does, when the agent can use it, access implications, source repository, licence and pinned
+commit/package version. New items with prerequisites name them in the five locales, under usage and before Install;
+these are requirements for use, not a second installer. When the pinned SKILL.md name differs from the card id,
+one localized “Name in the AI tool” line shows it before installation. Repository and Node download links open through the existing checked system-browser command.
+Skills guide the agent's existing file, command, network and browser powers; they create no new sandbox. The current
+server controls a headless Chrome browser, with Faber's telemetry/update/file-navigation denies preserved.
+
+A plugin is one checked item containing skills, slash-command prompts, subagent definitions and/or R253-portable
+servers. Its card summarizes the parts and names delivery limits; its detail lists each part and its access. Commands
+guide the project agent within its current permissions; subagents inherit those permissions; servers need Full access.
+The Claude Code limit line appears only for a plugin that has a command or subagent, with Claude connected and its flags
+already read. A plugin's parts have no intent words of their own: a task that matches the plugin's job loads all its skills
+and servers together, within the same six-item budget as other items.
+A bundled server requires Node before Install, like a standalone server. Plugins stay out of the Skills filter.
+Install, On/Off, Remove and Undo apply to the whole plugin through the existing store, lock, ledger and journal;
+parts never acquire independent installation rows or switches. Installed opens the parent plugin detail.
+
+Projects receives checked commands and agents in Claude Code's existing private session plugin, alongside skills,
+when the installed CLI declares its plugin flag. Otherwise the card and detail say that commands and agents are
+unavailable and skills use the existing instruction fallback. Codex skills keep their existing delivery; subagents
+use checked role TOML files through per-session agent configuration. Codex gets no plugin slash-command prompts,
+which the card and detail say plainly. Faber never writes personal command/agent folders or CLI configuration.
+Chat receives only task-picked catalog skill text, including plugin skills; plugin commands and agents stay in Projects.
+Bundled servers use the existing project picker and saved preferences with namespaced identities. Turning the parent
+off disables their project switches without replacing saved choices. Every plugin source folder and delivered part is
+checked again before use; hooks, binaries, shipped scripts, postinstall and unsupported parts keep a candidate out.
+
+Install checks the original source's pinned files and never executes shipped scripts. Install, Remove and installed
+on/off are separate actions. Turning off retains checked files outside every CLI skill root. Remove asks in place,
+with Cancel, then offers Undo. Undo restores the previous on/off state locally after a pin/digest check. The screen saves
+the removed item and its on/off choice together only after successful removal; a failed removal of another item leaves
+that Undo unchanged. Retry recognizes when recovery completed that exact restore, even during another store action or
+session launch, and updates the screen. A small completed receipt remains until the next successful removal, Catalog
+entry or engine restart; it retains no removed files and is checked against the restored copy before acknowledgement. An intent
+record precedes the file move; interrupted restores complete before launch pruning or cleanup, and a failed ledger
+save leaves the recoverable copy and intent in place. Only the latest manual removal is shown for Undo; opening Catalog or restarting
+the engine expires unreachable copies after recovery. An agent removal uses this same Undo notice and retains its prior on/off choice; its receipt survives opening Catalog so the person can reach Undo, then expires at engine restart. Restoring one offers the next pending agent removal through that same notice, without reopening Catalog. Disabled copies are checked by name, ledger and folder type on
+launch; their files are hashed when enabling. Future sessions in Chat and Projects follow the saved choice and existing
+permission boundaries. The session kit selects verified installed instructions and servers for each task; Claude
+Projects also discovers descriptions of all enabled catalog skills. Chat receives only selected catalog instructions,
+never personal or external plugin skills; servers there need an explicit file-free, setup-free catalog review and Full access.
+Existing conversation kits retain their checked files; these choices apply to new sessions.
+
+Every shipped item has one hand-written `catalog.name.*` name in each of the five locales. Cards, details, installed
+catalog rows, removal messages, conversation work logs and the context panel's list of a conversation's tools use that same source; CLI aliases remain a separate detail.
+Codex Projects also receives a lazy index of all enabled skills, using their checked, shortened descriptions. Its 32 KiB
+cap is separate from the 16 KiB selected kit, so discovery cannot crowd out servers or pins. Chat skips oversized
+instructions and takes the next matching item that fits. Claude Projects names native plugin skills without outside
+file reads when its CLI supports the plugin flag; older CLIs and helpers receive the lazy Read fallback. An unchanged
+native resume, including warm-up, sends no repeated index.
+
+Updates, the update check and repairs: [Catalog updates](catalog-updates.md).
+
+An installed server's detail offers the project picker and existing per-project MCP preference. It reads/writes the same
+projects.json field, reports each connected CLI's last known state, and never treats global availability as a second
+project preference. A server must be installed and globally on for its project switch to be available. Off or Remove
+shows that switch off and disabled while preserving both its saved project preference and last reported session state;
+turning it on or undoing removal shows that same preference again.
+
+## Installed sources and limits
+
+Installed includes the catalog plus each CLI's known personal/project skill folders and plugin installation records,
+with source and location. Personal/project installs are read-only. Faber never starts a CLI, opens skill bodies, follows
+plugin install paths or reads broad home configuration. A linked personal skill appears by the link's own name and path,
+marked Linked, not inspected, without resolving or opening its target. Project links and linked roots remain refused.
+Display paths omit Windows verbatim prefixes; plugin rows say Plugin record instead of exposing a manifest filename.
+Unknown external enablement is left unknown. Unsupported
+sources/overrides and unsafe/unreadable records are stated. In particular, Codex plugin state cannot be inferred from
+its cache. Project MCP names/statuses still come from the existing live-session snapshot rules (R334 through R337).
+
+The installed Codex 0.162.1 protocol has plugin reports, but they are not passive: even a local-only `plugin/list`
+can start catalog refresh tasks, while `plugin/installed` starts bundle synchronization. Opening Installed must not
+update tools (R50), so Faber leaves this state explicitly unreported instead of calling either method or reading broad
+home configuration. The screen explains why those plugins are absent. Evidence:
+[versioned plugin request processor](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/request_processors/plugins.rs#L733).
+
+The tab and its resources unmount on close. There is no interval, background process, network on browse, kept card DOM
+or per-frame work. Catalog pages draw at most 48 cards; inventory pages draw at most 48 rows per CLI. Discovery bounds
+folder entries/depth and manifest bytes before building its snapshot. CPU work is finite filtering and one snapshot per
+open/project/action. Filesystem commands run on blocking workers rather than the window's command thread. Inventory
+returns an unavailable state within two seconds; one scanner owns its permit until it actually finishes, even after
+timeout, so retries cannot accumulate stalled readers. Disk cost includes disabled items, manual and pending agent Undo copies and leased snapshots.
+Metadata is capped at 36 KiB; stored job limits are 35 for building games, 11 for marketing, 23 for game design
+and 14 for any remaining job, checked in engine tests. Only metadata and localized words ship. Actual working-set/CPU
+measurements and the native screen suite belong to the lead's unsandboxed validation; no measured saving is claimed.
+
+Checks: `tests/ui/catalog.check.ts`, `tests/ui/plugins.check.ts`, `engine/tests/plugins.rs`,
+`engine-projects/src/tools/plugins.rs` and `plugin_delivery.rs`, `tests/ui/kits.check.ts`, `engine/tests/locales.rs` (each shipped name, each locale),
+`engine/src/engine/kits.rs` (native resume and oversize discovery), `engine/tests/tools.rs`, `engine/tests/tool_inventory.rs`, and existing MCP checks.
+Cards checked in code review: C007 (localized UTF-8), C009 (shared context menu policy), C011 (management placement).
+Catalog is not a C005 work home; no composer is added to satisfy that card. Visual screenshots remain to be verified.
+
+## Cost statement for the pull request
+
+No new process, background timer or persistent catalog DOM. While open, render at most 48 tool cards, five matching
+pipeline cards and 48 inventory rows per AI page; keep one bounded metadata snapshot and at most one inventory worker. A timed-out filesystem call may
+retain that one worker until the OS returns, without polling or queuing retries. Closed, the tab releases its nodes and
+listeners. Disabled tools are hashed on activation. Snapshot preparation and cleanup use one store worker; ready sessions
+rehash the whole folders they may use before launch, outside the engine lock, including supporting files and server code.
+One launch check runs at a time per engine, so simultaneous conversations cannot multiply its file buffers.
+Transient preparation failures back off from one to sixty seconds; a catalog change allows an immediate retry. A snapshot shares
+verified files through hardlinks where supported, with streamed-copy fallback and a 256 MiB aggregate cap. Leases keep old
+states alive while needed; startup cleanup expires all Undo files; entry cleanup expires only manual Undo files from the previous visit. Native
+working-set/processor measurements were not available in this sandbox, so no measured MB or CPU improvement is claimed.
+Undo metadata is one item id and its prior on/off choice; a restore attempt adds a bounded receipt read before the
+existing checks. Completed receipts add no per-session hashing or writes. No background work or process is added.
+
+## Agent requests
+
+Agent search shows up to eight hits per shelf: Faber Kit, mine, then open world by installs. Site, game,
+video and voice put their kit first. Mine: the ledger, the CLI's skills and plugins, known servers.
+Live search sends at most eight plain words (no paths, emails, URLs, domains, file names, IDs or numbers). The inventory and
+both directories run in parallel, each with a 4 s deadline and a 512 KiB body cap; a failed one leaves the other shelves.
+Up to 16 queries are cached: full answers 10 min, partial ones 1 min. Look-alikes of checked tools are dropped.
+Neither Faber nor the AI installs a directory hit yet (the AI is told not to); R33 will ask once when it can. Checked installs
+in live Full access skip the card (R584), verify digests and log `conv` and `full_access`.
+
+Removal has separate consent. Its card says Catalog Undo lasts until restart and current tools stay available.
+
+Replacement streams hashes in 64 KiB chunks under the 64 MiB file cap. Catalog search starts no process; the cache keeps only
+result IDs, sources and ranks.
+
+Pinned server descriptions disclose Chrome or Node.js 24 requirements. Rejections use the localized retry notice.
+Context7 and step-by-step thinking share the Full access boundary in Chat and Projects. Browser servers are Projects-only.

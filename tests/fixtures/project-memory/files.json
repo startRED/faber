@@ -1,0 +1,31 @@
+{
+  "files": [
+    "CLAUDE.md",
+    ".claude/CLAUDE.md",
+    "CLAUDE.local.md",
+    "AGENTS.md",
+    "override/AGENTS.override.md",
+    "src/CLAUDE.md",
+    "src/.claude/CLAUDE.md",
+    "src/CLAUDE.local.md",
+    "src/AGENTS.md",
+    "src/override/AGENTS.override.md",
+    ".faber/learning.md",
+    ".faber/decisions/choices.md"
+  ],
+  "text": "# Rules\r\n\r\nUse native widgets.\r\n\r\n- Run the tests.\r\n  Keep the output.\r\n  - A nested detail.\r\n\r\n- Keep paths local.\r\n\r\n```text\r\n- not an entry\r\n```\r\n",
+  "entries": [
+    {
+      "line": 3,
+      "text": "Use native widgets."
+    },
+    {
+      "line": 5,
+      "text": "- Run the tests.\r\n  Keep the output.\r\n  - A nested detail."
+    },
+    {
+      "line": 9,
+      "text": "- Keep paths local."
+    }
+  ]
+}

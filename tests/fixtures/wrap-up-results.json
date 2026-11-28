@@ -1,0 +1,23 @@
+{
+  "description": "Synthetic conversation for a screen photograph of an agent reporting results after wrap-up; values are illustrative, not recorded usage.",
+  "messages": [
+    {
+      "id": "request",
+      "role": "user",
+      "at": 1000,
+      "text": "Fix the login page and check it."
+    },
+    {
+      "id": "reply",
+      "role": "assistant",
+      "at": 2000,
+      "status": "done",
+      "text": "The login page is fixed and checked. The conversation delivered one changed file and one passing check, at an API value of $0.02.",
+      "wrapUp": {
+        "recap": "The login page is fixed and checked.",
+        "done": true,
+        "actions": []
+      }
+    }
+  ]
+}

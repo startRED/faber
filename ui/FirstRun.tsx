@@ -1,0 +1,381 @@
+import { createEffect, createSignal, For, type JSX, onCleanup, onMount, Show } from 'solid-js';
+import themes from '../src-tauri/src/themes.json';
+import { api, type Appearance, type Experience, type Look, type Motion } from './api.ts';
+import { appliedLook, applyLook, motion as motionNow, previewer, switchTheme } from './appearance.ts';
+import { Segmented } from './controls.tsx';
+import { Icon, VendorMark } from './Glyphs.tsx';
+import { failureText, t } from './i18n.ts';
+import type { Key } from './locales/en.ts';
+import { Mark } from './Mark.tsx';
+
+// The first run: a stage with no sidebar, a stepper on top, and the step below it. Step 1 is `Setup` (ui/Setup.tsx) and
+// step 2 is `LookStep`; step 3 is the new conversation itself. The stage is a modal dialog: nothing else is on screen.
+
+const THEMES = themes['user-controls'].themes;
+const STEPS = ['accounts', 'look', 'chat'] as const;
+
+export function StorageQuestion(props: { onDone: () => void; onError: (error: unknown) => void }) {
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<unknown>();
+  const save = async (reset: boolean) => {
+    if (busy()) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      if (await api.storageChoose(reset)) props.onDone();
+    } catch (failure) {
+      if (reset) {
+        props.onError(failure);
+        props.onDone();
+      } else {
+        setError(failure);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Stage labelledby="first-storage-title">
+      <Title id="first-storage-title" text={t('set.storage.location')} />
+      <p class="sub">{t('first.storage.low')}</p>
+      <div class="setup-card-actions">
+        <button type="button" class="btn" aria-disabled={busy()} onClick={() => void save(false)}>{t('set.storage.change')}</button>
+        <button type="button" class="btn" aria-disabled={busy()} onClick={() => void save(true)}>{t('first.storage.keep')}</button>
+      </div>
+      <Show when={error()}>{(failure) => <p class="note err" role="alert">{failureText(failure())}</p>}</Show>
+    </Stage>
+  );
+}
+
+/** Three steps: the ones before `at` are done, `at` is the current one. */
+export function Stepper(props: { at: 1 | 2 }) {
+  return (
+    <ol class="stepper" aria-label={t('first.steps')}>
+      <For each={STEPS}>
+        {(id, i) => (
+          <li classList={{ done: i() < props.at - 1, cur: i() === props.at - 1 }} aria-current={i() === props.at - 1 ? 'step' : undefined}>
+            <Show when={i() < props.at - 1}>
+              <Icon name="check" small />
+            </Show>
+            {t(`first.step.${id}` as Key)}
+          </li>
+        )}
+      </For>
+    </ol>
+  );
+}
+
+/** The window of the first run. `step` is the stepper's place; the cards that only reconnect an account have none. */
+export function Stage(props: { step?: 1 | 2; labelledby: string; children: JSX.Element }) {
+  return (
+    <div class="fr-stage" data-screen={props.step === 1 ? 'first.accounts' : props.step === 2 ? 'first.look' : 'setup'} classList={{ plain: !props.step }} role="dialog" aria-modal="true" aria-labelledby={props.labelledby}>
+      <Show when={props.step}>
+        {(at) => (
+          <div class="fr-top">
+            <Stepper at={at()} />
+          </div>
+        )}
+      </Show>
+      <div class="firstrun">{props.children}</div>
+    </div>
+  );
+}
+
+/** A heading whose last word is set apart, so a look with an italic or dimmed emphasis (Workshop, Dark Room) can draw it. */
+export function Title(props: { id: string; text: string }) {
+  const at = () => props.text.lastIndexOf(' ');
+  // The heading takes focus when the step opens, so a keyboard or screen reader user starts at the top of it.
+  return (
+    <h1 id={props.id} class="display fr-title" tabindex="-1" ref={(el) => queueMicrotask(() => el.focus())}>
+      {at() < 0 ? props.text : props.text.slice(0, at())}
+      <Show when={at() >= 0}>
+        {' '}
+        <em>{props.text.slice(at() + 1)}</em>
+      </Show>
+    </h1>
+  );
+}
+
+/** One small live render of the app, drawn with the tokens of its own look. It is a picture: nothing in it can be used.
+ * A `base` asks the shell for that theme as designed; a `look` is drawn as given (the preview of Settings). */
+export function Mini(props: { base?: string; look?: Look }) {
+  let el: HTMLSpanElement | undefined;
+  onMount(() => {
+    if (props.base) {
+      void api
+        .previewLook({ base: props.base })
+        .then((look) => el && applyLook(look, el))
+        .catch(() => undefined);
+    }
+  });
+  createEffect(() => {
+    const look = props.look;
+    if (look && el) applyLook(look, el);
+  });
+  const title = () => t('first.mini.title');
+  const at = () => title().lastIndexOf(' ');
+  return (
+    <span class="mini" ref={(node) => (el = node)} aria-hidden="true">
+      <span class="m-side">
+        <Mark size={16} />
+        <i class="on" />
+        <i style={{ width: '80%' }} />
+        <i style={{ width: '60%' }} />
+        <i style={{ width: '72%' }} />
+      </span>
+      <span class="m-main">
+        <span class="grain" />
+        <span class="m-amb m-beam" />
+        <span class="m-amb m-loom" />
+        <span class="m-amb m-flow" />
+        <span class="m-h display">
+          {title().slice(0, at())} <em>{title().slice(at() + 1)}</em>
+        </span>
+        <span class="m-bar">
+          <i />
+        </span>
+        <span class="m-ask">
+          <Icon name="ask" small />
+          {t('run.needsYou')}
+        </span>
+        <span class="m-row">
+          <span class="vm claude">
+            <VendorMark vendor="claude" />
+            {t('first.mini.claude')} <span class="verb">{t('run.working')}</span>
+          </span>
+        </span>
+        <span class="m-row">
+          <span class="vm codex">
+            <VendorMark vendor="codex" />
+            {t('first.mini.codex')} <span class="verb">{t('run.working')}</span>
+          </span>
+        </span>
+        <span class="m-foot">
+          <span class="m-in">{t('first.mini.input')}</span>
+          <span class="m-btn">{t('composer.send')}</span>
+        </span>
+      </span>
+    </span>
+  );
+}
+
+/** One look to choose, in both places that offer one. `sm` is Settings: a small picture with its name and its kind under it.
+ * `lg` is the first run: a larger card with the description beside a radio. The ids start with `prefix`, so a screen can
+ * hold both. */
+export function LookCard(props: { id: string; prefix: string; size: 'sm' | 'lg'; selected: boolean; onPick: () => void }) {
+  const large = () => props.size === 'lg';
+  const name = () => t(`look.${props.id}.name` as Key);
+  const desc = () => t(`look.${props.id}.desc` as Key);
+  const ids = (part: string) => `${props.prefix}-${props.id}-${part}`;
+  const kind = () => t(props.id === themes.default ? 'set.kindDefault' : themes['user-controls'].themes.includes(props.id) ? 'set.kindTheme' : 'set.kindPreset');
+  return (
+    <button
+      type="button"
+      class={large() ? 'tcard' : 'preset'}
+      aria-pressed={props.selected}
+      aria-labelledby={ids('name')}
+      aria-describedby={ids('desc')}
+      title={large() ? undefined : desc()}
+      onClick={() => props.onPick()}
+    >
+      <Show
+        when={large()}
+        fallback={
+          <>
+            <span class="thumb" aria-hidden="true">
+              <Mini base={props.id} />
+            </span>
+            <span class="nm" id={ids('name')}>
+              {name()}
+            </span>
+            <span class="kind">{kind()}</span>
+            <span class="sr" id={ids('desc')}>
+              {desc()}
+            </span>
+          </>
+        }
+      >
+        <Mini base={props.id} />
+        <span class="meta">
+          <span class="radio" aria-hidden="true" />
+          <span class="txt">
+            <span class="nm" id={ids('name')}>
+              {name()}
+              <Show when={props.id === themes.default}>
+                <small>{t('look.default')}</small>
+              </Show>
+            </span>
+            <span class="ds" id={ids('desc')}>
+              {desc()}
+            </span>
+          </span>
+        </span>
+      </Show>
+    </button>
+  );
+}
+
+
+/** Step 2: the three looks side by side, the first settings, and the question that decides how much the tutorial says. */
+export function LookStep(props: {
+  /** The saved appearance, none for a first run. */
+  initial?: Appearance;
+  experience?: Experience;
+  /** The name typed so far, or the one already saved. */
+  userName?: string;
+  /** The key to other windows as chosen so far or saved; it starts off (the owner's answer 4, 2026-11-25). */
+  otherWindows?: boolean;
+  /** Going back keeps the choices made so far, for when the person comes forward again. */
+  onBack: (appearance: Appearance, experience: Experience | undefined, name: string, otherWindows: boolean) => void;
+  /** Saves everything. Resolves to false when the save failed, and the step stays open. */
+  onContinue: (appearance: Appearance, experience: Experience | undefined, name: string, otherWindows: boolean) => Promise<boolean>;
+  onError: (err: unknown) => void;
+}) {
+  const [draft, setDraft] = createSignal<Appearance>(props.initial ?? { base: themes.default });
+  const [experience, setExperience] = createSignal<Experience | undefined>(props.experience);
+  const [name, setName] = createSignal(props.userName ?? '');
+  const [otherWindows, setOtherWindows] = createSignal(props.otherWindows === true);
+  const [busy, setBusy] = createSignal(false);
+  // Every choice goes to the look engine at once, and only the answer to the newest request is applied to the page.
+  const preview = previewer(api.previewLook, (look) => applyLook(look), props.onError);
+  // A request still on its way when this step closes must not land on the next screen.
+  onCleanup(() => preview.cancel());
+  const change = (next: Appearance) => {
+    setDraft(next);
+    void preview(next);
+  };
+  const density = () => draft().density ?? appliedLook()?.appearance.density ?? 1;
+  const textSize = () => draft().textSize ?? appliedLook()?.appearance.textSize ?? 15;
+  // Nothing chosen yet means the look's own level, held down by a system that asks for less motion.
+  const shownMotion = () => draft().motion ?? motionNow();
+  const go = async () => {
+    setBusy(true);
+    // The saved look is applied when the save answers, so no preview may land after it.
+    preview.cancel();
+    try {
+      await props.onContinue(draft(), experience(), name(), otherWindows());
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Stage step={2} labelledby="fr-title">
+      <Title id="fr-title" text={t('first.look.title')} />
+      <p class="sub">{t('first.look.sub')}</p>
+      <div class="themes" role="group" aria-labelledby="fr-title" inert={busy()}>
+        <For each={THEMES}>
+          {(id) => (
+            <LookCard id={id} prefix="fr" size="lg" selected={draft().base === id} onPick={() => change(switchTheme(draft(), id))} />
+          )}
+        </For>
+      </div>
+      <div class="first-ctl" inert={busy()}>
+        {/* The same control as Settings > Appearance, so the first choice and a later one are one thing. */}
+        <div class="ctl">
+          <label class="lbl" for="fr-size">
+            {t('set.textSize')}
+          </label>
+          <input
+            id="fr-size"
+            class="range"
+            type="range"
+            min={themes['user-controls']['text-size'].min}
+            max={themes['user-controls']['text-size'].max}
+            step={themes['user-controls']['text-size'].step}
+            value={textSize()}
+            aria-describedby="fr-size-value"
+            onInput={(e) => change({ ...draft(), textSize: e.currentTarget.valueAsNumber })}
+          />
+          <p class="hint" id="fr-size-value">
+            {t('set.textSizeValue', { n: textSize() })}
+          </p>
+        </div>
+        <Segmented
+          id="fr-density"
+          label={t('set.density')}
+          value={density()}
+          onPick={(d) => change({ ...draft(), density: d })}
+          options={[
+            [1, t('set.densityComfortable')],
+            [0.8, t('set.densityCompact')],
+          ]}
+        />
+        <div class="ctl">
+          <Segmented
+            id="fr-motion"
+            label={t('set.motion')}
+            value={shownMotion()}
+            onPick={(m) => change({ ...draft(), motion: m })}
+            options={(['full', 'reduced', 'none'] as Motion[]).map((m): [Motion, string] => [m, t(`look.motion.${m}` as Key)])}
+          />
+          <p class="hint">{t('first.motionHint')}</p>
+        </div>
+        <div class="ctl">
+          <span class="lbl" id="fr-xp">
+            {t('first.xp.title')}
+          </span>
+          <div class="choice2" role="group" aria-labelledby="fr-xp">
+            <For each={['beginner', 'experienced'] as const}>
+              {(level) => (
+                <button type="button" aria-pressed={experience() === level} onClick={() => setExperience(level)}>
+                  {t(`first.xp.${level}` as Key)}
+                  <small>{t(`first.xp.${level}Hint` as Key)}</small>
+                </button>
+              )}
+            </For>
+          </div>
+        </div>
+        <div class="ctl">
+          <label class="lbl" for="fr-name">
+            {t('set.name')}
+          </label>
+          <input
+            id="fr-name"
+            class="field"
+            type="text"
+            maxLength={40}
+            autocomplete="off"
+            aria-describedby="fr-name-hint"
+            value={name()}
+            onInput={(e) => setName(e.currentTarget.value)}
+          />
+          <p class="hint" id="fr-name-hint">
+            {t('first.name.hint')}
+          </p>
+        </div>
+        {/* The key is the one first-run choice a default covers (R585): it is here, off, so the risk is read before it is used. */}
+        <div class="ctl first-key">
+          <div class="first-key-row">
+            <input
+              id="fr-other-windows"
+              class="sw2"
+              type="checkbox"
+              role="switch"
+              aria-describedby="fr-other-windows-hint"
+              checked={otherWindows()}
+              onChange={(e) => setOtherWindows(e.currentTarget.checked)}
+            />
+            <label class="lbl" for="fr-other-windows">
+              {t('set.otherWindows')}
+            </label>
+          </div>
+          <p class="hint" id="fr-other-windows-hint">
+            {t('first.otherWindowsHint')}
+          </p>
+        </div>
+      </div>
+      <div class="first-foot">
+        <p>{t('first.foot')}</p>
+        <button type="button" class="btn ghost" disabled={busy()} onClick={() => props.onBack(draft(), experience(), name(), otherWindows())}>
+          <Icon name="left" small />
+          {t('first.back')}
+        </button>
+        <button type="button" class="btn primary big" disabled={busy()} onClick={() => void go()}>
+          {t('first.continue')}
+          <Icon name="right" small />
+        </button>
+      </div>
+    </Stage>
+  );
+}

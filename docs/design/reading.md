@@ -1,0 +1,107 @@
+# Reading
+
+How conversation text reads and keeps its place, in Chat and Projects.
+
+- The conversation and message box share a centered 760 px column, expanding to 960 px at window widths of 1600 px and up.
+  Stage gutters are 24 px, or 16 px at window widths up to 760 px. Prose uses `--fs-read` with 1.6 leading and a 680 px
+  cap, or `--fs-lead` and a 640 px cap at wide widths. Paragraph gaps are 12 px and list items are 8 px apart.
+  The reply identity, work-log verbs and first heading use weight 600. Other strong text keeps weight 580.
+  The finished reply status starts at the answer column, and the conversation header covers the transcript during scroll.
+  When the window is short, the attachment count opens a tray with a separate remove control beside each picture.
+  The first title uses `--fs-h3` with 8 px below it. Section headings use `--fs-lead` with 20 px above and 10 px below.
+  A table has horizontal rules and scrolls within a 680 px cap. Code has 12 px inset and a separate language and copy bar.
+  The transcript starts at 18 px and ends at 40 px. The 6 px leading fade softens letters clipped at the header.
+  The 22 px trailing fade needs more than 820 px of height. Both fades are off while focus is in the transcript and
+  in forced colors. At 540 px or less the header is 40 px, the transcript
+  starts at 8 px and the opening paragraph uses 1.5 leading. Selecting words in an answer floats "Ask about this" over
+  them (menu motion), and it puts them in the message box as a quote. Scrolled up, "Jump to latest" sits between the
+  scroll viewport and the composer, keeping media controls clear. It scrolls down smoothly.
+- A conversation initially loads its newest 40 messages and opens at the tail. Near the first drawn message, it
+  requests the preceding 40 and inserts them in four-message batches across animation frames, with an instant viewport
+  correction after each batch and any focused search marker restored. The final frame and resize corrections reapply
+  the same anchor after offscreen replies update their estimated heights. One request per conversation window may be
+  in flight; remaining batches are discarded after navigation or disposal. Scrolling by hand between batches updates
+  the anchor. Capturing a reading position starts with viewport hit testing, with a geometry fallback; restoring it
+  matches message identity before measuring that row. Unchanged positions never write to the native scroll offset.
+  Search and version links, and a saved reading position, load as many pages as their target needs. Message indices and
+  saved positions include the unloaded `Conversation.earlier` offset. Loaded pages stay in memory, but at most 120
+  messages (three pages) are drawn: past that, paging up lets go of the newest drawn ones and paging down of the earliest,
+  with the row being read kept in place, so reading a thousand messages from the first stays as light as reading the last
+  ones (a thousand drawn messages took the window past 850 MB, R125). Nothing adds a setting, a second scroll view or motion. Chat and Projects share this behavior, including reduced motion and narrow windows.
+- User messages share the native `content-visibility: auto` skipping used by answers, with a remembered intrinsic height
+  of 160 px until measured; offscreen rows stay in the same DOM for selection, find and reading anchors. Bottom padding
+  contains the action bar's negative margin, so native paint containment never clips its hit targets.
+- Returning to a conversation, including after a restart, keeps the same message at the same reading offset even when
+  earlier text or pictures changed height. Search still opens its result, keeping its focus and brief outline if scrolling
+  loads an earlier page. Pagination restores its viewport after reconnecting focus, so any geometry change caused by
+  focusing a reused row is included in the correction. Reading above the tail never follows new words;
+  scrolling by hand immediately changes the reading point. A removed message falls back to its surviving neighbour.
+  This correction is instant at every motion level and uses the existing message window, not a second scrolling view.
+- "Jump to latest" first selects the conversation's newest message window, then scrolls to its end; it never stops at
+  an intermediate loaded page. Reaching that tail removes the old reading position from storage.
+- In the helper column, centering uses layout translation independently of press feedback, so reducing motion never
+  moves "Jump to latest" out from under the pointer (`tests/ui/motion.check.ts`, "the helper Latest action").
+
+## Streaming text
+
+A growing Markdown block updates compatible text and elements in place after sanitisation. Appending words preserves
+the existing text node and selection; code blocks keep keyboard focus and horizontal scroll. Changed reference links
+update their attributes, including removing unsafe or obsolete attributes. A change of block type can still replace
+that block. No second message tree, timer or unbounded cache is retained. The focused streaming check in
+`tests/ui/thread.check.ts` covers those guarantees, not every source of viewport movement.
+
+## Verification
+
+The hidden Chat and Projects screen scenarios in `testkit/src/screen/reading.rs` each use 160 synthetic messages and no AI. Each closes the
+first app and requires its process tree, including WebView2, to exit before enlarging an earlier saved message and
+relaunching the same profile. It checks the real message id and viewport offset, native wheel scrolling, the latest
+message and forgotten tail position, the unchanged conversation file, and screenshots at 1280 and 720 px.
+
+The existing tree memory limit remains 400 MB. Report this fixture's sampled tree memory and CPU over its measured
+post-launch flow intervals; these are not isolated anchor overhead, broad latency results or a zero-cost claim.
+
+### Measured fixture (Windows, 2026-10-23)
+
+The original Chat 160-message scenario passed with motion set to none and no AI. The first app and WebView2 tree ended before
+the same profile reopened in another native process; a larger earlier message preserved message 7 at its -24 px offset.
+The 1280 and 720 px captures, native wheel gesture, one-click jump to message 159 and removal of the stored position passed.
+
+| Measurement | Result |
+| :--- | :--- |
+| Sampled app and WebView2 tree peak | 165.9 MB, below the unchanged 400 MB limit |
+| CPU across the two post-launch scripted intervals | 2,141 ms over 2,094 ms, 102.2% of one core |
+| Whole native scenario, including launches and shutdown | 20.5 s |
+
+CPU covers navigation, scrolling and screenshots on this fixture; it excludes app launches and the closed-profile interval.
+It is a flow measurement on a busy local PC, not isolated feature overhead or a broad interaction latency result.
+The disabled-cache mutation failed only after the real relaunch; its exact source bytes were restored before the green run.
+
+### Projects restart follow-up (Windows, 2026-10-23)
+
+The Projects case seeds one synthetic project and opens its conversation through the real area, project and conversation
+controls. After closing the app and WebView2 tree, it checks the same project identity and message 7 at its -24 px offset
+in another native process using the same profile. Earlier content grows while closed; 1280 and 720 px captures, a native
+wheel gesture, one jump to message 159, forgotten tail metadata and the unchanged conversation file are checked too.
+
+A temporary Projects-only omission of the loaded reading cache failed after the second real launch at the viewport
+assertion. Restoring the exact original app source made both Chat and Projects pass, with zero failed/not run/skipped.
+
+| Follow-up fixture | Sampled tree peak | CPU / measured post-launch flow | Scenario duration |
+| :--- | :--- | :--- | :--- |
+| Chat | 168.0 MB | 1,281 / 1,455 ms | 8.2 s |
+| Projects | 176.5 MB | 1,250 / 1,484 ms | 8.0 s |
+
+These are single busy-PC flows including navigation, scrolling and screenshots, not isolated overhead, a performance
+comparison or a zero-cost claim. The project is a synthetic local folder with no AI; this does not cover remote projects,
+other operating systems, smooth motion or a screen reader. This verification-only extension changes no app code.
+
+### Paged delivery fixture (Windows, 2026-11-01)
+
+The 300-message replay in `engine/tests/big_conversation.rs`, with 50 KB of text per message, compares the old full
+screen payload with the newest 40 on the same loaded engine. Fastest of three clone-and-serialize runs: 15,014,748 bytes
+in 493.0531 ms for all 300, versus 2,002,110 bytes in 65.0025 ms for 40 (86.7% fewer bytes, about 7.6 times shorter
+engine delivery). The cold newest-window engine opening took 84.4745 ms. Older pages walked back to message 5 without
+gaps. The test leaves its measurement in `target/faber-300-message-delivery.txt` because passing output is captured.
+
+These are synthetic engine delivery wall times, not a whole-app opening or isolated CPU measurement. Full-app memory,
+CPU, visible scrolling and the 300-message screen check remain CI proofs under R125; W10 runs no UI/screen suite locally.

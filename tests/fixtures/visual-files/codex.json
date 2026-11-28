@@ -1,0 +1,315 @@
+[
+  {
+    "method": "item/started",
+    "params": {
+      "item": {
+        "id": "read",
+        "type": "dynamicToolCall",
+        "tool": "read_file",
+        "arguments": {
+          "file_path": "read.html"
+        }
+      }
+    }
+  },
+  {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "id": "read",
+        "type": "dynamicToolCall",
+        "tool": "read_file",
+        "arguments": {
+          "file_path": "read.html"
+        },
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "method": "item/started",
+    "params": {
+      "item": {
+        "id": "write",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "page.html",
+            "kind": "add"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "id": "write",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "page.html",
+            "kind": "add"
+          }
+        ],
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "method": "item/started",
+    "params": {
+      "item": {
+        "id": "edit",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "drawing.svg",
+            "kind": "update"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "id": "edit",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "drawing.svg",
+            "kind": "update"
+          }
+        ],
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "method": "item/started",
+    "params": {
+      "item": {
+        "id": "diagram",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "flow.mmd",
+            "kind": "add"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "id": "diagram",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "flow.mmd",
+            "kind": "add"
+          }
+        ],
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "method": "item/started",
+    "params": {
+      "item": {
+        "id": "diagram-long",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "flow.mermaid",
+            "kind": "add"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "id": "diagram-long",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "flow.mermaid",
+            "kind": "add"
+          }
+        ],
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "method": "item/started",
+    "params": {
+      "item": {
+        "id": "long",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "large.htm",
+            "kind": "add"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "id": "long",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "large.htm",
+            "kind": "add"
+          }
+        ],
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "method": "item/started",
+    "params": {
+      "item": {
+        "id": "outside",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "../outside.html",
+            "kind": "add"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "id": "outside",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "../outside.html",
+            "kind": "add"
+          }
+        ],
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "method": "item/started",
+    "params": {
+      "item": {
+        "id": "other",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "private.txt",
+            "kind": "add"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "id": "other",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "private.txt",
+            "kind": "add"
+          }
+        ],
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "method": "item/started",
+    "params": {
+      "item": {
+        "id": "failed",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "failed.html",
+            "kind": "add"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "id": "failed",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "failed.html",
+            "kind": "add"
+          }
+        ],
+        "status": "failed"
+      }
+    }
+  },
+  {
+    "method": "item/started",
+    "params": {
+      "item": {
+        "id": "relative",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "./nested/page.htm",
+            "kind": "add"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "id": "relative",
+        "type": "fileChange",
+        "changes": [
+          {
+            "path": "./nested/page.htm",
+            "kind": "add"
+          }
+        ],
+        "status": "completed"
+      }
+    }
+  },
+  {
+    "method": "item/agentMessage/delta",
+    "params": {
+      "itemId": "reply",
+      "delta": "```mermaid\nflowchart LR\nA-->B\n```\n\n```mermaid\nflowchart LR\nUnfinished"
+    }
+  }
+]

@@ -1,0 +1,13 @@
+{"dir":"in","msg":{"type":"user","message":{"content":"check policy"}}}
+{"dir":"out","msg":{"type":"system","subtype":"init","session_id":"policy-fixture","model":"haiku"}}
+{"dir":"out","msg":{"type":"control_request","request_id":"write","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"src/new.rs","content":"ok"}}}}
+{"dir":"in","msg":{"type":"control_response","response":{"request_id":"write","response":{"behavior":"allow"}}}}
+{"dir":"out","msg":{"type":"control_request","request_id":"outside","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"../outside.txt","content":"no"}}}}
+{"dir":"in","msg":{"type":"control_response","response":{"request_id":"outside","response":{"behavior":"allow"}}}}
+{"dir":"out","msg":{"type":"control_request","request_id":"git","request":{"subtype":"can_use_tool","tool_name":"Edit","input":{"file_path":".git/config","old_string":"old","new_string":"evil"}}}}
+{"dir":"in","msg":{"type":"control_response","response":{"request_id":"git","response":{"behavior":"allow"}}}}
+{"dir":"out","msg":{"type":"control_request","request_id":"delete","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"rm -rf dist"}}}}
+{"dir":"in","msg":{"type":"control_response","response":{"request_id":"delete","response":{"behavior":"allow"}}}}
+{"dir":"out","msg":{"type":"control_request","request_id":"question","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Which database?","options":[{"label":"SQLite"},{"label":"Postgres"}]}]}}}}
+{"dir":"in","msg":{"type":"control_response","response":{"request_id":"question","response":{"behavior":"allow"}}}}
+{"dir":"out","msg":{"type":"result","subtype":"success","is_error":false,"usage":{}}}

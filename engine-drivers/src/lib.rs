@@ -1,0 +1,21 @@
+//! The CLI drivers of Faber's engine, above `faber-engine-core`: the Claude Code and Codex sessions, the Antigravity reader, the persona they
+//! start with, the helper, the agent's own tools (`plan`, `status`, `wrap_up`, the conversation tool) and the account
+//! readings. Edits here, frequent ones, rebuild this crate and the `Engine` only. `faber-engine` re-exports both.
+
+// The core's modules under their own names, so `crate::model` reads as it did before the split.
+pub(crate) use faber_engine_core::*;
+pub(crate) use faber_engine_projects::*;
+pub(crate) use faber_engine_store::*;
+
+pub mod account;
+pub mod agy;
+pub mod claude;
+pub mod codex;
+pub mod creative;
+pub mod faber_tool;
+pub mod helper;
+pub mod persona;
+pub mod progress;
+pub mod sibling;
+
+pub use account::AccountStatus;

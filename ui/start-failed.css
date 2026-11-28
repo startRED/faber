@@ -1,0 +1,7 @@
+/* The start-failure screen (ui/StartFailed.tsx): the window's bar and one short message, nothing else to click past. */
+.start-failed { position: fixed; inset: 0; z-index: 1000; display: grid; grid-template-rows: 36px minmax(0, 1fr); background: var(--frame); color: var(--ink); }
+.start-failed-body { align-self: center; justify-self: center; display: grid; gap: 12px; max-width: 34rem; padding: 24px; }
+.start-failed-body h1 { margin: 0; font: 600 var(--fs-h2) var(--font-display); }
+.start-failed-body p { margin: 0; color: var(--ink-2); font-size: var(--fs-read); line-height: 1.5; }
+.start-failed-body .start-failed-code { color: var(--ink-3); font: var(--fs-sm) var(--font-data); user-select: text; }
+.start-failed-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }

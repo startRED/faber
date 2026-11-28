@@ -1,0 +1,11 @@
+Started { session_id: "00000000-0000-4000-8000-000000000125", model: "gemini-4-neon-high" }
+Started { session_id: "00000000-0000-4000-8000-000000000125", model: "gemini-3.8-flash-low" }
+Context { used: Some(0), window: Some(1048576) }
+Context { used: Some(11721), window: Some(1048576) }
+Tool { id: "call_1", name: "AskUserQuestion", input: Object {"questions": Array [Object {"header": String(""), "multiSelect": Bool(false), "options": Array [Object {"description": String(""), "label": String("(Recommended) red")}, Object {"description": String(""), "label": String("blue")}], "question": String("Which color do you prefer?")}]}, parent: None }
+Permission { request_id: "1", tool: "AskUserQuestion", input: Object {"questions": Array [Object {"header": String(""), "multiSelect": Bool(false), "options": Array [Object {"description": String(""), "label": String("(Recommended) red")}, Object {"description": String(""), "label": String("blue")}], "question": String("Which color do you prefer?")}]} }
+ToolResult { id: "call_1", ok: true, declined: false, exit_code: None, text: "" }
+Break { final_answer: false }
+Text("blue")
+Context { used: Some(11799), window: Some(1048576) }
+Done { ok: true, reason: "end_turn", cost_total_usd: None, input_tokens: 23474, output_tokens: 46, cache_read_tokens: 9631, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: false }

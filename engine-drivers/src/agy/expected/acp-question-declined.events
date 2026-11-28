@@ -1,0 +1,12 @@
+Started { session_id: "00000000-0000-4000-8000-000000000124", model: "gemini-4-neon-high" }
+Started { session_id: "00000000-0000-4000-8000-000000000124", model: "gemini-3.8-flash-low" }
+Context { used: Some(0), window: Some(1048576) }
+Context { used: Some(11726), window: Some(1048576) }
+Tool { id: "call_1", name: "AskUserQuestion", input: Object {"questions": Array [Object {"header": String(""), "multiSelect": Bool(false), "options": Array [Object {"description": String(""), "label": String("red")}, Object {"description": String(""), "label": String("blue")}], "question": String("Which color do you prefer?")}]}, parent: None }
+Permission { request_id: "1", tool: "AskUserQuestion", input: Object {"questions": Array [Object {"header": String(""), "multiSelect": Bool(false), "options": Array [Object {"description": String(""), "label": String("red")}, Object {"description": String(""), "label": String("blue")}], "question": String("Which color do you prefer?")}]} }
+ToolResult { id: "call_1", ok: true, declined: false, exit_code: None, text: "" }
+Break { final_answer: false }
+Text("You declined")
+Text(" or skipped selecting an option.")
+Context { used: Some(11813), window: Some(1048576) }
+Done { ok: true, reason: "end_turn", cost_total_usd: None, input_tokens: 23489, output_tokens: 50, cache_read_tokens: 9639, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: false }

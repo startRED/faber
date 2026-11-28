@@ -1,0 +1,10 @@
+{"dir":"in","msg":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"faber","title":"Faber","version":"0.0.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}}
+{"dir":"out","msg":{"id":1,"result":{"userAgent":"faber/0.0.0 (Windows 10.0; x86_64) xterm-256color (faber; 0.0.0)","codexHome":"C:\\Users\\user\\.codex","platformFamily":"windows","platformOs":"windows"}}}
+{"dir":"in","msg":{"method":"initialized"}}
+{"dir":"in","msg":{"id":2,"method":"thread/start","params":{"cwd":"E:\\faber-rec-tmp","model":"gpt-6-luna","sandbox":"read-only","approvalPolicy":"on-request"}}}
+{"dir":"out","msg":{"id":2,"result":{"thread":{"id":"plan-thread","cwd":"E:\\faber-rec-tmp"},"model":"gpt-6-luna"}}}
+{"dir":"in","msg":{"id":3,"method":"turn/start","params":{"threadId":"plan-thread","input":[{"type":"text","text":"Plan this change.","text_elements":[]}],"collaborationMode":{"mode":"plan","settings":{"model":"gpt-6-luna","reasoning_effort":"low","developer_instructions":null}}}}}
+{"dir":"out","msg":{"id":3,"result":{"turn":{"id":"plan-turn","items":[],"status":"inProgress"}}}}
+{"dir":"out","msg":{"method":"turn/started","params":{"threadId":"plan-thread","turn":{"id":"plan-turn","items":[],"status":"inProgress"}}}}
+{"dir":"out","msg":{"method":"item/completed","params":{"item":{"type":"plan","id":"plan-item","text":"1. Inspect the parser.\n2. Add the check."},"threadId":"plan-thread","turnId":"plan-turn","completedAtMs":1792500000000}}}
+{"dir":"out","msg":{"method":"turn/completed","params":{"threadId":"plan-thread","turn":{"id":"plan-turn","items":[{"type":"plan","id":"plan-item","text":"1. Inspect the parser.\n2. Add the check."}],"itemsView":"full","status":"completed"}}}}

@@ -1,0 +1,39 @@
+# One pull request per ecosystem per week, into the integration branch. Each group takes every update of its ecosystem.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: phase-1-base
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci(deps)
+    groups:
+      actions:
+        patterns: ['*']
+
+  - package-ecosystem: cargo
+    directory: /
+    target-branch: phase-1-base
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(deps)
+    # WebView2 0.39/Tauri exchange COM types from windows-core 0.62; update that line together.
+    ignore:
+      - dependency-name: windows-core
+        versions: ['>=0.63']
+    groups:
+      cargo:
+        patterns: ['*']
+
+  - package-ecosystem: npm
+    directory: /
+    target-branch: phase-1-base
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      npm:
+        patterns: ['*']

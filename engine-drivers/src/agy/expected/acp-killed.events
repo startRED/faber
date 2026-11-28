@@ -1,0 +1,7 @@
+Started { session_id: "00000000-0000-4000-8000-000000000113", model: "gemini-4-neon-high" }
+Started { session_id: "00000000-0000-4000-8000-000000000113", model: "gemini-3.8-flash-low" }
+Context { used: Some(0), window: Some(1048576) }
+Context { used: Some(11731), window: Some(1048576) }
+Tool { id: "call_1", name: "Bash", input: Object {"command": String("ping -n 63 127.0.0.1")}, parent: None }
+Permission { request_id: "1", tool: "Bash", input: Object {"command": String("ping -n 63 127.0.0.1")} }
+Started { session_id: "00000000-0000-4000-8000-000000000113", model: "gemini-4-neon-high" }

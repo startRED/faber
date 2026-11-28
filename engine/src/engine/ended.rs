@@ -1,0 +1,915 @@
+//! A run that ended while nobody looked (task 016, the legible agent runs design): the conversation keeps one mark,
+//! `Conversation::ended`, from the moment it leaves the running list until the person opens it. The running column draws it
+//! as a done card and the sidebar as a dot, both from the conversation list (`Summary::ended`), so they agree and survive a
+//! restart. A run the person was there for (their own Stop, an archive) leaves no mark, and a new run takes the old one away.
+use super::*;
+pub(super) use crate::conversation_state::{fresh_plan, needs_conclusion, result_kind, run_state};
+
+impl Engine {
+    /// The person has the conversation open on a visible window: its done card and its dot go.
+    pub fn seen(&self, id: &str) -> Result<(), String> {
+        self.with(|c| c.seen(id))
+    }
+}
+
+impl Core {
+    /// Every completion path meets here, even when the turn ran no automatic checks.
+    pub(super) fn turn_ended(&mut self, conv: &str) {
+        self.finish_answer_pictures(conv);
+        if self.live.get(conv).is_some_and(|l| l.turn.is_some())
+            || self.compacts.contains_key(conv)
+            || self.compactions.contains_key(conv)
+            || self.convs.get(conv).is_none_or(|c| {
+                c.compacting
+                    || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
+                    || c.messages.last().is_some_and(|m| m.permissions.iter().flatten().any(|p| p.tool == "ExitPlanMode"))
+            })
+        {
+            return;
+        }
+        self.drain(conv);
+        self.tell_parent(conv);
+        self.schedule_copy_sweep();
+    }
+
+    pub(super) fn seen(&mut self, id: &str) -> Result<(), String> {
+        let c = self.load(id).ok_or("error.conversationGone")?;
+        if c.ended.take().is_none() {
+            return Ok(());
+        }
+        self.save(id);
+        (self.emit)(AppEvent::List);
+        Ok(())
+    }
+
+    /// Reads the running list about to be sent against the last one: a conversation that leaves it ended its run; one back at
+    /// work starts a new run and loses its old mark. A reply only closing (`settled`) has not left yet: showing a card before
+    /// the turn-end decision would make it come and go.
+    pub(super) fn mark_ended(&mut self, items: &[RunningItem]) {
+        let at = now();
+        let listed = |id: &str| items.iter().any(|i| i.conversation_id == id);
+        let mut changed = Vec::new();
+        for old in self.running.items.iter().filter(|i| !listed(&i.conversation_id)) {
+            let Some(c) = self.convs.get_mut(&old.conversation_id) else { continue };
+            // The person's own Stop: they were there.
+            if c.stopped {
+                continue;
+            }
+            let Some(kind) = end_kind(c) else { continue };
+            let start = old.keep_progress.as_ref().map(|p| p.since).filter(|s| *s > 0).unwrap_or(old.since);
+            c.ended = Some(Ended { at, kind, work_ms: at.saturating_sub(start), line: conclusion_line(c) });
+            changed.push(old.conversation_id.clone());
+        }
+        for item in items.iter().filter(|i| !i.settled) {
+            let Some(c) = self.convs.get_mut(&item.conversation_id) else { continue };
+            if c.ended.take().is_some() {
+                changed.push(item.conversation_id.clone());
+            }
+        }
+        if changed.is_empty() {
+            return;
+        }
+        for id in &changed {
+            self.save(id);
+        }
+        (self.emit)(AppEvent::List);
+    }
+}
+
+/// How the conversation's run ended, or None when it has not ended for the person: they put it away, or Keep going or a
+/// waiting message goes on with it.
+pub(super) fn end_kind(c: &Conversation) -> Option<EndKind> {
+    if c.archived_at.is_some() || c.keep_going.is_some() || !c.queued.is_empty() {
+        return None;
+    }
+    result_kind(c)
+}
+
+/// The line a card or a row shows for the end: the closing call's result and what is left, with the plan steps not marked done.
+pub(super) fn conclusion_line(c: &Conversation) -> Option<String> {
+    let pending = fresh_plan(c)
+        .map(|p| p.steps.iter().filter(|s| s.state != StepState::Done).map(|s| s.text.as_str()).collect::<Vec<_>>().join("; "))
+        .filter(|s| !s.is_empty());
+    let recap = c.messages.last().and_then(|m| m.wrap_up.as_ref()).map(|w| crate::progress::first_sentence(&w.recap));
+    match (recap, pending) {
+        (Some(recap), Some(pending)) => Some(format!("{recap} · {pending}")),
+        (Some(text), None) | (None, Some(text)) => Some(text),
+        (None, None) => keep_going::progress_line(&c.messages),
+    }
+}
+
+/// One conclusion wake per request, and one more for each done conclusion refused for missing proof (at most
+/// `proof::MAX_ASKS` of those): the refusal reaches the agent only through this wake.
+fn conclusion_wake_left(c: &Conversation) -> bool {
+    let replies = || c.messages.iter().rev().take_while(|m| m.role != Role::User || m.wake.is_some());
+    let wakes = replies().filter(|m| m.wake.as_ref().is_some_and(|w| w.why == "wake.conclusion")).count();
+    if wakes == 0 && !replies().any(|m| m.conclusion_requested) {
+        return true;
+    }
+    let last = c.messages.last();
+    // Each proof refusal gets its reminder, after the first missing-conclusion one too; refusals stop at MAX_ASKS
+    // (`Core::weigh_proof`), so at most MAX_ASKS + 1 reminders reach one request.
+    wakes <= crate::proof::MAX_ASKS
+        && last
+            .is_some_and(|m| !m.conclusion_requested && m.conclusion_error.as_deref().is_some_and(|e| e.starts_with(crate::proof::REFUSED)))
+}
+
+/// What Faber says, once, to an agent whose turn ended with work done and no conclusion. It names its sender: an agent that
+/// reads it as the person's words answers "as you asked" for something the person never said.
+const CONCLUDE: &str = "Faber sends this, not the person: your last turn ended without concluding the task. Check what really got done, then end your closing message with the <|faber-wrap-up|> JSON block and the outcome: done only if the whole request is finished and you verified it, blocked if you cannot go on, needs_you if the next \
+move is the person's. Say what is not done or not verified. Write your closing message to the person before that block.";
+
+fn closing_input(base: &str, memory: &crate::project::memory::MemoryList) -> String {
+    let files: Vec<_> = memory
+        .files
+        .iter()
+        .filter(|file| file.over_limit.is_some() && !file.path.starts_with(".faber/notes/"))
+        .map(|file| file.path.escape_debug().to_string())
+        .collect();
+    if files.is_empty() {
+        return base.to_string();
+    }
+    format!(
+        "{base}\nFold {}: merge duplicates and drop what a later line overrides; keep decisions the person kept and move other overridden decisions to .faber/decisions-old.md. If the target cannot be reached without losing a live item, drop nothing.",
+        files.join(", ")
+    )
+}
+
+impl Core {
+    /// One bounded wake, through the ordinary metered continuation path. All project-note reads run off the lock.
+    pub(super) fn request_conclusion(&mut self, conv: &str) {
+        if self.bench.off(BenchPart::FollowUps) {
+            return;
+        }
+        let Some(c) = self.convs.get(conv).filter(|c| c.area == Area::Project) else { return };
+        let pending = c.messages.iter().any(|m| !m.fold_kept.is_empty());
+        if !pending && !self.can_request_conclusion(conv) {
+            return;
+        }
+        let Some(reply) = c.messages.last().map(|m| m.id.clone()) else { return };
+        let Ok(folder) = self.folder_of(c) else { return };
+        let Some(project) = c.project_id.as_deref() else { return };
+        let kept = self.store.kept_decisions_reader(project);
+        let (me, conv) = (self.me.clone(), conv.to_string());
+        self.opts.runtime.spawn_blocking(move || {
+            let memory = crate::project::memory::list_faber(&folder).ok();
+            let kept = kept();
+            let Some(core) = me.upgrade() else { return };
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            // Stop, a new message, a different working copy or a removed project cancels this admission.
+            if core
+                .convs
+                .get(&conv)
+                .is_none_or(|c| c.messages.last().is_none_or(|m| m.id != reply) || core.folder_of(c).ok().as_ref() != Some(&folder))
+                || core.live.get(&conv).is_some_and(|live| live.turn.is_some())
+            {
+                return;
+            }
+            core.conclusion_memory_ready(&conv, memory, &kept);
+        });
+    }
+
+    pub(super) fn can_request_conclusion(&self, conv: &str) -> bool {
+        // A turn that ended to wait for its background command concludes after it, not now.
+        if self.live.get(conv).is_some_and(|l| l.turn.is_some())
+            || self.waiting_command(conv).is_some()
+            || self.compacts.contains_key(conv)
+            || self.compactions.contains_key(conv)
+            || self.room_refusal(conv).is_some()
+        {
+            return false;
+        }
+        self.convs.get(conv).is_some_and(|c| {
+            !c.stopped
+                && c.archived_at.is_none()
+                && c.keep_going.is_none()
+                // It ended its turn to wait for conversations it started: their reports wake it, and the request is not over.
+                && c.waiting_on.is_none()
+                && c.queued.is_empty()
+                && !c.compacting
+                && matches!(result_kind(c), Some(EndKind::Done | EndKind::Unconcluded))
+                && c.messages.last().is_some_and(|m| m.status == Some(Status::Done))
+                && conclusion_wake_left(c)
+        })
+    }
+
+    fn conclusion_memory_ready(
+        &mut self,
+        conv: &str,
+        memory: Option<crate::project::memory::MemoryList>,
+        kept: &[crate::project::memory::KeptDecision],
+    ) {
+        use crate::project::memory::present_kept;
+        if let Some(memory) = &memory {
+            let c = self.convs.get_mut(conv).unwrap();
+            let mut lost = false;
+            let mut checked = false;
+            for message in &mut c.messages {
+                if !message.fold_kept.is_empty()
+                    && let Some(present) = present_kept(memory, &message.fold_kept)
+                {
+                    lost |= present.len() != message.fold_kept.len();
+                    message.fold_kept.clear();
+                    checked = true;
+                }
+            }
+            if lost && let Some(reply) = c.messages.last_mut() {
+                reply.fold_lost = true;
+            }
+            if checked {
+                self.save(conv);
+            }
+        }
+        if !self.can_request_conclusion(conv) {
+            return;
+        }
+        let c = &self.convs[conv];
+        let conclude = result_kind(c) == Some(EndKind::Unconcluded) && needs_conclusion(c);
+        let base = if conclude {
+            CONCLUDE
+        } else {
+            "Faber sends this, not the person: before closing, tidy the project notes, then end your closing message with the <|faber-wrap-up|> block restating the task's outcome and verification."
+        };
+        let mut text = memory.as_ref().map_or_else(|| base.into(), |memory| closing_input(base, memory));
+        let fold = text != base;
+        if let Some(error) = c.messages.last().and_then(|m| m.conclusion_error.as_deref()) {
+            text.push_str("\nThe previous conclusion was rejected: ");
+            text.extend(error.chars().take(1000));
+            text.push_str(". Correct it in the closing block.");
+        }
+        if !conclude && !fold && c.messages.last().is_none_or(|m| m.conclusion_error.is_none()) {
+            return;
+        }
+        let reply = self.convs.get_mut(conv).unwrap().messages.last_mut().unwrap();
+        reply.conclusion_requested = true;
+        if fold {
+            reply.fold_kept = memory.as_ref().and_then(|memory| present_kept(memory, kept)).unwrap_or_default();
+        }
+        self.save(conv);
+        let _ = self.send_by_itself(conv, text, Wake::of("wake.conclusion"));
+    }
+
+    /// Done only with proof (`crate::proof`): a done conclusion after edits to source is weighed against the request's own
+    /// receipts. Unproven, it is refused at most `proof::MAX_ASKS` times (each refusal reaches the agent through the one
+    /// conclusion wake), then let through labelled for the person. Reads only stored calls: no process, no model call.
+    pub(super) fn weigh_proof(&mut self, conv: &str, box_: &mut crate::model::WrapUp) -> Result<(), String> {
+        if !box_.done {
+            return Ok(());
+        }
+        let Some(c) = self.convs.get(conv).filter(|c| c.area == Area::Project) else { return Ok(()) };
+        let Some(summary) = box_.summary.as_mut() else { return Ok(()) };
+        let root = self.live.get(conv).map(|l| l.cwd.to_string_lossy().into_owned()).unwrap_or_default();
+        let Some(mut a) = crate::proof::assess(c, summary, &root) else { return Ok(()) };
+        if !a.problems.is_empty() {
+            if crate::proof::refusals(c) < crate::proof::MAX_ASKS {
+                let refused = crate::proof::refusal(&a.problems);
+                let reply = self.convs.get_mut(conv).and_then(|c| c.messages.iter_mut().rev().find(|m| m.role == Role::Assistant));
+                if let Some(m) = reply {
+                    m.proof_asks = m.proof_asks.saturating_add(1);
+                }
+                return Err(refused);
+            }
+            a.proof.labelled = true;
+        }
+        for (r, ok) in summary.requirements.iter_mut().zip(&a.requirements) {
+            r.confirmed = *ok;
+        }
+        box_.proof = crate::proof::worth_showing(&a.proof).then_some(a.proof);
+        Ok(())
+    }
+
+    pub(super) fn fold_notice_input(&mut self, conv: &str, text: String) -> String {
+        let Some(c) = self.convs.get_mut(conv) else { return text };
+        let mut lost = false;
+        for message in &mut c.messages {
+            lost |= std::mem::take(&mut message.fold_lost);
+        }
+        if !lost {
+            return text;
+        }
+        self.save(conv);
+        format!("{text}\nNotice: A decision kept by the person is missing after folding .faber/decisions.md; check and restore it.")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Outcome;
+    use crate::sibling::State;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn rejected_conclusion_sends_its_reason_in_the_one_reminder() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Default::default() }).unwrap();
+        let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+        let (send, mut receive) = tokio::sync::mpsc::unbounded_channel();
+        let id = super::super::answer::tests::seed(
+            &engine,
+            Session::from_fn(move |command| {
+                if let crate::events::SessionCommand::Send(turn) = command {
+                    let _ = send.send(turn.text);
+                }
+            }),
+            &[("reply", &[])],
+        );
+        engine.with(|core| {
+            core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
+            core.ledger.of_mut(Vendor::Claude).billing = Billing::Subscription;
+            let c = core.convs.get_mut(&id).unwrap();
+            c.area = Area::Project;
+            c.project_id = Some(project.id);
+            c.sessions.insert(Vendor::Claude, "synthetic-session".into());
+            c.choice = Some(Choice { vendor: "claude".into(), model: None, effort: None });
+            let reply = c.messages.last_mut().unwrap();
+            reply.text = "Tried.".into();
+            reply.status = Some(Status::Done);
+            reply.conclusion_error = Some("error.chat.saveFailed".into());
+            let cwd = core.cwd_of(&core.convs[&id]).unwrap();
+            let live = core.live.get_mut(&id).unwrap();
+            live.turn = None;
+            live.cwd = cwd;
+            live.cli = core.opts.clis[&Vendor::Claude].clone();
+            live.model = Some(crate::router::default_model(Vendor::Claude, None, &[]));
+            live.tuning = core.store.settings().tuning();
+            core.conclusion_memory_ready(&id, None, &[]);
+        });
+        let input = tokio::time::timeout(Duration::from_secs(10), receive.recv()).await.unwrap().unwrap();
+        assert!(input.contains("error.chat.saveFailed"), "{input}");
+        assert!(input.contains("Correct it in the closing block"));
+        engine.with(|core| assert!(!core.can_request_conclusion(&id)));
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_lead_waiting_for_its_conversations_is_not_asked_to_conclude() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
+        engine.with(|core| {
+            core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
+            core.ledger.of_mut(Vendor::Claude).billing = Billing::Subscription;
+            let c = core.convs.get_mut(&id).unwrap();
+            c.area = Area::Project;
+            c.choice = Some(Choice { vendor: "claude".into(), model: None, effort: None });
+            let reply = c.messages.last_mut().unwrap();
+            reply.text = "Two conversations started; I wait for their reports.".into();
+            reply.status = Some(Status::Done);
+            core.live.get_mut(&id).unwrap().turn = None;
+            assert!(core.can_request_conclusion(&id), "a turn that ended with no conclusion is asked for one");
+            let wait = crate::model::WaitingOn {
+                storage_blocked: false,
+                ids: vec!["child".into()],
+                note: "Both lanes report".into(),
+                since: 1,
+                until: 300001,
+                problem: None,
+                pr: None,
+            };
+            core.convs.get_mut(&id).unwrap().waiting_on = Some(wait.clone());
+            assert!(!core.can_request_conclusion(&id), "its members' reports wake it; a conclusion now would end the wait");
+            core.conclusion_memory_ready(&id, None, &[]);
+            let c = &core.convs[&id];
+            assert_eq!(c.waiting_on, Some(wait), "the wait is kept");
+            assert!(c.messages.iter().all(|m| m.wake.is_none()) && c.queued.is_empty(), "nothing was sent");
+        });
+        engine.shutdown();
+    }
+
+    #[test]
+    fn faber_names_itself_in_what_it_sends_to_close() {
+        assert!(CONCLUDE.starts_with("Faber sends this, not the person"));
+    }
+
+    #[tokio::test]
+    async fn t495_fold_kept_loss_is_a_notice_in_the_next_input() {
+        use crate::project::memory::{self, KeptDecision};
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let id = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("reply", &[])]);
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::create_dir(folder.path().join(".faber")).unwrap();
+        let path = folder.path().join(".faber/decisions.md");
+        std::fs::write(&path, "- Keep exports local. [by person]\n- Proposal. [by person]\n").unwrap();
+        let kept = vec![KeptDecision::of("- Keep exports local.")];
+        let before = memory::list_faber(folder.path()).unwrap();
+        let snapshot = memory::present_kept(&before, &kept).unwrap();
+        assert_eq!(snapshot, kept, "a forged person mark is not an approval");
+        engine.with(|core| {
+            let reply = core.convs.get_mut(&id).unwrap().messages.last_mut().unwrap();
+            reply.fold_kept = snapshot;
+            reply.conclusion_requested = true;
+            // The pending hashes survive saving and reopening a conversation.
+            let saved = serde_json::to_value(&*reply).unwrap();
+            *reply = serde_json::from_value(saved).unwrap();
+            core.conclusion_memory_ready(&id, Some(before), &kept);
+            assert!(!core.convs[&id].messages.last().unwrap().fold_lost);
+            core.convs.get_mut(&id).unwrap().messages.last_mut().unwrap().fold_kept = kept.clone();
+        });
+        std::fs::write(&path, "- Keep exports remote. [by person]\n").unwrap();
+        let mut after = memory::list_faber(folder.path()).unwrap();
+        after.incomplete = true;
+        engine.with(|core| {
+            core.conclusion_memory_ready(&id, Some(after.clone()), &kept);
+            let reply = core.convs[&id].messages.last().unwrap();
+            assert!(!reply.fold_lost && !reply.fold_kept.is_empty(), "an incomplete scan cannot prove loss");
+            after.incomplete = false;
+            core.conclusion_memory_ready(&id, Some(after), &kept);
+            let reply = core.convs[&id].messages.last().unwrap();
+            assert!(reply.fold_lost && reply.error.is_none());
+            assert!(reply.fold_kept.is_empty());
+            let input = core.fold_notice_input(&id, "Next task".into());
+            assert!(input.starts_with("Next task\nNotice:"));
+            assert!(input.contains("kept by the person is missing"));
+            assert_eq!(core.fold_notice_input(&id, "Another task".into()), "Another task", "notice is consumed once");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn t495_normal_close_folds_once_for_both_vendors() {
+        for vendor in [Vendor::Claude, Vendor::Codex] {
+            let dir = crate::workspace::TestRoot::new();
+            let (engine, _) = super::super::answer::tests::engine(&dir);
+            engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Default::default() }).unwrap();
+            let folder = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+            std::fs::create_dir(folder.path().join(".faber")).unwrap();
+            let notes = folder.path().join(".faber/decisions.md");
+            let kept = crate::project::memory::KeptDecision::of("- Keep exports local.");
+            std::fs::write(&notes, format!("- Keep exports local. [by person]\n\n{}", "x".repeat(8193))).unwrap();
+            let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+            let (send, mut receive) = tokio::sync::mpsc::unbounded_channel();
+            let id = super::super::answer::tests::seed(
+                &engine,
+                Session::from_fn(move |command| {
+                    if let crate::events::SessionCommand::Send(turn) = command {
+                        let _ = send.send(turn.text);
+                    }
+                }),
+                &[("reply", &[])],
+            );
+            engine.with(|core| {
+                core.store.keep_decision(&project.id, kept.clone(), std::slice::from_ref(&project.id)).unwrap();
+                let name = if vendor == Vendor::Claude { "claude" } else { "codex" };
+                core.opts.clis.insert(vendor, Cli { command: name.into(), prefix: vec![] });
+                core.ledger.of_mut(vendor).billing = Billing::Subscription;
+                let c = core.convs.get_mut(&id).unwrap();
+                c.area = Area::Project;
+                c.project_id = Some(project.id);
+                c.sessions.insert(vendor, "synthetic-session".into());
+                let cwd = core.cwd_of(&core.convs[&id]).unwrap();
+                let live = core.live.get_mut(&id).unwrap();
+                live.vendor = vendor;
+                live.cli = core.opts.clis[&vendor].clone();
+                live.cwd = cwd;
+                live.model = Some(crate::router::default_model(vendor, None, &[]));
+                live.tuning = core.store.settings().tuning();
+                let c = core.convs.get_mut(&id).unwrap();
+                c.choice = Some(Choice { vendor: name.into(), model: None, effort: None });
+                let reply = c.messages.last_mut().unwrap();
+                reply.vendor = Some(vendor);
+                reply.text = "Finished and checked.".into();
+                reply.status = Some(Status::Done);
+                reply.wrap_up = Some(concluded("done"));
+                core.end_turn(&id, Some("reply".into()), None);
+            });
+            let input = tokio::time::timeout(Duration::from_secs(10), receive.recv())
+                .await
+                .expect("a normal conclusion must fold")
+                .unwrap_or_else(|| panic!("{vendor:?} session retired: {:?}", engine.open(&id).unwrap().messages.last()));
+            assert!(input.contains("Fold .faber/decisions.md"), "{input}");
+            // The fold changes approved words but copies their person mark, and leaves the file over target.
+            std::fs::write(&notes, format!("- Keep exports remote. [by person]\n\n{}", "x".repeat(8193))).unwrap();
+            engine.with(|core| {
+                assert_eq!(core.convs[&id].messages.iter().find(|m| m.id == "reply").unwrap().fold_kept, [kept]);
+                let reply = core.convs.get_mut(&id).unwrap().messages.last_mut().unwrap();
+                reply.status = Some(Status::Done);
+                reply.wrap_up = Some(concluded("done"));
+                core.live.get_mut(&id).unwrap().turn = None;
+                core.request_conclusion(&id);
+            });
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), receive.recv()).await.is_err(),
+                "one fold per request, even if still over target"
+            );
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while !engine.with(|core| core.convs[&id].messages.last().unwrap().fold_lost) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("fold comparison must record loss");
+            engine.with(|core| core.send_by_itself(&id, "Next task".into(), Wake::of("wake.keepGoing")).unwrap());
+            let next = tokio::time::timeout(Duration::from_secs(10), receive.recv()).await.unwrap().unwrap();
+            assert!(next.contains("Notice: A decision kept by the person is missing"), "{next}");
+            assert!(!next.contains("Fold .faber/decisions.md"), "ordinary turns get no fold instruction");
+            engine.shutdown();
+        }
+    }
+
+    #[test]
+    fn t495_closing_input_names_only_notes_over_target() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".faber")).unwrap();
+        let file = dir.path().join(".faber/decisions.md");
+        std::fs::write(dir.path().join(".faber/lessons.md"), "- Small note\n").unwrap();
+        std::fs::create_dir(dir.path().join(".faber/notes")).unwrap();
+        std::fs::write(dir.path().join(".faber/notes/big.md"), "y".repeat(13 * 1024)).unwrap();
+        std::fs::write(&file, "x".repeat(8192)).unwrap();
+        let list = crate::project::memory::list_faber(dir.path()).unwrap();
+        assert_eq!(closing_input("close", &list), "close");
+        std::fs::write(&file, "x".repeat(8193)).unwrap();
+        let list = crate::project::memory::list_faber(dir.path()).unwrap();
+        let input = closing_input("close", &list);
+        assert!(input.contains(".faber/decisions.md"));
+        assert!(!input.contains(".faber/lessons.md"));
+        assert!(input.contains("drop nothing"));
+        let mut list = list;
+        list.files.iter_mut().find(|file| file.over_limit.is_some()).unwrap().path = ".faber/tasks/line\nbreak.md".into();
+        assert_eq!(closing_input("close", &list).lines().count(), 2, "a filename cannot add an instruction line");
+    }
+
+    #[tokio::test]
+    async fn turn_end_drains_queue_without_checks_once() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Default::default() }).unwrap();
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let capture = sent.clone();
+        let id = super::super::answer::tests::seed(
+            &engine,
+            Session::from_fn(move |command| {
+                if let crate::events::SessionCommand::Send(turn) = command {
+                    capture.lock().unwrap().push(turn.text);
+                }
+            }),
+            &[("reply", &[])],
+        );
+        engine.with(|core| {
+            core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
+            core.ledger.claude.billing = Billing::Subscription;
+            let cwd = core.cwd_of(&core.convs[&id]).unwrap();
+            let live = core.live.get_mut(&id).unwrap();
+            live.cwd = cwd;
+            live.model = Some(crate::router::default_model(Vendor::Claude, None, &[]));
+            live.tuning = core.store.settings().tuning();
+            let choice = Choice { vendor: "claude".into(), model: None, effort: None };
+            let c = core.convs.get_mut(&id).unwrap();
+            c.choice = Some(choice.clone());
+            c.messages.last_mut().unwrap().status = Some(Status::Done);
+            c.queued.push(QueuedTurn {
+                id: "queued".into(),
+                text: "Follow up".into(),
+                images: None,
+                attachments: None,
+                choice,
+                at: now(),
+                sending: false,
+                wake: None,
+            });
+            core.end_turn(&id, Some("reply".into()), None);
+            core.turn_ended(&id);
+            assert!(core.convs[&id].queued.is_empty());
+            assert_eq!(core.convs[&id].messages.iter().filter(|m| m.id == "queued").count(), 1);
+            assert!(core.convs[&id].messages.iter().all(|m| m.checks.is_none()));
+            assert_eq!(core.convs[&id].messages.last().unwrap().status, Some(Status::Streaming));
+            assert_eq!(sent.lock().unwrap().len(), 1, "repeated completion cannot dispatch twice");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn retired_cli_compaction_still_reports_child_once() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
+        let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
+        engine.with(|core| {
+            core.opts.clis.insert(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] });
+            let c = core.convs.get_mut(&child).unwrap();
+            c.area = Area::Project;
+            c.started_by = Some(parent.clone());
+            c.messages.last_mut().unwrap().status = Some(Status::Done);
+            core.plan_compaction(&child, None).unwrap();
+            core.replace_clis(BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]));
+            core.end_turn(&child, Some("child".into()), None);
+            core.turn_ended(&child);
+            let report_id = format!("report-{child}-child");
+            assert_eq!(core.convs[&parent].queued.iter().filter(|q| q.id == report_id).count(), 1);
+            assert!(!core.compacts.contains_key(&child));
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn retired_cli_compaction_keeps_the_requested_next_step() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
+        engine.with(|core| {
+            core.plan_compaction(&child, Some("Continue the task".into())).unwrap();
+            core.live.remove(&child);
+            core.convs.get_mut(&child).unwrap().messages.last_mut().unwrap().status = Some(Status::Done);
+            assert!(!core.compact_due(&child));
+            let queued = &core.convs[&child].queued;
+            assert_eq!(queued.len(), 1);
+            assert!(queued[0].text.contains("Continue the task"));
+            assert_eq!(queued[0].wake.as_ref().unwrap().why, "wake.compactFailed");
+        });
+        engine.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_reply_that_never_started_reports_its_failed_end_once() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let parent = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("parent", &[])]);
+        let child = super::super::answer::tests::seed(&engine, Session::from_fn(|_| {}), &[("child", &[])]);
+        engine.with(|core| {
+            core.live.remove(&child);
+            core.convs.get_mut(&child).unwrap().started_by = Some(parent.clone());
+            core.fail_reply(&child, "child", "error.turnFailed".into());
+            assert_eq!(core.convs[&parent].queued.len(), 1, "the failed-start boundary itself delivers the report");
+            core.turn_ended(&child);
+            let reports: Vec<_> =
+                core.convs[&parent].queued.iter().filter(|q| q.wake.as_ref().is_some_and(|w| w.why == "wake.childDone")).collect();
+            assert_eq!(reports.len(), 1);
+            assert_eq!(result_kind(&core.convs[&child]), Some(EndKind::Failed));
+            assert!(reports[0].text.contains("stopped with an error in its latest turn"), "{}", reports[0].text);
+        });
+        engine.shutdown();
+    }
+
+    /// A project task that edited a file and ran nothing after: done is refused twice, then let through labelled.
+    #[tokio::test]
+    async fn done_without_proof_is_refused_twice_then_labelled() {
+        let dir = crate::workspace::TestRoot::new();
+        let (engine, _) = super::super::answer::tests::engine(&dir);
+        let closing = || {
+            crate::progress::wrap_up(&json!({
+                "outcome": "done", "did": "Fixed a.", "result": "a works.", "verified": "Looked at it.",
+                "requirements": [{"asked": "fix a", "proof": "cargo test"}]
+            }))
+            .unwrap()
+        };
+        let id = engine.with(|core| {
+            let id = core.blank(Area::Chat, None);
+            let c = core.convs.get_mut(&id).unwrap();
+            c.area = Area::Project;
+            c.messages.push(Message::new("u".into(), Role::User, "Fix a".into(), 1));
+            let mut r = Message::new("r0".into(), Role::Assistant, String::new(), 2);
+            r.tools = Some(vec![
+                serde_json::from_value(
+                    json!({"id":"t","name":"Edit","input":{"file_path":"src/a.rs","old_string":"a","new_string":"b"},"ok":true}),
+                )
+                .unwrap(),
+            ]);
+            c.messages.push(r);
+            id
+        });
+        for n in 0..crate::proof::MAX_ASKS {
+            let refused = engine.with(|core| {
+                let mut box_ = closing();
+                let e = core.weigh_proof(&id, &mut box_).unwrap_err();
+                // What the engine stores for the refused block, then the reminder and the agent's next reply.
+                let c = core.convs.get_mut(&id).unwrap();
+                c.messages.last_mut().unwrap().conclusion_error = Some(e.clone());
+                assert!(conclusion_wake_left(c), "attempt {n}: a proof refusal gets one more reminder");
+                let wake: Message = serde_json::from_value(
+                    json!({"id": format!("w{n}"), "role": "user", "text": "", "at": 3, "wake": {"why": "wake.conclusion"}}),
+                )
+                .unwrap();
+                c.messages.push(wake);
+                c.messages.push(Message::new(format!("r{}", n + 1), Role::Assistant, String::new(), 4));
+                e
+            });
+            assert!(refused.starts_with(crate::proof::REFUSED), "{refused}");
+            assert!(refused.contains("cargo test"), "{refused}");
+        }
+        engine.with(|core| {
+            let mut box_ = closing();
+            core.weigh_proof(&id, &mut box_).expect("after two refusals done goes through");
+            let proof = box_.proof.expect("labelled");
+            assert!(proof.labelled);
+            assert_eq!((proof.confirmed, proof.total), (0, 1));
+            assert!(!box_.summary.unwrap().requirements[0].confirmed);
+            assert_eq!(crate::proof::refusals(&core.convs[&id]), crate::proof::MAX_ASKS);
+            assert!(!conclusion_wake_left(&core.convs[&id]), "a labelled done needs no reminder");
+        });
+        engine.shutdown();
+    }
+
+    #[test]
+    fn a_second_conclusion_reminder_follows_only_a_proof_refusal() {
+        let wake: Message =
+            serde_json::from_value(json!({"id": "w", "role": "user", "text": "", "at": 3, "wake": {"why": "wake.conclusion"}})).unwrap();
+        let mut c = conv(vec![person(), worked()]);
+        assert!(conclusion_wake_left(&c), "the first reminder");
+        c.messages.push(wake);
+        let mut again = worked();
+        again.conclusion_error = Some("error.wrapUp.outcome".into());
+        c.messages.push(again);
+        assert!(!conclusion_wake_left(&c), "any other rejected block keeps the one reminder");
+        c.messages.last_mut().unwrap().conclusion_error = Some(format!("{}: run the tests", crate::proof::REFUSED));
+        assert!(conclusion_wake_left(&c), "the first proof refusal after the missing-conclusion reminder");
+        let refused = |c: &mut Conversation, n: usize| {
+            c.messages.push(
+                serde_json::from_value(
+                    json!({"id": format!("w{n}"), "role": "user", "text": "", "at": 5, "wake": {"why": "wake.conclusion"}}),
+                )
+                .unwrap(),
+            );
+            let mut m = worked();
+            m.conclusion_error = Some(format!("{}: run the tests", crate::proof::REFUSED));
+            c.messages.push(m);
+        };
+        refused(&mut c, 2);
+        assert!(conclusion_wake_left(&c), "the second proof refusal still gets its reminder, for the labelled third attempt");
+        refused(&mut c, 3);
+        assert!(!conclusion_wake_left(&c), "never more than MAX_ASKS + 1 reminders");
+    }
+
+    fn conv(messages: Vec<Message>) -> Conversation {
+        let mut c: Conversation = serde_json::from_value(json!({
+            "id": "c", "title": "Fix the login page", "area": "project", "createdAt": 0, "updatedAt": 0, "messages": []
+        }))
+        .unwrap();
+        c.messages = messages;
+        c
+    }
+
+    fn reply(status: Status) -> Message {
+        let mut m = Message::new("r".into(), Role::Assistant, "Fixed.".into(), 0);
+        m.status = Some(status);
+        m
+    }
+
+    /// A finished reply that edited a file, as a project task does.
+    fn worked() -> Message {
+        let mut m = reply(Status::Done);
+        m.tools = Some(vec![serde_json::from_value(json!({"id":"t","name":"Edit","input":{"file_path":"src/login.rs"}})).unwrap()]);
+        m
+    }
+
+    fn person() -> Message {
+        Message::new("u".into(), Role::User, "Fix it".into(), 0)
+    }
+
+    fn concluded(outcome: &str) -> crate::model::WrapUp {
+        crate::progress::wrap_up(&json!({
+            "outcome": outcome, "did": "Fixed the redirect.", "result": "Login works.", "verified": "Ran the login test: green."
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_tool_turn_that_exited_well_is_not_done_until_the_agent_concludes() {
+        let mut m = worked();
+        assert_eq!(end_kind(&conv(vec![person(), m.clone()])), Some(EndKind::Unconcluded), "the process ended well, nothing concluded");
+        m.wrap_up = Some(concluded("done"));
+        assert_eq!(end_kind(&conv(vec![person(), m.clone()])), Some(EndKind::Done));
+        m.wrap_up = Some(concluded("blocked"));
+        assert_eq!(end_kind(&conv(vec![person(), m.clone()])), Some(EndKind::NeedsYou), "blocked waits for the person");
+        m.wrap_up = Some(concluded("needs_you"));
+        assert_eq!(end_kind(&conv(vec![person(), m.clone()])), Some(EndKind::NeedsYou));
+        m.wrap_up.as_mut().unwrap().answered = Some("Yes".into());
+        assert_eq!(end_kind(&conv(vec![person(), m])), Some(EndKind::Unconcluded), "an answered box concluded nothing yet");
+    }
+
+    #[test]
+    fn a_plain_answer_is_its_own_conclusion_but_tool_work_in_a_project_is_not() {
+        let mut c = conv(vec![person(), reply(Status::Done)]);
+        assert_eq!(end_kind(&c), Some(EndKind::Done), "an answer with no tool work is a conclusion in itself");
+        c.messages[1] = worked();
+        c.area = Area::Chat;
+        assert_eq!(end_kind(&c), Some(EndKind::Done));
+        c.area = Area::Project;
+        assert_eq!(end_kind(&c), Some(EndKind::Unconcluded));
+    }
+
+    #[test]
+    fn a_project_reply_with_no_words_and_no_conclusion_is_not_an_answer() {
+        let mut empty = reply(Status::Done);
+        empty.text.clear();
+        let mut c = conv(vec![person(), empty]);
+        assert_eq!(end_kind(&c), Some(EndKind::Unconcluded), "nothing to read, nothing concluded");
+        c.area = Area::Chat;
+        assert_eq!(end_kind(&c), Some(EndKind::Done));
+    }
+
+    #[test]
+    fn unfinished_plan_steps_keep_a_done_claim_from_standing() {
+        let mut m = worked();
+        m.wrap_up = Some(concluded("done"));
+        let mut c = conv(vec![person(), m]);
+        c.plan = Some(crate::progress::plan(None, &json!({"steps":[{"text":"Check on a phone","state":"pending"}]}), 0).unwrap().unwrap());
+        assert_eq!(end_kind(&c), Some(EndKind::Unconcluded));
+        let line = conclusion_line(&c).unwrap();
+        assert!(line.contains("Login works") && line.contains("Check on a phone"), "{line}");
+    }
+
+    #[test]
+    fn a_turn_cut_by_faber_or_stopped_or_silent_is_never_done() {
+        let mut cut = reply(Status::Stopped);
+        cut.closed = true;
+        assert_eq!(end_kind(&conv(vec![person(), cut])), Some(EndKind::Interrupted));
+        assert_eq!(
+            end_kind(&conv(vec![person(), reply(Status::Stopped)])),
+            Some(EndKind::Unconcluded),
+            "a turn that stopped for another reason"
+        );
+        let mut silent = reply(Status::Done);
+        silent.halt = Some("reason.keepGoing.silent".into());
+        assert_eq!(end_kind(&conv(vec![person(), silent])), Some(EndKind::Unconcluded));
+        assert_eq!(end_kind(&conv(vec![person(), reply(Status::Streaming)])), None);
+    }
+
+    #[test]
+    fn a_run_ends_done_failed_or_needing_the_person() {
+        assert_eq!(end_kind(&conv(vec![person(), reply(Status::Done)])), Some(EndKind::Done));
+        let mut failed = reply(Status::Error);
+        failed.error = Some("error.turnFailed".into());
+        assert_eq!(end_kind(&conv(vec![person(), failed])), Some(EndKind::Failed));
+        let mut capped = reply(Status::Done);
+        capped.halt = Some("reason.keepGoing.cap".into());
+        assert_eq!(end_kind(&conv(vec![person(), capped])), Some(EndKind::NeedsYou));
+        let mut done = reply(Status::Done);
+        done.halt = Some("reason.keepGoing.done".into());
+        assert_eq!(end_kind(&conv(vec![person(), done])), Some(EndKind::Done));
+        // A closing box that asks the person something (the older shape) waits on them until it is answered.
+        let mut boxed = reply(Status::Done);
+        let ask = crate::model::WrapUp {
+            recap: "Fixed.".into(),
+            ask: Some("Ship it?".into()),
+            actions: vec!["Yes".into()],
+            ..Default::default()
+        };
+        boxed.wrap_up = Some(ask.clone());
+        assert_eq!(end_kind(&conv(vec![person(), boxed.clone()])), Some(EndKind::NeedsYou));
+        boxed.wrap_up = Some(crate::model::WrapUp { answered: Some("Yes".into()), ..ask });
+        assert_eq!(end_kind(&conv(vec![person(), boxed])), Some(EndKind::Unconcluded));
+        let mut archived = conv(vec![person(), reply(Status::Done)]);
+        archived.archived_at = Some(1);
+        assert_eq!(end_kind(&archived), None);
+    }
+
+    #[test]
+    fn every_state_has_one_answer_for_the_sidebar_the_list_and_other_agents() {
+        let mut m = worked();
+        let mut c = conv(vec![person(), m.clone()]);
+        assert_eq!(run_state(&c, false), State::Unconcluded);
+        m.wrap_up = Some(concluded("done"));
+        c.messages[1] = m.clone();
+        assert_eq!(run_state(&c, false), State::Concluded);
+        m.wrap_up = Some(concluded("blocked"));
+        c.messages[1] = m.clone();
+        assert_eq!(run_state(&c, false), State::Waiting);
+        c.messages[1] = reply(Status::Streaming);
+        assert_eq!(run_state(&c, false), State::Working, "a saved streaming reply is a turn in progress");
+        c.stuck = Some(crate::results::Stuck { noticed_at: 1, since: 1, turns: 3, wall_ms: 0, usd: 0.0, asked_at: None, ask_turns: 0 });
+        assert_eq!(run_state(&c, true), State::Stuck, "spending without a result is never working");
+        c.stuck = None;
+        let mut cut = reply(Status::Stopped);
+        cut.closed = true;
+        c.messages[1] = cut;
+        assert_eq!(run_state(&c, false), State::Interrupted);
+        c.messages[1] = reply(Status::Stopped);
+        assert_eq!(run_state(&c, false), State::Stopped);
+        let mut failed = reply(Status::Error);
+        failed.error = Some("error.turnFailed".into());
+        c.messages[1] = failed;
+        assert_eq!(run_state(&c, false), State::Failed);
+        c.messages.truncate(1);
+        assert_eq!(run_state(&c, false), State::Unconcluded, "a request nothing answered");
+        assert_eq!(run_state(&conv(vec![]), false), State::Working, "a conversation whose first turn is being made");
+    }
+
+    #[test]
+    fn a_card_nobody_opens_goes_after_a_week_and_a_failure_after_a_day() {
+        let day = 86_400_000;
+        let mark = |kind| Ended { at: 0, kind, work_ms: 0, line: None };
+        assert!(mark(EndKind::Done).current(6 * day) && !mark(EndKind::Done).current(7 * day));
+        assert!(mark(EndKind::NeedsYou).current(6 * day));
+        assert!(mark(EndKind::Failed).current(day - 1) && !mark(EndKind::Failed).current(day));
+    }
+
+    #[test]
+    fn a_stored_end_from_before_conclusions_still_loads() {
+        // Written by an older Faber: no outcome, no summary, no stuck mark, a `done` end kind.
+        let old: Conversation = serde_json::from_value(json!({
+            "id": "c", "title": "Old", "area": "project", "createdAt": 0, "updatedAt": 0,
+            "ended": {"at": 5, "kind": "done", "workMs": 9},
+            "messages": [{"id":"r","role":"assistant","text":"Fixed.","at":0,"status":"done",
+                          "wrapUp":{"recap":"Fixed it.","done":true}}]
+        }))
+        .unwrap();
+        assert_eq!(old.ended.as_ref().map(|e| e.kind), Some(EndKind::Done));
+        let w = old.messages[0].wrap_up.as_ref().unwrap();
+        assert_eq!((w.outcome(), w.summary.is_some()), (Some(Outcome::Done), false), "an older done box reads as a done conclusion");
+        assert_eq!(result_kind(&old), Some(EndKind::Done));
+        assert_eq!(run_state(&old, false), State::Concluded);
+    }
+}

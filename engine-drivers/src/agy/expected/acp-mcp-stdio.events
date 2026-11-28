@@ -1,0 +1,12 @@
+Started { session_id: "00000000-0000-4000-8000-000000000114", model: "gemini-4-neon-high" }
+Started { session_id: "00000000-0000-4000-8000-000000000114", model: "gemini-3.8-flash-low" }
+Context { used: Some(0), window: Some(1048576) }
+Context { used: Some(11948), window: Some(1048576) }
+Tool { id: "call_1", name: "mcp__probe__echo_marker", input: Object {"toolSummary": String("Echo test marker word")}, parent: None }
+Permission { request_id: "1", tool: "mcp__probe__echo_marker", input: Object {"toolSummary": String("Echo test marker word")} }
+ToolResult { id: "call_1", ok: true, declined: false, exit_code: None, text: "" }
+Break { final_answer: false }
+Text("MARKER")
+Text("-ZEBRA-42")
+Context { used: Some(12042), window: Some(1048576) }
+Done { ok: true, reason: "end_turn", cost_total_usd: None, input_tokens: 23957, output_tokens: 33, cache_read_tokens: 9879, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: false }

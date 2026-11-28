@@ -1,0 +1,32 @@
+[package]
+name = "faber-sidecar"
+description = "Faber's engine and command table behind newline JSON, the process an Electron shell runs beside its window."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "faber-sidecar"
+path = "src/main.rs"
+
+[dependencies]
+# The command line's channel over the same table, open for as long as the sidecar runs.
+faber-channel = { path = "../channel", features = ["host"] }
+faber-engine = { path = "../engine" }
+faber-host = { path = "../host" }
+faber-update = { path = "../update" }
+# The allocator, and the call that asks it to give freed memory back after conversations leave (`release_freed_memory`).
+faber-winproc = { path = "../winproc", features = ["mimalloc"] }
+mimalloc = { version = "0.1", default-features = false }
+serde_json = "1"
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "time"] }
+
+[lints]
+workspace = true

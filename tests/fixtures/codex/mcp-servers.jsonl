@@ -1,0 +1,13 @@
+{"dir":"in","msg":{"id":1,"method":"initialize"}}
+{"dir":"out","msg":{"id":1,"result":{}}}
+{"dir":"in","msg":{"method":"initialized"}}
+{"dir":"in","msg":{"id":2,"method":"thread/start"}}
+{"dir":"out","msg":{"id":2,"result":{"thread":{"id":"thread-on","model":"model"}}}}
+{"dir":"in","msg":{"id":3,"method":"thread/start"}}
+{"dir":"out","msg":{"id":3,"result":{"thread":{"id":"thread-off","model":"model"}}}}
+{"dir":"in","msg":{"id":4,"method":"mcpServerStatus/list","params":{"threadId":"thread-on","detail":"toolsAndAuthOnly","limit":100}}}
+{"dir":"out","msg":{"id":4,"result":{"data":[{"name":"measure","runtimeStatus":"failed","authStatus":"oAuth","tools":{"private":{"name":"private","inputSchema":{"type":"object"}}},"resources":[],"resourceTemplates":[]},{"name":"own","runtimeStatus":"connected","authStatus":"notLoggedIn","tools":{},"resources":[],"resourceTemplates":[]}],"nextCursor":"second-page"}}}
+{"dir":"in","msg":{"id":5,"method":"mcpServerStatus/list","params":{"threadId":"thread-on","detail":"toolsAndAuthOnly","limit":100,"cursor":"second-page"}}}
+{"dir":"out","msg":{"id":5,"result":{"data":[{"name":"project","runtimeStatus":"disabled","authStatus":"unknown","tools":{},"resources":[],"resourceTemplates":[]}],"nextCursor":null}}}
+{"dir":"in","msg":{"id":6,"method":"mcpServerStatus/list","params":{"threadId":"thread-off","detail":"toolsAndAuthOnly","limit":100}}}
+{"dir":"out","msg":{"id":6,"error":{"code":-32601,"message":"Unsupported method"}}}

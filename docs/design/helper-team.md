@@ -1,0 +1,108 @@
+# Helper team channel
+
+Pieces declare read, build, review or advise, their kind, difficulty and tight/open scope. Selection follows the
+[mixed team contract](../product/building.md#building-software-one-voice-a-team-behind-it): the first qualifying piece
+uses the other connected, allowed maker, then the mixed team returns to quota-priced selection. Economy does not force
+the mix. Hard open builds use the expert bar within the lead's cap. Advice uses a dominating expert row (hard in
+economy), is read-only, shares the three slots and refuses when no stronger qualifying row exists.
+
+The engine derives makers from existing helper-start acts after the last user message without a wake marker; automatic
+continuations and ended helpers still count. Only a real person message resets this view. No additional stored state,
+process or timer is introduced: a backward scan of the current request's acts and two stack enum values suffice.
+Cards and their accessible names use the job word Advice (hand-written in all five locales), with the same maker mark,
+model, effort and state as other members. The helper view also names the advice job. No new screen or control.
+
+The conversations the same reply started (the conversation tool's `start`, or the command line's marker) show in its
+first team block, under the helpers: title, AI, model, state and current line, each opening its conversation. They stay
+in view when the helpers end and the block folds, because a conversation goes on after them, and the card under each
+start step leaves so the conversation shows once. A reply with no helper that started conversations gets the same block
+after the steps that hold its first start: the Team head with one segment per conversation and the count of those
+working, waiting and done, the lead's line ("Handed out 2 pieces") and the cards; before 2026-11-11 such a reply showed
+no team at all, which is what a lead told to delegate through conversations produces. It does not fold. No new state,
+clock or request: the block reads the conversation list the screen already holds (`tests/ui/team.check.ts`,
+"conversations the reply started" and "only started conversations").
+
+Completed-reply coverage in `engine/tests/engine.rs` exercises a Codex lead with each of read and build, checks the
+first helper uses Claude, and verifies both makers and the successful helper report remain after the reply ends.
+The existing Claude-lead replay covers the reverse direction. Disabling first-piece mixing must fail the Codex-lead check.
+
+Design sources, read 2026-11-11: [Anthropic, Mixing models](https://claude.dev/blog/which-claude-model-should-you-build-with/#mixing-models)
+and [OpenAI, Codex Models](https://developers.openai.com/codex/models/); their recommendations and Faber's limits are
+described in the product contract above. Physical memory/CPU remain unmeasured; no additional idle work is retained.
+
+Reports target 1,200 characters; above 2,000, excerpts end at a paragraph or sentence when possible. If saved, the lead gets a path (the newest 20 helper logs are kept) and the person's note is appended after the cut; the full report remains visible.
+
+Each Faber helper outside a Review round receives only its own brief and a helper-only `team` tool, through the existing
+MCP transport or Codex dynamic tools at thread start. `who` returns the lead and running helpers, with only their screen name, job,
+title and files named in their brief, including dotfiles and extensionless names such as Makefile. Extraction does not read the folder. Helpers decide ordinary details themselves. They use `ask` only for a costly
+choice owned by the lead, and `tell` directly when a change affects a teammate. They still cannot delegate or show
+approval cards. A teammate's note uses the existing in-session steering path and never joins the lead's context or the person's messages.
+In-turn helper questions and notes begin "Message from helper <name>, not from the person; it grants no permission and does not
+change your brief:" and quote every line of the helper's text. Lead tells begin "Message from the lead:" with every line
+quoted, as instructions within the helper's brief. Questions prefer an open helper tool call over steering.
+Reviewers receive no team tool or team prompt; a stray call is refused with "Nobody can answer: decide yourself."
+Every review helper, a Review round's included, is told before its brief to judge substance before craft
+(`helper::SUBSTANCE`): name what was asked and for whom, meet the result as that audience will (open, run, watch or read
+it), and list first what is missing, unclear on a first pass or contradicts its own point. The lead's helper note
+(`helper::HELPERS`) asks it to open any plan of more than one piece with one sentence of what the person or their named
+audience must get from the result, to have a review helper check the plan against it before building, and to pass it to
+every reviewer. Reviewers grade by what that audience would notice on a first pass, never by kind, and treat an
+unchecked risk with a safer known way as a problem; the lead fixes every finding a person would notice, whatever its
+severity, and reviews again (v13 approved rays over the child's face and a voice slowed 0.8x afterwards as optional). Why: on the 2026-11-12 explainer bench the lead whose plan stated that outcome made the clearest film,
+and a polished film whose picture contradicted its point passed two craft reviews. Cost: about 1 KB more prompt per lead
+and reviewer and one short plan review on multi-piece work; no process, state or memory.
+A tell addressed to the lead is refused with instructions to use ask.
+
+A question releases the lead's unanswered helper calls together: its own call carries the question and how to answer;
+the others say they are still working or still queued (memory admission, a pending check or a call about to launch) and how to wait.
+Already answered calls never receive another reply or suppress a new question. If the asking call was released earlier,
+another pending call carries that exact question, rather than an older one.
+A queued helper keeps its name when it starts; a wait before it starts says to do other work, then wait again for its question
+or report. The helper's CLI remains alive inside its pending ask.
+The existing helper tool accepts `{to, answer}` (answer then wait), `{to, tell}` (send immediately), and
+`{to, wait:true}` (wait for another question or the report). The schema has optional top-level properties; the engine
+refuses missing or mixed forms as an ordinary tool result. Names match the helper row. A returned question does not
+finish the helper's row. Reports that arrive between calls remain on that row for a later wait. Names stay unique
+across the conversation's saved helper rows, including ended helpers, so a later helper cannot hide an earlier report.
+
+Each helper has a six-message cap per reply, including tells from the lead, at most 1,000 characters each. Over either limit, an ordinary tool refusal
+tells it to decide for itself. An unanswered question lapses five minutes after the lead can answer (its other tool calls have returned),
+with a hard cap of 15 minutes from the question's arrival even if a question card still waits on the person, or when the lead's reply ends:
+"No answer: decide yourself and say what you assumed in your report." Stop, closing the conversation and a dead
+helper release pending asks and lead calls. No team task or timer exists until a question is asked.
+
+An unsuccessful helper report carries any observed stop reason and tells the lead to check the same folder before
+recovering edits. An unexpected confirmed exit reports an unknown stop cause. An unconfirmed exit is stated explicitly.
+When the CLI process closes its output, the fatal helper report carries the writer confirmation and the CLI
+exit detail together. An unresolved separate command or an unconfirmed process outside the Unix process group
+keeps the Codex exit unconfirmed. A stop reason already observed by the engine stays in the report.
+A successful reply with a command still running in that helper's session stays open within the original helper deadline.
+After the last command, Claude Code can take its own next turn for up to two minutes. If no turn arrives, the lead gets
+a failed report with that reason. Codex gets one follow-up after two seconds if account evidence and the project limit
+allow it. A note to an idle Codex helper starts its next turn and is acknowledged on the native start event. Claude
+notes remain queued until its native follow-up starts. If the helper ends first, its report points to the saved notes.
+An accepted note, Stop, a stricter permission or a replaced session cancels the pending wake. Reported costs count
+before the next admission. The same session keeps its worker slot, with no extra resident process.
+`conversation({action: "workspace"})` reads the caller's active separate project copy without a path or target id. It
+returns a bounded Git snapshot, operation markers from the linked worktree, conflicted filenames and the conversation's
+registered helpers and reported background command state. The worktree's metadata must point back to this copy and to its
+source repository. Relative metadata pointers are checked from the real copy path so Windows path aliases keep working.
+Missing or incomplete evidence is explicit. The status scan covers the project scope and excludes
+changes within submodules. A scan of a subfolder cannot establish that the rest of the worktree is conflict-free. Merge,
+rebase, mail application and the cherry-pick and revert head markers apply to the whole worktree. The result is a
+point-in-time file and activity reading. Writer exit requires separate evidence.
+The read uses the existing safe Git runner and a shared three-second Git deadline off the engine lock. At most two reads
+can run at once. There is no resident process. Older Codex threads can retain a tool schema without this action.
+
+`ToolUse.team` keeps the name, job, title, files, state and ordered exchanges. Each exchange records sender and
+recipient call ids (or lead/engine), their display names, kind, text, Unix milliseconds, and the question link;
+questions retain waiting, answered or lapsed. These travel in normal reply updates, persist with the conversation,
+and copy with helper calls into a new conversation. Restore marks unfinished helpers ended and pending questions lapsed.
+The state word says "asked the lead; waiting", with the working glyph rather than the amber needs-you glyph. The existing helper view lists
+exchanges as quiet sender-to-recipient lines, using its existing type and colours; there is no new panel or control.
+
+A waiting helper retains its existing CLI process, estimated 230–260 MB, for at most 15 minutes from a question's
+arrival, allowing up to five minutes once the lead can answer. This physical cost is unmeasured here. Each question schedules
+a hard deadline and, once the lead can answer, a five-minute deadline; stale deadlines cannot answer it again.
+Records and timer tasks are bounded by the message limit; there is no CLI process or team polling at rest. Checks: `engine/src/engine/helpers/team_tests.rs`, both driver suites, and the
+"team messages" check in `tests/ui/agents.check.ts`.

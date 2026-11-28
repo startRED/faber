@@ -1,0 +1,721 @@
+//! The Settings scenarios: each section says its part, a look is a draft until "Use this look", and the account cards come
+//! and go without losing it.
+
+use super::shell::chat_with_future_resets;
+use super::{Result, Scenario, ask, claude_chat, ensure, eventually, pause, same, start_settings};
+use crate::app::Ctx;
+use crate::page::{Page, css, role, role_any};
+use crate::sandbox::Launch;
+use serde_json::json;
+use std::time::{Duration, Instant};
+
+const QUESTION: &str = "In one sentence: why is the sky blue?";
+
+pub fn scenarios() -> Vec<Scenario> {
+    vec![
+        Scenario { name: "settings keyboard traversal reaches every control with a visible ring at 720 px", run: keyboard_traversal },
+        Scenario { name: "control journey: project preferences and edited checks survive reopening and restart", run: project_preferences },
+        Scenario {
+            name: "control journey: Catalog search, keyboard details and selection return without installation",
+            run: catalog_journey,
+        },
+        Scenario { name: "system toggles persist independently and survive reopening Settings", run: system_toggles_persist },
+        Scenario { name: "receive previews starts off, saves on its own and survives reopening Settings", run: previews_persist },
+        Scenario { name: "settings default model persists and starts a fresh Chat draft", run: default_model_persists },
+        Scenario { name: "autostart begins in the tray without creating a webview window", run: autostart_has_no_window },
+        Scenario {
+            name: "every section of Settings says its part: the accounts, the usage limits and what stays on this PC",
+            run: walks_the_sections,
+        },
+        Scenario {
+            name: "an installed CLI that is signed out is not a connected account, and the section asks again each time it opens",
+            run: installed_is_not_connected,
+        },
+        Scenario { name: "Settings closed with focus inside it is not kept alive by the page", run: closed_settings_is_freed },
+        Scenario {
+            name: "the quota in the sidebar opens Settings on the usage limits, and a reload shows the same figures",
+            run: opens_at_usage,
+        },
+        Scenario { name: "a click waits for the target's rendered layout before sending one pointer click", run: clicks_rendered_target },
+        Scenario {
+            name: "a look is a draft: the page wears it only after Use this look, and Back to default undoes it",
+            run: look_is_a_draft,
+        },
+        Scenario {
+            name: "an accent too close to a meaning colour is refused in words, and the draft goes back",
+            run: refuses_a_close_accent,
+        },
+        Scenario {
+            name: "the account cards open from Settings, and Close brings Settings back with the look not yet used",
+            run: keeps_the_draft_across_accounts,
+        },
+    ]
+}
+
+/// The chat of the fixtures with resets in the future, run by a Claude CLI that says it is signed in or, with `signed_in`
+/// false, one that is installed and says nobody is.
+fn chat_with_cli(ctx: &Ctx, signed_in: bool) -> std::result::Result<Launch, String> {
+    let mut launch = chat_with_future_resets(ctx)?;
+    let setup = ctx.sb.data.join("claude.setup.json");
+    std::fs::write(&setup, json!({ "vendor": "claude", "version": "2.1.296", "chat": "chat-future.jsonl" }).to_string())
+        .map_err(|e| e.to_string())?;
+    launch.recording = Some(setup);
+    if signed_in {
+        std::fs::create_dir_all(&ctx.sb.state).map_err(|e| e.to_string())?;
+        std::fs::write(ctx.sb.state.join("claude.signed-in"), "true").map_err(|e| e.to_string())?;
+    }
+    Ok(launch)
+}
+
+fn open_settings(page: &mut Page) -> Result {
+    let settings = page.named("button", "settings.open")?.exact();
+    page.click(&settings)?;
+    let heading = page.named("heading", "set.general")?;
+    page.wait_visible(&heading)
+}
+
+fn wait_keyboard_switch(page: &mut Page, what: &str, condition: &str) -> Result {
+    let Err(error) = page.wait_for(what, condition) else { return Ok(()) };
+    let previous = page.cdp.set_deadline(Some(Instant::now() + Duration::from_secs(3)));
+    let evidence = page.eval(
+        r#"(() => {
+        const box = document.activeElement;
+        return { id: box?.id, checked: box?.checked, changes: window.__settingsSwitchChanges };
+    })()"#,
+    );
+    let saved = page.eval(
+        r#"(async () => {
+        const invoke = window.faberShell?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+        return invoke ? (await invoke('state')).settings.autostart ?? false : null;
+    })()"#,
+    );
+    page.cdp.set_deadline(previous);
+    Err(format!("{error}; keyboard switch evidence after the timeout: {evidence:?}; saved autostart: {saved:?}"))
+}
+
+fn keyboard_traversal(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "de")?;
+    super::shell::seed_project(ctx, "Keyboard fixture")?;
+    std::fs::write(ctx.sb.sandbox.join("demo/AGENTS.md"), "# Synthetic project\n\n## Proof commands\n\n```bash\nnpm test\n```\n")
+        .map_err(|e| e.to_string())?;
+    let launch = chat_with_cli(ctx, true)?;
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    page.cdp.call("Emulation.setDeviceMetricsOverride", json!({ "width": 720, "height": 700, "deviceScaleFactor": 1, "mobile": false }))?;
+    page.wait_visible(&css(".composer textarea"))?;
+    page.eval("document.querySelector('.composer textarea').focus()")?;
+    page.press("Control+,")?;
+    page.wait_visible(&css(".settings"))?;
+    page.wait_for("Settings takes keyboard focus", "document.activeElement === document.querySelector('.s-nav button')")?;
+    page.eval(
+        r#"(() => {
+        window.__settingsSwitchChanges = [];
+        document.addEventListener('change', (event) => {
+            const box = event.target;
+            if (!(box instanceof HTMLInputElement) || !box.matches('input[role=switch]')) return;
+            const changes = window.__settingsSwitchChanges;
+            changes.push({ id: box.id, checked: box.checked });
+            if (changes.length > 12) changes.shift();
+        }, true);
+    })()"#,
+    )?;
+    // All native Tab stops are checked in DOM order; closed/disabled controls must never enter the walk.
+    for section in 2..=6 {
+        page.press_on(&css(&format!(".s-nav button:nth-child({section})")), "Enter")?;
+        for expanded in [false, true] {
+            if expanded {
+                let folds = page.eval("[...document.querySelectorAll('.st-fold-head, .pset-head, .st-q, .more')].filter(el => !el.closest('[inert]')).map((el, i) => { el.dataset.keyboardFold = String(i); return i; }).length")?.as_u64().ok_or("missing fold count")?;
+                for index in 0..folds {
+                    page.press_on(&css(&format!("[data-keyboard-fold='{index}']")), "Space")?;
+                }
+                if section == 3 {
+                    page.wait_visible(&css("[data-testid=proof-edit]"))?;
+                    page.wait_visible(&css("#pset-demo-goals-switch:not(:disabled)"))?;
+                    page.press_on(&css("[data-testid=proof-edit]"), "Enter")?;
+                    page.wait_visible(&css("[data-testid=proof-draft]"))?;
+                }
+            }
+            let count = page.eval(r#"(() => {
+                const controls = [...document.querySelectorAll('.settings button, .settings input, .settings select, .settings textarea, .settings a[href], .settings [tabindex]')]
+                    .filter(el => !el.matches(':disabled') && !el.closest('[inert]') && el.getClientRects().length);
+                controls.forEach((el, i) => el.dataset.keyboardStep = String(i));
+                return controls.length;
+            })()"#)?.as_u64().ok_or("missing control count")?;
+            page.press_on(&css(".s-nav button:nth-child(2)"), "Shift+Tab")?;
+            for index in 0..count {
+                let result = page.eval(&format!(r#"(() => {{
+                    const el = document.activeElement;
+                    const target = el?.matches('input[type=color]') ? el.parentElement : el;
+                    if (!target || el.dataset.keyboardStep !== '{index}' || el.tabIndex !== 0 || !target.matches(':focus-visible, :focus-within')) return false;
+                    const ring = getComputedStyle(target), rect = target.getBoundingClientRect();
+                    return parseFloat(ring.outlineWidth) > 0 && ring.outlineStyle !== 'none' && ring.outlineColor !== 'rgba(0, 0, 0, 0)' && rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth;
+                }})()"#))?;
+                same(
+                    result.as_bool(),
+                    Some(true),
+                    &format!("section {section}, expanded {expanded}, Tab stop {index}: order and visible ring"),
+                )?;
+                let switch = page.eval("document.activeElement.matches('input[role=switch]')")?.as_bool() == Some(true);
+                if switch && section != 3 {
+                    let checked = page.eval("document.activeElement.checked")?.as_bool().ok_or("switch has no checked state")?;
+                    let id = page.eval("document.activeElement.id")?;
+                    // These switches move before saving. Wait for the saved setting before pressing Space again.
+                    let key = match id.as_str() {
+                        Some("set-notify-switch") => Some("notifications"),
+                        Some("set-sound-switch") => Some("notificationSound"),
+                        Some("set-resume-interrupted-switch") => Some("resumeInterrupted"),
+                        Some("set-awake-switch") => Some("keepAwake"),
+                        Some("set-autostart-switch") => Some("autostart"),
+                        Some("set-previews-switch") => Some("previews"),
+                        Some("set-trust-switch") => Some("faberTrust"),
+                        Some("set-stronger-switch") => Some("strongerWhenStuck"),
+                        _ => None,
+                    };
+                    let check = |expected| {
+                        let dom = format!("document.activeElement.checked === {expected}");
+                        key.map_or_else(
+                            || dom.clone(),
+                            |key| {
+                                format!(
+                                    "(async () => {{ const invoke = window.faberShell?.invoke ?? window.__TAURI_INTERNALS__.invoke; return {dom} && (await invoke('state')).settings.{key} === {expected}; }})()"
+                                )
+                            },
+                        )
+                    };
+                    page.press("Space")?;
+                    wait_keyboard_switch(page, "switch saves its keyboard choice", &check(!checked))?;
+                    page.press("Space")?;
+                    wait_keyboard_switch(page, "switch restores its keyboard choice", &check(checked))?;
+                }
+                let range = page.eval("document.activeElement.matches('input[type=range]')")?.as_bool() == Some(true);
+                if range {
+                    page.press("ArrowRight")?;
+                    page.press("ArrowLeft")?;
+                }
+                let select = page.eval("document.activeElement.matches('select')")?.as_bool() == Some(true);
+                if select {
+                    page.press("Space")?;
+                    page.press("Escape")?;
+                    page.wait_for(
+                        "native picker Escape keeps its Settings select",
+                        "document.querySelector('.settings') && document.activeElement?.matches('select')",
+                    )?;
+                }
+                let text = page.eval("document.activeElement.matches('input[type=text], textarea')")?.as_bool() == Some(true);
+                if text {
+                    page.press("Home")?;
+                    page.press("End")?;
+                }
+                let access = page.eval("document.activeElement.matches('#set-permissions-pick')")?.as_bool() == Some(true);
+                if access {
+                    page.press("Enter")?;
+                    page.press("ArrowUp")?;
+                    page.press("Escape")?;
+                    page.wait_for("access menu Escape keeps Settings and its trigger focus", "document.querySelector('.settings') && document.activeElement?.id === 'set-permissions-pick' && document.activeElement.getAttribute('aria-expanded') === 'false'")?;
+                }
+                if page.eval("document.activeElement.matches('[data-opt=set-default-model] .model-chip')")?.as_bool() == Some(true) {
+                    page.press("Enter")?;
+                    page.wait_visible(&css(".model-menu"))?;
+                    page.press("Escape")?;
+                    page.wait_for(
+                        "model menu Escape keeps Settings and restores focus",
+                        "document.activeElement.matches('[data-opt=set-default-model] .model-chip[aria-expanded=false]')",
+                    )?;
+                }
+                if index + 1 < count {
+                    page.press("Tab")?;
+                }
+            }
+        }
+    }
+    page.press("Escape")?;
+    page.wait_for(
+        "Escape returns focus to Chat",
+        "!document.querySelector('.settings') && document.activeElement === document.querySelector('.composer textarea')",
+    )
+}
+
+/// Opens a section from the list on the left and waits for its heading.
+fn open_section(page: &mut Page, key: &str) -> Result {
+    let item = page.named("button", key)?;
+    page.click(&item)?;
+    let heading = page.named("heading", key)?;
+    page.wait_visible(&heading)
+}
+
+/// What the card of Claude in Accounts and limits says about the account (connected, notConnected, unsure, checking).
+const CLAUDE_STATE: &str = "document.querySelector('.acct[data-vendor=claude]')?.dataset.state";
+const BASE: &str = "document.documentElement.dataset.base";
+/// The background the preview panel draws with.
+const PREVIEW_BG: &str = "getComputedStyle(document.querySelector('.pvbox .mini')).getPropertyValue('--bg').trim()";
+
+fn walks_the_sections(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = chat_with_cli(ctx, true)?;
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    ask(page, QUESTION)?;
+    let actions = page.named("article", "answer.label")?.css(".actions");
+    page.wait_visible(&actions)?;
+    page.wait_for("the quota to show", "/^(at least )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
+    open_settings(page)?;
+
+    // General: the language, hooks, both notification switches, keep-awake, resume-interrupted, autostart, full trust for Faber's own setup
+    // and the stronger AI if stuck.
+    let language = page.labelled("set.language")?;
+    page.wait_visible(&language)?;
+    same(page.count(&role_any("switch"))?, 9, "switches on General")?;
+    for key in ["set.notifyMe", "set.playSound", "set.keepAwake"] {
+        let toggle = page.named("switch", key)?;
+        same(page.is_checked(&toggle)?, true, "defaults on")?;
+    }
+    let autostart = page.named("switch", "set.autostart")?;
+    same(page.is_checked(&autostart)?, false, "autostart defaults off")?;
+    let previews = page.named("switch", "set.previews")?;
+    same(page.is_checked(&previews)?, false, "previews default off")?;
+    ctx.shot(&mut app, "settings-general")?;
+
+    // Appearance: the six looks are drawn before the picture is taken.
+    let page = &mut app.page;
+    open_section(page, "set.appearance")?;
+    page.wait_for("the six looks to be drawn", "document.querySelectorAll('.preset .thumb .mini[style]').length === 6")?;
+    page.wait_for("the preview to wear the look", &format!("{PREVIEW_BG} === '#0e0e10'"))?;
+    pause(0.8);
+    ctx.shot(&mut app, "settings-appearance")?;
+    // The section scrolls in a 800 px window; a taller one shows all of it in one picture.
+    let tall = json!({ "width": 1280, "height": 1160, "deviceScaleFactor": 1, "mobile": false });
+    app.page.cdp.call("Emulation.setDeviceMetricsOverride", tall)?;
+    pause(0.5);
+    ctx.shot(&mut app, "settings-appearance-tall")?;
+    // A narrow window stacks the preview under the controls: nothing sticks out sideways, and the bar of actions is there.
+    let narrow = json!({ "width": 900, "height": 700, "deviceScaleFactor": 1, "mobile": false });
+    app.page.cdp.call("Emulation.setDeviceMetricsOverride", narrow)?;
+    pause(0.5);
+    let fits = app.page.eval(
+        "(() => { const m = document.querySelector('.s-main'); const p = document.querySelector('.s-prev').getBoundingClientRect(); const c = document.querySelector('.ap-main').getBoundingClientRect(); return document.documentElement.scrollWidth <= innerWidth && m.scrollWidth <= m.clientWidth && p.top >= c.bottom - 1; })()",
+    )?;
+    same(fits.as_bool(), Some(true), "Appearance at 900 px wide: no sideways scroll, and the preview under the controls")?;
+    ctx.shot(&mut app, "settings-appearance-narrow")?;
+    app.page.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?;
+
+    // Accounts and limits: one card per AI, Antigravity's too without agy. Claude is connected, Codex is not, and Claude's card holds the 5-hour window then
+    // the 7-day one, with the shares the sidebar shows.
+    let page = &mut app.page;
+    open_section(page, "set.subscriptions")?;
+    same(page.count(&css(".acct"))?, 3, "the accounts listed")?;
+    page.wait_for("Claude to be connected", &format!("({CLAUDE_STATE}) === 'connected'"))?;
+    same(
+        page.eval("document.querySelector('.acct[data-vendor=codex]').dataset.state")?.as_str(),
+        Some("notConnected"),
+        "Codex is not connected",
+    )?;
+    let shares =
+        page.eval("[...document.querySelectorAll('.acct[data-vendor=claude] .urow .share')].map((e) => e.childNodes[0].textContent)")?;
+    same(shares.to_string(), r#"["7%","47%"]"#.to_string(), "the shares of the two windows")?;
+    let names =
+        page.eval("[...document.querySelectorAll('.acct[data-vendor=claude] .urow .uname')].map((e) => e.childNodes[0].textContent)")?;
+    same(names.to_string(), r#"["5-hour limit","7-day limit"]"#.to_string(), "the windows")?;
+    same(page.count(&css("[data-restore=manage]"))?, 1, "Manage accounts once in the section")?;
+    ctx.shot(&mut app, "settings-accounts")?;
+
+    // Privacy: three plain statements.
+    let page = &mut app.page;
+    open_section(page, "set.privacy")?;
+    for id in ["telemetry", "history", "logins"] {
+        let said = page.text_of(&format!("set.privacy.{id}"))?;
+        page.wait_visible(&css(".facts li").has_text(&said))?;
+    }
+    same(page.count(&css(".facts li"))?, 3, "the statements")?;
+    ctx.shot(&mut app, "settings-privacy")
+}
+
+fn opens_at_usage(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = chat_with_future_resets(ctx)?;
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    ask(page, QUESTION)?;
+    let actions = page.named("article", "answer.label")?.css(".actions");
+    page.wait_visible(&actions)?;
+    page.wait_for("the quota to show", "/^(at least )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
+    let vendor = css(".usage .vendor").has_text("Claude");
+    page.click(&vendor)?;
+    let heading = page.named("heading", "set.subscriptions")?;
+    page.wait_visible(&heading)?;
+    let shares =
+        "[...document.querySelectorAll('.acct[data-vendor=claude] .urow .share')].map((e) => e.childNodes[0].textContent).join(' ')";
+    same(page.eval(shares)?.as_str(), Some("7% 47%"), "the figures at the usage limits")?;
+    // A screen that loads again asks the engine and shows the same readings.
+    page.reload()?;
+    page.wait_for("the quota after a reload", "/^(at least )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
+    // Quota is seeded before the remembered conversation's asynchronous snapshot has rendered.
+    page.wait_visible(&actions)?;
+    // DOM readiness can precede the new document's native pointer hit-test frame.
+    page.eval("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")?;
+    open_settings(page)?;
+    open_section(page, "set.subscriptions")?;
+    page.wait_for("the same figures", &format!("({shares}) === '7% 47%'"))
+}
+
+fn clicks_rendered_target(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
+    let page = &mut app.page;
+    page.eval("(() => { const b = document.createElement('button'); b.id = 'layout-target'; b.style.cssText = 'position:fixed;left:300px;top:300px;width:80px;height:40px;z-index:9999'; b.onclick = () => window.__targetClicks = (window.__targetClicks ?? 0) + 1; b.scrollIntoView = () => requestAnimationFrame(() => { b.style.left = '600px'; }); document.body.append(b); window.__targetClicks = 0; })()")?;
+    page.click(&css("#layout-target"))?;
+    same(page.eval("window.__targetClicks")?.as_u64(), Some(1), "exactly one click reaches the target after its layout changes")?;
+    page.eval("(() => { const b=document.querySelector('#layout-target'); b.style.left='300px'; b.scrollIntoView=()=>{}; b.onpointerenter=()=>{if(!window.__hoverMoved){window.__hoverMoved=true;b.style.left='600px'}}; window.__targetClicks=0; })()")?;
+    page.click(&css("#layout-target"))?;
+    same(page.eval("window.__targetClicks")?.as_u64(), Some(1), "one click reaches the target after pointer entry changes its layout")
+}
+
+fn look_is_a_draft(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    open_settings(page)?;
+    open_section(page, "set.appearance")?;
+    page.wait_for("the preview to wear Dark Room", &format!("{PREVIEW_BG} === '#0e0e10'"))?;
+    let apply = page.named("button", "set.use")?;
+    same(page.is_disabled(&apply)?, true, "Use this look with nothing to use")?;
+    let (pending, applied) = (page.text_of("set.previewPending")?, page.text_of("set.previewApplied")?);
+    same(page.inner_text(&css(".s-prev .ph small"))?, applied.clone(), "the preview of the look on the page")?;
+
+    // Morning: the preview wears it, the page does not.
+    let morning = page.named("button", "look.manha.name")?;
+    page.click(&morning)?;
+    page.wait_for("the preview to wear Morning", &format!("{PREVIEW_BG} === '#f3f5f0'"))?;
+    same(page.eval(BASE)?.as_str(), Some("sala"), "the page while the look is a draft")?;
+    same(
+        page.eval("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()")?.as_str(),
+        Some("#0e0e10"),
+        "the page's background",
+    )?;
+    same(page.inner_text(&css(".s-prev .ph small"))?, pending, "the preview says it is not applied")?;
+    same(page.is_disabled(&apply)?, false, "Use this look with a draft")?;
+
+    // Back to default undoes the draft.
+    let reset = page.named("button", "set.reset")?;
+    page.click(&reset)?;
+    page.wait_for("the preview to wear Dark Room", &format!("{PREVIEW_BG} === '#0e0e10'"))?;
+    let sala = page.named("button", "look.sala.name")?;
+    same(page.attr(&sala, "aria-pressed")?, Some("true".to_string()), "Dark Room is chosen again")?;
+    same(page.is_disabled(&apply)?, true, "Use this look after Back to default")?;
+
+    // Morning again, this time used.
+    page.click(&morning)?;
+    page.wait_for("the preview to wear Morning", &format!("{PREVIEW_BG} === '#f3f5f0'"))?;
+    page.click(&apply)?;
+    page.wait_for("the page to wear Morning", &format!("{BASE} === 'manha'"))?;
+    page.wait_for(
+        "the preview to say it is applied",
+        &format!("document.querySelector('.s-prev .ph small').textContent === {}", serde_json::json!(applied)),
+    )?;
+    same(page.is_disabled(&apply)?, true, "Use this look once it is used")?;
+    let file = ctx.sb.data.join("settings.json");
+    eventually("the look to reach settings.json", Duration::from_secs(15), || {
+        std::fs::read_to_string(&file).is_ok_and(|text| text.contains("\"base\": \"manha\""))
+    })
+}
+
+fn refuses_a_close_accent(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    open_settings(page)?;
+    open_section(page, "set.appearance")?;
+    page.wait_for("the preview to wear Dark Room", &format!("{PREVIEW_BG} === '#0e0e10'"))?;
+    let hex = page.labelled("set.hexLabel")?;
+    let value = "document.querySelector('.hex').value";
+    let before = page.eval(value)?;
+
+    // Amber means "needs you": an accent next to it is refused, and the draft is what it was.
+    page.fill(&hex, "#f0a030")?;
+    page.press_on(&hex, "Enter")?;
+    let sentence = page.text_of("error.look.nearAmber")?;
+    page.wait_visible(&css(".ap-msg").has_text(&sentence))?;
+    page.wait_for("the field to go back", &format!("{value} === {before}"))?;
+    let apply = page.named("button", "set.use")?;
+    same(page.is_disabled(&apply)?, true, "Use this look after a refused accent")?;
+    same(page.eval(BASE)?.as_str(), Some("sala"), "the page after a refused accent")?;
+    pause(0.4);
+    ctx.shot(&mut app, "settings-accent-refused")?;
+
+    // Something that is not a colour gets its own sentence.
+    let page = &mut app.page;
+    page.fill(&hex, "banana")?;
+    page.press_on(&hex, "Enter")?;
+    let invalid = page.text_of("set.hexInvalid")?;
+    page.wait_visible(&css(".ap-msg").has_text(&invalid))?;
+    page.wait_for("the field to go back", &format!("{value} === {before}"))?;
+
+    // A colour in the short form is read, drawn, and can be used.
+    page.fill(&hex, "36C")?;
+    page.press_on(&hex, "Enter")?;
+    page.wait_for("the field to show the colour", &format!("{value} === '#3366cc'"))?;
+    page.wait_for("Use this look to be allowed", "!document.querySelector('.ap-bar .btn.primary').disabled")?;
+    ensure(page.inner_text(&css(".ap-msg"))?.is_empty(), || "the sentence of the refusal should be gone".to_string())
+}
+
+fn keeps_the_draft_across_accounts(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    open_settings(page)?;
+    open_section(page, "set.appearance")?;
+    let morning = page.named("button", "look.manha.name")?;
+    page.click(&morning)?;
+    page.wait_for("the preview to wear Morning", &format!("{PREVIEW_BG} === '#f3f5f0'"))?;
+    open_section(page, "set.subscriptions")?;
+    let manage = page.named("button", "set.openSetup")?;
+    page.click(&manage)?;
+    let cards = page.named("heading", "setup.title")?;
+    page.wait_visible(&cards)?;
+    same(page.count(&css(".settings"))?, 0, "Settings while the cards are open")?;
+    // The window's own Close button has the same name, so the one asked for is looked for inside the dialog.
+    let close = css(".fr-stage").role("button", &page.text_of("setup.close")?).exact();
+    page.click(&close)?;
+    // Settings is back on the section it left, with the look still a draft.
+    let heading = page.named("heading", "set.subscriptions")?;
+    page.wait_visible(&heading)?;
+    // Focus goes back to the button that opened the cards, so a keyboard user is where they were.
+    page.wait_for("focus on Manage accounts", "document.activeElement?.dataset.restore === 'manage'")?;
+    same(page.eval(BASE)?.as_str(), Some("sala"), "the page after the cards")?;
+    open_section(page, "set.appearance")?;
+    let morning = page.named("button", "look.manha.name")?;
+    same(page.attr(&morning, "aria-pressed")?, Some("true".to_string()), "the draft after the cards")?;
+    page.wait_for("the preview to wear Morning", &format!("{PREVIEW_BG} === '#f3f5f0'"))?;
+    let apply = page.named("button", "set.use")?;
+    same(page.is_disabled(&apply)?, false, "Use this look after the cards")?;
+    // Esc leaves Settings and drops the draft.
+    page.press("Escape")?;
+    let title = page.named("heading", "empty.chatTitle")?;
+    page.wait_visible(&title)?;
+    same(page.eval(BASE)?.as_str(), Some("sala"), "the page after leaving Settings")
+}
+
+fn installed_is_not_connected(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = chat_with_cli(ctx, false)?;
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    open_settings(page)?;
+    open_section(page, "set.subscriptions")?;
+    // The CLI is installed, and says nobody is signed in.
+    page.wait_for("Claude to be not connected", &format!("({CLAUDE_STATE}) === 'notConnected'"))?;
+    // Signing in somewhere else; the section asks again the next time it opens.
+    std::fs::write(ctx.sb.state.join("claude.signed-in"), "true").map_err(|e| e.to_string())?;
+    let page = &mut app.page;
+    open_section(page, "set.privacy")?;
+    open_section(page, "set.subscriptions")?;
+    page.wait_for("Claude to be connected", &format!("({CLAUDE_STATE}) === 'connected'"))?;
+    ctx.close(app.id)
+}
+
+fn closed_settings_is_freed(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    // The Projects area with no project open has no composer to take the focus when Settings closes, so the page's record
+    // of the focus is what could keep the closed Settings alive.
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    let projects = page.named("button", "area.projects")?;
+    page.click(&projects)?;
+    let open = page.named("heading", "empty.openProjectTitle")?;
+    page.wait_visible(&open)?;
+    open_settings(page)?;
+    open_section(page, "set.appearance")?;
+    page.wait_for("the six looks to be drawn", "document.querySelectorAll('.preset .thumb .mini[style]').length === 6")?;
+    // Back takes the focus when it is clicked, and the whole of Settings leaves the page with it.
+    let back = page.named("button", "set.back")?;
+    page.eval("window.__settings = new WeakRef(document.querySelector('.settings'))")?;
+    page.click(&back)?;
+    page.wait_visible(&open)?;
+    let mut freed = false;
+    for _ in 0..8 {
+        app.page.cdp.call("HeapProfiler.collectGarbage", json!({}))?;
+        pause(0.3);
+        if app.page.eval("window.__settings.deref() === undefined")? == true {
+            freed = true;
+            break;
+        }
+    }
+    ensure(freed, || "the page still holds the Settings it closed".to_string())?;
+    ctx.close(app.id)
+}
+
+fn autostart_has_no_window(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let out = ctx.sb.data.join("startup.json");
+    let launch = Launch { args: vec!["--autostart".into()], checks_out: Some(out.clone()), ..claude_chat(ctx) };
+    let id = ctx.spawn(launch)?;
+    // The app's `fs::write` creates the file before it writes it: wait for a whole report, not for the file.
+    let read = || std::fs::read_to_string(&out).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+    eventually("autostart setup to finish", crate::app::startup(), || read().is_some())?;
+    let report = read().ok_or("the autostart report went away")?;
+    same(report["windowCount"].as_u64(), Some(0), "autostart webview windows")?;
+    ensure(ctx.exited(id).is_none(), || "autostart exited instead of staying in the tray".into())?;
+    ctx.close(id)
+}
+
+fn previews_persist(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
+    let page = &mut app.page;
+    open_settings(page)?;
+    let previews = page.named("switch", "set.previews")?;
+    let file = ctx.sb.data.join("settings.json");
+    let saved = |on: bool| {
+        std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .is_some_and(|saved| saved["previews"] == on)
+    };
+    for on in [true, false] {
+        page.click(&previews)?;
+        eventually("the previews choice to reach settings.json", Duration::from_secs(15), || saved(on))?;
+        page.reload()?;
+        open_settings(page)?;
+        same(page.is_checked(&previews)?, on, "previews after reload")?;
+    }
+    ctx.close(app.id)
+}
+
+fn default_model_persists(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
+    let page = &mut app.page;
+    open_settings(page)?;
+    let model = css("[data-opt=set-default-model] .model-chip");
+    page.click(&model)?;
+    page.wait_visible(&css(".model-menu"))?;
+    ctx.shot(&mut app, "settings-default-model-desktop")?;
+    let page = &mut app.page;
+    page.click(&role("button", "Claude Sonnet").exact())?;
+    let file = ctx.sb.data.join("settings.json");
+    eventually("the default model to reach settings.json", Duration::from_secs(15), || {
+        std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .is_some_and(|saved| saved["defaultModel"] == json!({"vendor": "claude", "model": "sonnet"}))
+    })?;
+    page.reload()?;
+    page.wait_for("the default model in a fresh draft", "!!document.querySelector('.composer .model-chip .mk.claude')")?;
+    open_settings(page)?;
+    page.wait_for(
+        "the default model in Settings after reload",
+        "!!document.querySelector('[data-opt=set-default-model] .model-chip .mk.claude')",
+    )?;
+    page.cdp.call("Emulation.setDeviceMetricsOverride", json!({ "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": false }))?;
+    page.wait_for("the Settings panel has room on a phone", "document.querySelector('.s-main')?.clientWidth >= 320")?;
+    page.click(&model)?;
+    page.wait_visible(&css(".model-menu"))?;
+    ctx.shot(&mut app, "settings-default-model-phone")?;
+    ctx.close(app.id)
+}
+
+fn system_toggles_persist(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
+    let page = &mut app.page;
+    open_settings(page)?;
+    let awake = page.named("switch", "set.keepAwake")?;
+    let autostart = page.named("switch", "set.autostart")?;
+    let file = ctx.sb.data.join("settings.json");
+    for (keep_awake, start) in [(false, true), (true, false)] {
+        page.click(&awake)?;
+        page.click(&autostart)?;
+        eventually("system preferences to reach settings.json", Duration::from_secs(15), || {
+            std::fs::read_to_string(&file)
+                .ok()
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+                .is_some_and(|saved| saved["keepAwake"] == keep_awake && saved["autostart"] == start)
+        })?;
+        page.reload()?;
+        open_settings(page)?;
+        same(page.is_checked(&awake)?, keep_awake, "keep-awake after reload")?;
+        same(page.is_checked(&autostart)?, start, "autostart after reload")?;
+    }
+    ctx.close(app.id)
+}
+fn project_preferences(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    super::shell::seed_project(ctx, "Preferences fixture")?;
+    std::fs::write(ctx.sb.sandbox.join("demo/AGENTS.md"), "# Synthetic project\n\n## Proof commands\n\n```bash\nnpm test\n```\n")
+        .map_err(|e| e.to_string())?;
+    let mut app = ctx.launch(super::no_cli())?;
+    let settings = app.page.named("button", "settings.open")?.exact();
+    app.page.click(&settings)?;
+    app.page.wait_visible(&css(".settings"))?;
+    open_section(&mut app.page, "set.projects")?;
+    app.page.click(&css(".pset-head"))?;
+    let copies = css("#pset-demo-copies-switch");
+    same(app.page.is_checked(&copies)?, true, "separate copies initially enabled")?;
+    app.page.press_on(&copies, "Space")?;
+    same(app.page.is_checked(&copies)?, false, "keyboard toggles this project's copies")?;
+    app.page.click(&css("[data-testid=proof-edit]"))?;
+    app.page.fill(&css("[data-testid=proof-draft]"), "npm run synthetic-proof")?;
+    app.page.press_on(&css("[data-testid=proof-save]"), "Enter")?;
+    app.page.wait_for(
+        "confirmed controls",
+        "!document.querySelector('[data-testid=proof-save]') && !document.querySelector('[data-testid=proof-confirm]')",
+    )?;
+    app.page.press("Escape")?;
+    app.page.wait_for("Settings removed", "!document.querySelector('.settings')")?;
+    let settings = app.page.named("button", "settings.open")?.exact();
+    app.page.click(&settings)?;
+    app.page.wait_visible(&css(".settings"))?;
+    open_section(&mut app.page, "set.projects")?;
+    app.page.click(&css(".pset-head"))?;
+    same(app.page.is_checked(&copies)?, false, "saved copies preference survives reopening")?;
+    ctx.close(app.id)?;
+    let mut app = ctx.launch(super::no_cli())?;
+    let settings = app.page.named("button", "settings.open")?.exact();
+    app.page.click(&settings)?;
+    app.page.wait_visible(&css(".settings"))?;
+    open_section(&mut app.page, "set.projects")?;
+    app.page.click(&css(".pset-head"))?;
+    same(app.page.is_checked(&copies)?, false, "saved copies preference survives a real restart")?;
+    app.page.click(&css("[data-testid=proof-edit]"))?;
+    same(
+        app.page.eval("document.querySelector('[data-testid=proof-draft]').value")?,
+        json!("npm run synthetic-proof"),
+        "confirmed commands survive a real restart",
+    )?;
+    ctx.shot(&mut app, "project-preferences-restarted")?;
+    ensure(ctx.records()?.is_empty(), || "editing preferences unexpectedly launched a CLI".into())?;
+    ctx.close(app.id)
+}
+
+fn catalog_journey(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(super::no_cli())?;
+    app.page.click(&css("[data-catalog-tab]"))?;
+    let card = css(".catalog-tile").last().css("[data-catalog-card]");
+    app.page.wait_visible(&card)?;
+    let id = app.page.attr(&card, "data-catalog-card")?.ok_or("catalog card had no identity")?;
+    app.page.press_on(&card, "Enter")?;
+    app.page.wait_visible(&css(".catalog-detail"))?;
+    app.page.wait_for("detail heading has focus", "document.activeElement?.matches('.catalog-detail h1')")?;
+    app.page.press("Escape")?;
+    app.page
+        .wait_for("the original catalog card regains focus", &format!("document.activeElement?.dataset.catalogCard === {}", json!(id)))?;
+    app.page.press_on(&css(".catalog-tile").last().css(".catalog-pick"), "Space")?;
+    app.page.wait_visible(&css("[data-catalog-batch]"))?;
+    app.page.press("Escape")?;
+    app.page.wait_for(
+        "Escape clears the selected cards",
+        "!document.querySelector('[data-catalog-batch]') && !document.querySelector('.catalog-pick:checked')",
+    )?;
+    app.page.fill(&css(".catalog-search input"), "synthetic-no-such-catalog-entry-84729")?;
+    app.page.wait_visible(&css(".catalog-empty"))?;
+    same(app.page.count(&css("[data-catalog-card]"))?, 0, "unmatched search has no stale cards")?;
+    app.page.press_on(&css(".catalog-search input"), "Escape")?;
+    app.page.wait_visible(&card)?;
+    ctx.shot(&mut app, "catalog-keyboard-returned")?;
+    ensure(ctx.records()?.is_empty(), || "browsing catalog unexpectedly launched a CLI".into())?;
+    ctx.close(app.id)
+}

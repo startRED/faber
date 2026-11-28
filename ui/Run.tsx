@@ -1,0 +1,200 @@
+import { createEffect, createSignal, createUniqueId, For, Index, on, Show, type JSX } from 'solid-js';
+import type { Message, Plan } from './api.ts';
+import { Icon } from './Glyphs.tsx';
+import { elapsed } from './running.ts';
+import { fromEngine, t } from './i18n.ts';
+import { planWords } from './Plan.tsx';
+
+/** A Keep going run (task 018): turns Faber started by itself, one after another with no message of the person between. */
+export interface Run {
+  /** Index in the conversation of each reply of the run, oldest first. */
+  replies: number[];
+}
+
+/** The reply a message Faber sent by itself was answered with. */
+const byFaber = (messages: Message[], at: number) => messages[at]?.role === 'assistant' && !!messages[at - 1]?.wake;
+
+/** The runs of a conversation by the index of the reply they keep open (their newest with content, or newest). Only two turns
+ * or more make a run: one turn Faber sent reads as a reply like any other. */
+export function runsOf(messages: Message[], drawn?: (m: Message, at: number) => boolean): Map<number, Run> {
+  const runs = new Map<number, Run>();
+  let replies: number[] = [];
+  const close = () => {
+    if (replies.length >= 2) {
+      const shown = (drawn ? replies.findLast((r) => drawn(messages[r]!, r)) : undefined) ?? replies.at(-1)!;
+      runs.set(shown, { replies });
+    }
+    replies = [];
+  };
+  for (let at = 0; at < messages.length; at++) {
+    if (messages[at]!.role === 'user') {
+      if (!messages[at]!.wake) close();
+      continue;
+    }
+    if (byFaber(messages, at)) replies.push(at);
+    else close();
+  }
+  close();
+  return runs;
+}
+
+/** The reply indexes a run folds away (all but the one it keeps open). */
+export function folded(runs: Map<number, Run>): Set<number> {
+  return new Set([...runs.entries()].flatMap(([shown, run]) => run.replies.filter((r) => r !== shown)));
+}
+
+/** A question Faber answered for the person, with the choices they may change it to. */
+export interface Answered {
+  question: string;
+  answer: string;
+  others: string[];
+}
+
+/** The questions Faber answered in these replies: the agent's questions (`autoAnswers`) and its closing boxes. */
+export function answeredIn(replies: Message[]): Answered[] {
+  return replies.flatMap((m) => [
+    ...(m.autoAnswers ?? []).map((a) => ({ question: a.question === 'plan.contractQuestion' ? t('plan.contractQuestion') : a.question, answer: a.answer === 'plan.stateContract' ? t('plan.stateContract') : a.answer, others: a.others ?? [] })),
+    ...(m.wrapUp?.ask && m.wrapUp.answered
+      ? [{ question: m.wrapUp.ask, answer: m.wrapUp.answered, others: (m.wrapUp.actions ?? []).filter((a) => a !== m.wrapUp!.answered) }]
+      : []),
+  ]);
+}
+
+/** "Faber answered 3 questions for you": one quiet card, a row per question with the answer chosen. "Change" opens the whole
+ * question with every choice under its row, and only "Change answer" sends the one picked, as the person's message. */
+export function AnswersCard(props: { answers: Answered[]; onReply?: (text: string) => void }) {
+  const uid = createUniqueId();
+  const [open, setOpen] = createSignal<number>();
+  const [picked, setPicked] = createSignal<string>();
+  const toggle = (i: number) => {
+    setPicked(undefined);
+    setOpen(open() === i ? undefined : i);
+  };
+  // Closing removes the focused control, so focus goes back to the row's Change.
+  const close = (e: Event) => {
+    const change = (e.currentTarget as Element).closest('li')?.querySelector<HTMLButtonElement>('.change');
+    setOpen(undefined);
+    change?.focus();
+  };
+  const send = (e: Event, a: Answered) => {
+    const answer = picked();
+    if (!answer || answer === a.answer) return;
+    close(e);
+    props.onReply?.(t('answers.changeTo', { question: a.question, answer }));
+  };
+  return (
+    <section class="answers" aria-label={t('answers.title', { n: props.answers.length })}>
+      <p class="woke">
+        <Icon name="loop" small />
+        {t('answers.title', { n: props.answers.length })}
+      </p>
+      <ul>
+        {/* By place, not by object: the list is made again on every tick of a stream, and a row (and a focused Change) stays. */}
+        <Index each={props.answers}>
+          {(a, i) => (
+            <li
+              classList={{ open: open() === i }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Escape' || open() !== i) return;
+                e.stopPropagation();
+                close(e);
+              }}
+            >
+              <div class="row">
+                <span class="q" title={a().question}>{a().question}</span>
+                <span class="a">{a().answer}</span>
+                <Show when={props.onReply && a().others.length}>
+                  <button type="button" class="btn ghost change" aria-expanded={open() === i} onClick={() => toggle(i)}>
+                    {t('answers.change')}
+                  </button>
+                </Show>
+              </div>
+              <Show when={open() === i}>
+                <fieldset class="piece-choices answer-choices">
+                  <legend class="sr">{a().question}</legend>
+                  <For each={[a().answer, ...a().others]}>
+                    {(choice) => (
+                      <label>
+                        <input type="radio" name={`${uid}-${i}`} checked={(picked() ?? a().answer) === choice} onChange={() => setPicked(choice)} />
+                        <span>
+                          {choice}
+                          <Show when={choice === a().answer}>
+                            <span class="chosen"> · {t('answers.chosen')}</span>
+                          </Show>
+                        </span>
+                      </label>
+                    )}
+                  </For>
+                </fieldset>
+                <div class="answer-actions">
+                  <button type="button" class="btn send" disabled={!picked() || picked() === a().answer} onClick={(e) => send(e, a())}>
+                    {t('answers.send')}
+                  </button>
+                  <button type="button" class="btn ghost" onClick={close}>
+                    {t('answers.cancel')}
+                  </button>
+                </div>
+              </Show>
+            </li>
+          )}
+        </Index>
+      </ul>
+    </section>
+  );
+}
+
+/** What Faber asked in a run, once per reason, for the header's tooltip. */
+function reasons(messages: Message[], run: Run): string {
+  const count = new Map<string, number>();
+  for (const at of run.replies) {
+    const why = messages[at - 1]?.wake?.why;
+    if (why) count.set(why, (count.get(why) ?? 0) + 1);
+  }
+  return [...count].map(([why, n]) => (n > 1 ? `${fromEngine(why)} ×${n}` : fromEngine(why))).join(' · ');
+}
+
+/** One header over a run: the loop icon, how long it worked on its own and how many turns, and the plan's progress on the
+ * newest run, in the work log's disclosure. Opened, it shows the earlier turns, each with its work log folded; only the
+ * newest turn with content stays open below it. The earlier turns are drawn only while shown, so a long run keeps a small screen. */
+export function RunBlock(props: { messages: Message[]; run: Run; shown?: number; plan?: Plan; earlier: (at: number) => JSX.Element; reveal?: number; from?: number; offset?: number }) {
+  const [open, setOpen] = createSignal(false);
+  let details!: HTMLDetailsElement;
+  const foldedReplies = () => {
+    const keep = props.shown ?? props.run.replies.at(-1);
+    return props.run.replies.filter((at) => at !== keep);
+  };
+  createEffect(on(() => props.reveal, (at) => {
+    if (at !== undefined && foldedReplies().includes(at)) {
+      details.open = true;
+      setOpen(true);
+    }
+  }));
+  const first = () => props.messages[props.run.replies[0]! - 1];
+  const newest = () => props.messages[props.run.replies.at(-1)!];
+  const time = () => {
+    const end = newest();
+    const e = elapsed(first()?.at ?? 0, end?.finishedAt ?? end?.movedAt ?? end?.at ?? 0);
+    return t(e.key, { n: e.n });
+  };
+  const plan = () => {
+    const p = props.plan;
+    if (!p?.steps.length) return '';
+    return t('run.block.plan', { count: planWords({ done: p.steps.filter((s) => s.state === 'done').length, total: p.steps.length }) });
+  };
+  const title = () =>
+    [t('run.block.title', { time: time(), turns: t('run.block.turns', { n: props.run.replies.length }) }), plan()].filter(Boolean).join(' · ');
+  return (
+    <details class="run-block disclosure" ref={(el) => (details = el)} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary title={reasons(props.messages, props.run) || undefined}
+        data-reading-id={props.messages[props.run.replies[0]!]!.id} data-reading-index={props.run.replies[0]! + (props.offset ?? 0)} data-reading-run="true">
+        <Icon name="loop" small />
+        <span class="run-title">{title()}</span>
+      </summary>
+      <Show when={open()}>
+        <div class="run-earlier">
+          <For each={foldedReplies().filter((at) => at >= (props.from ?? 0))}>{(at) => props.earlier(at)}</For>
+        </div>
+      </Show>
+    </details>
+  );
+}

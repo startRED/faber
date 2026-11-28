@@ -1,0 +1,10 @@
+Started { session_id: "00000000-0000-4000-8000-000000000116", model: "gemini-4-neon-high" }
+Started { session_id: "00000000-0000-4000-8000-000000000116", model: "gemini-3.8-flash-low" }
+Context { used: Some(0), window: Some(1048576) }
+Context { used: Some(12767), window: Some(1048576) }
+Tool { id: "call_1", name: "Bash", input: Object {"command": String("cmd /c \"echo made> made.txt\"")}, parent: None }
+ToolResult { id: "call_1", ok: true, declined: false, exit_code: Some(0), text: "Created At: 2026-11-22T23:08:51-03:00\nCompleted At: 2026-11-22T23:08:57-03:00\nCommand exited with code 0.\n\nNo output from the command." }
+Break { final_answer: false }
+Text("done")
+Context { used: Some(12855), window: Some(1048576) }
+Done { ok: true, reason: "end_turn", cost_total_usd: None, input_tokens: 25575, output_tokens: 47, cache_read_tokens: 10675, cache_write_tokens: 0, cache_write_1h_tokens: 0, incomplete: false }

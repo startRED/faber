@@ -1,0 +1,181 @@
+{
+  "messages": [
+    {
+      "id": "b0a1e001-0000-4000-8000-0000000000a3",
+      "role": "user",
+      "text": "Review this conversation’s changes with Faber’s review tool. Fix only the agreed problems, call it again, follow its last line, and finish with the final score and what you changed.",
+      "at": -420000
+    },
+    {
+      "id": "b0a1e001-0000-4000-8000-0000000000a4",
+      "role": "assistant",
+      "at": -416000,
+      "took": 372000,
+      "finishedAt": -44000,
+      "movedAt": -44000,
+      "vendor": "claude",
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
+      "status": "done",
+      "costUsd": 0.94,
+      "inputTokens": 168400,
+      "outputTokens": 9200,
+      "checks": { "state": "passed", "passed": 2 },
+      "acts": [
+        {
+          "kind": "helper",
+          "actor": { "who": "ai", "vendor": "codex", "model": "gpt-6.2-sol", "role": "helper" },
+          "what": "act.helper.started",
+          "params": { "call": "review-1a", "effort": "high", "job": "review" }
+        },
+        {
+          "kind": "helper",
+          "actor": { "who": "ai", "vendor": "claude", "model": "claude-sonnet-5-5", "role": "helper" },
+          "what": "act.helper.started",
+          "params": { "call": "review-1b", "effort": "high", "job": "review" }
+        },
+        {
+          "kind": "helper",
+          "actor": { "who": "ai", "vendor": "codex", "model": "gpt-6.2-sol", "role": "helper" },
+          "what": "act.helper.started",
+          "params": { "call": "review-2a", "effort": "high", "job": "review" }
+        },
+        {
+          "kind": "helper",
+          "actor": { "who": "ai", "vendor": "claude", "model": "claude-sonnet-5-5", "role": "helper" },
+          "what": "act.helper.started",
+          "params": { "call": "review-2b", "effort": "high", "job": "review" }
+        }
+      ],
+      "review": {
+        "rounds": [
+          {
+            "call": "rv1",
+            "lines": [4, 3, 4, 4, 4],
+            "total": 19,
+            "reviewers": ["Codex 1", "Claude 2"],
+            "scores": [["Codex 1", [4, 3, 4, 4, 4]], ["Claude 2", [5, 3, 4, 4, 4]]],
+            "jesters": [],
+            "agreed": [
+              {
+                "line": 2,
+                "file": "src/components/PickupTimePicker.tsx",
+                "at": 8,
+                "what": "A pickup time can be chosen on Sunday and Monday, when the shop is closed.",
+                "should": "Offer no times on a closed day and say when orders open again.",
+                "evidence": "pickupTimes looks only at the hour; the contact page says Tuesday to Saturday.",
+                "severity": "P1",
+                "visible": true,
+                "reviewers": ["Codex 1", "Claude 2"]
+              },
+              {
+                "line": 2,
+                "file": "src/pages/order.tsx",
+                "at": 49,
+                "what": "A time chosen at 9:25 can still be ordered at 9:40 if the page stayed open.",
+                "should": "Check the pickup time against the clock again when Place order is clicked.",
+                "evidence": "pickup is set once and the click never compares it with the time.",
+                "severity": "P2",
+                "visible": true,
+                "reviewers": ["Codex 1", "Claude 2"]
+              },
+              {
+                "line": 5,
+                "file": "tests/checkout.test.ts",
+                "at": 42,
+                "what": "No test covers a day the shop is closed.",
+                "should": "Add a test for Sunday and one for Monday.",
+                "evidence": "All three pickup tests use Tuesday 12 May 2026.",
+                "severity": "P2",
+                "reviewers": ["Codex 1", "Claude 2"]
+              }
+            ],
+            "notes": [
+              {
+                "line": 4,
+                "file": "src/pages/order.tsx",
+                "at": 26,
+                "what": "The menu list is written twice, here and on the menu page.",
+                "should": "Share one list component.",
+                "severity": "P3",
+                "reviewers": ["Claude 2"]
+              }
+            ]
+          },
+          {
+            "call": "rv2",
+            "lines": [5, 5, 5, 4, 5],
+            "total": 24,
+            "reviewers": ["Codex 1", "Claude 2"],
+            "scores": [["Codex 1", [5, 5, 5, 4, 5]], ["Claude 2", [5, 5, 5, 4, 5]]],
+            "jesters": [],
+            "agreed": [],
+            "notes": [
+              {
+                "line": 4,
+                "file": "src/pages/order.tsx",
+                "at": 26,
+                "what": "The menu list is written twice, here and on the menu page.",
+                "should": "Share one list component.",
+                "severity": "P3",
+                "reviewers": ["Claude 2"]
+              }
+            ]
+          }
+        ],
+        "stop": "review.stop.target"
+      },
+      "parts": [
+        {
+          "tools": [
+            {
+              "id": "rv1",
+              "name": "Review",
+              "input": { "request": "Online ordering at /order: the order page, the pickup time picker, totals in cents and nine tests.", "files": ["src/pages/order.tsx", "src/components/PickupTimePicker.tsx", "src/lib/cart.ts", "src/App.tsx", "tests/checkout.test.ts"] },
+              "ok": true,
+              "started": -410000,
+              "ended": -296000,
+              "output": "Score: 19 out of 25\nDoes what was asked: 4\nCorrect: 3\nSafe: 4\nSimple: 4\nChecked: 4\nAgreed, fix: line 2, src/components/PickupTimePicker.tsx:8: A pickup time can be chosen on Sunday and Monday, when the shop is closed.; should: Offer no times on a closed day and say when orders open again.; evidence: pickupTimes looks only at the hour; the contact page says Tuesday to Saturday.\nAgreed, fix: line 2, src/pages/order.tsx:49: A time chosen at 9:25 can still be ordered at 9:40 if the page stayed open.; should: Check the pickup time against the clock again when Place order is clicked.; evidence: pickup is set once and the click never compares it with the time.\nAgreed, optional: line 5, tests/checkout.test.ts:42: No test covers a day the shop is closed.; should: Add a test for Sunday and one for Monday.; evidence: All three pickup tests use Tuesday 12 May 2026.\nNotes seen by one reviewer or without evidence: 1\nNext: fix the rows marked Agreed, fix, then call review again"
+            },
+            { "id": "review-1a", "name": "Helper", "parent": "rv1", "input": { "title": "Review" }, "ok": true, "started": -408000, "ended": -312000 },
+            { "id": "review-1b", "name": "Helper", "parent": "rv1", "input": { "title": "Review" }, "ok": true, "started": -408000, "ended": -298000 }
+          ]
+        },
+        {
+          "tools": [
+            { "id": "f1", "name": "Edit", "input": { "file_path": "src/components/PickupTimePicker.tsx" }, "ok": true, "started": -280000, "ended": -279000 },
+            { "id": "f2", "name": "Edit", "input": { "file_path": "src/pages/order.tsx" }, "ok": true, "started": -250000, "ended": -249000 },
+            { "id": "f3", "name": "Edit", "input": { "file_path": "tests/checkout.test.ts" }, "ok": true, "started": -222000, "ended": -221000 },
+            { "id": "f4", "name": "Bash", "input": { "command": "npm test" }, "ok": true, "exitCode": 0, "check": true, "started": -200000, "ended": -182000, "output": " ✓ tests/checkout.test.ts (11 tests) 16ms\n\n Test Files  1 passed (1)\n      Tests  11 passed (11)" }
+          ]
+        },
+        {
+          "tools": [
+            {
+              "id": "rv2",
+              "name": "Review",
+              "input": { "request": "The three agreed problems are fixed: closed days, a time that has passed, and two tests for closed days.", "files": ["src/pages/order.tsx", "src/components/PickupTimePicker.tsx", "tests/checkout.test.ts"] },
+              "ok": true,
+              "started": -170000,
+              "ended": -62000,
+              "output": "Score: 24 out of 25\nDoes what was asked: 5\nCorrect: 5\nSafe: 5\nSimple: 4\nChecked: 5\nNotes seen by one reviewer or without evidence: 1\nNext: stop (target)"
+            },
+            { "id": "review-2a", "name": "Helper", "parent": "rv2", "input": { "title": "Review" }, "ok": true, "started": -168000, "ended": -80000 },
+            { "id": "review-2b", "name": "Helper", "parent": "rv2", "input": { "title": "Review" }, "ok": true, "started": -168000, "ended": -64000 }
+          ]
+        },
+        "## Review: 24 of 25\n\nTwo reviewers read the change without seeing my notes: the other AI, and a fresh session of mine told to doubt everything. They agreed on three problems, and all three are fixed.\n\n1. **Closed days.** The picker offered times on Sunday and Monday. It now offers none and says orders open again on Tuesday at 7 a.m.\n2. **A time that has passed.** A page left open could order for 9:25 at 9:40. Place order now checks the clock again.\n3. **A missing test.** Two new tests cover Sunday and Monday, so there are 11 and all pass.\n\nOne note is left for you, because only one reviewer raised it: the menu list is written twice. It works; sharing it is tidying, not a fix."
+      ],
+      "wrapUp": {
+        "recap": "The review ended at 24 of 25: the three agreed problems are fixed and the 11 tests pass. Nothing is saved to the site yet.",
+        "done": true,
+        "outcome": "done",
+        "summary": {
+          "did": "Fixed the three problems both reviewers agreed on.",
+          "result": "The review went from 19 to 24 of 25.",
+          "verified": "npm test (11 passed) after the last edit, and a second review round."
+        }
+      }
+    }
+  ]
+}

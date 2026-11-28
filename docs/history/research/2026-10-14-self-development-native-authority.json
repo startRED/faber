@@ -1,0 +1,213 @@
+{
+  "schema": 1,
+  "informationalOnly": true,
+  "qualificationPassed": false,
+  "roleAdmissionOpened": false,
+  "realMissionRan": false,
+  "measuredAt": "2026-10-14T10:42:51.171Z",
+  "nativeObservations": [
+    {
+      "path": "g1-codex-role-tools/live-denial.json",
+      "vendor": "codex",
+      "modelTurns": 1,
+      "cliHash": "dd13bdb162a184fa04039488b234a8258ef9b76f84e926c505d5742b19249a6a",
+      "state": "observed",
+      "markerUnchanged": true,
+      "apiEquivalentUsd": 0.0015853400000000002,
+      "tokenUsage": {
+        "cacheWriteInputTokens": 0,
+        "cachedInputTokens": 33024,
+        "inputTokens": 44915,
+        "outputTokens": 132,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 45047
+      },
+      "killWaitMs": 21
+    },
+    {
+      "path": "g1-codex-native/live-denial.json",
+      "vendor": "codex",
+      "modelTurns": 6,
+      "cliHash": "dd13bdb162a184fa04039488b234a8258ef9b76f84e926c505d5742b19249a6a",
+      "state": "observed",
+      "markerUnchanged": true,
+      "apiEquivalentUsd": 0.005245400000000001,
+      "tokenUsage": {
+        "cacheWriteInputTokens": 0,
+        "cachedInputTokens": 177920,
+        "inputTokens": 210297,
+        "outputTokens": 457,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 210754
+      },
+      "killWaitMs": 19
+    },
+    {
+      "path": "g1-claude-native/live-denial.json",
+      "vendor": "claude",
+      "modelTurns": 1,
+      "cliHash": "76de74f7694a5bdc03378a5f837c9e132827bf004c98c276bc4e9094ff06769a",
+      "state": "observed",
+      "markerUnchanged": true,
+      "apiEquivalentUsd": 0.0003885,
+      "tokenUsage": {
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 1194,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "cache_creation_input_tokens": 1194,
+        "cache_read_input_tokens": 0,
+        "fallback_credit": null,
+        "inference_geo": "global",
+        "input_tokens": 2,
+        "iterations": [
+          {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 1194,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "cache_creation_input_tokens": 1194,
+            "cache_read_input_tokens": 0,
+            "input_tokens": 2,
+            "output_tokens": 299,
+            "type": "message"
+          }
+        ],
+        "output_tokens": 299,
+        "output_tokens_details": {
+          "thinking_tokens": 223
+        },
+        "server_tool_use": {
+          "web_fetch_requests": 0,
+          "web_search_requests": 0
+        },
+        "service_tier": "standard",
+        "speed": "standard"
+      },
+      "killWaitMs": 11
+    }
+  ],
+  "spendingFailure": {
+    "path": "g2-codex-stop-drained/live-denial.json",
+    "state": "stopped",
+    "stopRule": 2,
+    "usageBeforeStop": null,
+    "usageAfterStop": null,
+    "settlementDrainMs": 5005,
+    "killWaitMs": 15,
+    "measuredTokenOvershoot": null,
+    "reserveMicros": null,
+    "plannedStopsPerVendor": 3,
+    "completedMeasuredStopsPerVendor": 0,
+    "abortedCodexTurns": 2,
+    "claudeStopsAttempted": 0
+  },
+  "cost": {
+    "nativeApiEquivalentSubtotal": 0.00721924,
+    "total": null,
+    "priorKnownSubtotal": 0.00577606,
+    "combinedKnownSubtotal": 0.0129953,
+    "combinedUnsettledTurns": 4,
+    "ramRealMissionMb": null,
+    "ramLiveProbesMb": null
+  },
+  "ownerAudit": {
+    "before": "2026-10-14T10:13:42.952Z",
+    "after": "2026-10-14T10:30:57.164Z",
+    "trackedFiles": 291,
+    "installFiles": 2,
+    "unchanged": true,
+    "changed": [],
+    "scope": "Tracked owner bytes and HEAD/index/packed-refs; excluded untracked files and build output; all stable install files.",
+    "beforeManifestSha256": "1503c583e8a05aee1bfae769efdd2574614ed594bf02e7e2c425fb27bdf56a1b",
+    "afterManifestSha256": "3bdf1c5fc06c618e1d5867ec23500bc7d37d2fa4c6dede7257c22974cb07fa23",
+    "stableFileHashes": {
+      "faber.exe": "076ed666fbddb70a3052d0218c1aa0d730a3444af740692cd4f3da275fc0f230",
+      "uninstall.exe": "1ab5d119c34e5c58e980d17fb1ea9c37fcb1ff755913c9341bb91c6d549ad34b"
+    },
+    "metadataHashes": {
+      "HEAD": "d94760f0c75720df1c5241c494049a8f3bbd1892fd3a5292a87ee95d068da7c4",
+      "index": "0156ef33964b36e8aab526f672a0b5ffd8c2b868d0b05ab683b8c41a4fc757b3",
+      "packed-refs": "5f2ea32b71a125e1f94be19b0f2fc2e78f801a0ebeabd7562fd1a53dce1c2c40"
+    },
+    "afterValidation": {
+      "path": "g1-owner-after-validation.json",
+      "at": "2026-10-14T11:08:14.348Z",
+      "unchanged": true,
+      "changed": [],
+      "manifestSha256": "fd3254b2fde69fa2aa65d73c1caeeee8fe8794a66d0b780fec84e854c8623987"
+    }
+  },
+  "helperExecutableSha256AtPostProbeBeforeValidation": "a2f582879d0a05cb067325933b7a25a0d2fa4d1c06ed605828167ed7a6a107f7",
+  "provenanceNote": "Post-probe executable hash; not an assertion that subsequently edited source matches the previously executed binary. The recorded controls are acknowledged by the installed CLI.",
+  "requiredValidation": {
+    "commands": [
+      {
+        "command": "npm run lint",
+        "started": "2026-10-14T10:43:38.266Z",
+        "exit": 0,
+        "seconds": 0.368,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-native-authority\\proof-01.log"
+      },
+      {
+        "command": "npm run typecheck",
+        "started": "2026-10-14T10:43:38.635Z",
+        "exit": 0,
+        "seconds": 0.794,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-native-authority\\proof-02.log"
+      },
+      {
+        "command": "npm run build",
+        "started": "2026-10-14T10:43:39.430Z",
+        "exit": 0,
+        "seconds": 1.422,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-native-authority\\proof-03.log"
+      },
+      {
+        "command": "cargo fmt --all --check",
+        "started": "2026-10-14T10:43:40.853Z",
+        "exit": 0,
+        "seconds": 1.64,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-native-authority\\proof-04.log"
+      },
+      {
+        "command": "cargo clippy --workspace --all-targets -- -D warnings",
+        "started": "2026-10-14T10:43:42.494Z",
+        "exit": 0,
+        "seconds": 13.068,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-native-authority\\proof-05.log"
+      },
+      {
+        "command": "cargo clippy -p faber --features test-hooks -- -D warnings",
+        "started": "2026-10-14T10:43:55.562Z",
+        "exit": 0,
+        "seconds": 7.552,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-native-authority\\proof-06.log"
+      },
+      {
+        "command": "cargo t --all",
+        "started": "2026-10-14T10:44:03.115Z",
+        "exit": 0,
+        "seconds": 1202.186,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-native-authority\\proof-07.log"
+      }
+    ],
+    "fullSuite": {
+      "passed": 1377,
+      "failed": 0,
+      "notRun": 0,
+      "skipped": 0
+    },
+    "pureExampleTests": {
+      "passed": 8,
+      "failed": 0
+    },
+    "scriptedRam": {
+      "projectsPeakMb": 224.8,
+      "warmFakeGuardMb": 1.1,
+      "warmFakeTreeMb": 144.5
+    }
+  },
+  "ci": "Pending at commit; exact delivered head and final CI status are recorded in private delivery-native-authority.json.",
+  "rateDate": "2026-10-12"
+}

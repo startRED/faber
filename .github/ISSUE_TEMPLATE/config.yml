@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea
+    url: https://github.com/startRED/faber/discussions
+    about: Ask a question or propose an idea before opening an issue.
+  - name: Security vulnerability
+    url: https://github.com/startRED/faber/security/advisories/new
+    about: Report it privately, as SECURITY.md describes. Never open a public issue for it.
+  - name: Roadmap and product direction
+    url: https://github.com/startRED/faber/blob/main/docs/product/README.md
+    about: Read what Faber is building, its phases and its non-goals.
+  - name: Live development board
+    url: https://github.com/startRED/faber/blob/board/BOARD.md
+    about: See what is in progress and what landed recently.
