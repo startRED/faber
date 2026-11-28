@@ -6,6 +6,7 @@ import { es } from '../../ui/locales/es.ts';
 import { fr } from '../../ui/locales/fr.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
 import { StartFailed } from '../../ui/StartFailed.tsx';
+import { mac } from '../../ui/WindowControls.tsx';
 import { check, equal, ok } from './check.ts';
 import { t } from '../../ui/i18n.ts';
 
@@ -30,7 +31,8 @@ check('start failure: Faber says it could not start, names the code and offers s
     const buttons = [...host.querySelectorAll<HTMLButtonElement>('.start-failed-actions button')].map((b) => b.textContent);
     equal(JSON.stringify(buttons), JSON.stringify([t('startFailed.restart'), t('startFailed.report'), t('startFailed.quit')]));
     equal(document.activeElement, host.querySelector('.start-failed-actions button'), 'Start again has the focus');
-    ok(host.querySelector('.caption'), 'the window keeps its own buttons');
+    // macOS draws its own traffic lights over the bar; Windows and Linux get Faber's buttons.
+    equal(Boolean(host.querySelector('.caption')), !mac, 'the window keeps its own buttons');
   } finally {
     dispose();
     host.remove();

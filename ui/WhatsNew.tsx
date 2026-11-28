@@ -23,7 +23,8 @@ export function WhatsNew(props: { version: string; notes: Note[]; onClose: () =>
   const groups = grouped(props.notes).map((g) => ({ ...g, first: n, notes: g.notes.map((note) => ({ note, at: n++ })) }));
   onMount(() => {
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    queueMicrotask(() => button?.focus());
+    // Focus starts on Continue without scrolling to it: a long list opened at its end, hiding the title and the first entries.
+    queueMicrotask(() => button?.focus({ preventScroll: true }));
     // Capture phase, so the shortcuts of the shell never see these keys.
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {

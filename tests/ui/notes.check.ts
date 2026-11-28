@@ -152,6 +152,23 @@ async function mounted(close: (host: HTMLElement) => void) {
   }
 }
 
+check('notes: a list longer than the window opens at its top, with focus on Continue', async () => {
+  const long = Array.from({ length: 60 }, (_, i) => entry(i + 1, i % 3 === 0 ? 'new' : i % 3 === 1 ? 'better' : 'fixed'));
+  const host = document.createElement('div');
+  document.body.append(host);
+  const dispose = render(() => createComponent(WhatsNew, { version: '9.9.9', notes: long, onClose: () => {} }), host);
+  try {
+    await settle();
+    const page = document.querySelector<HTMLElement>('.notes')!;
+    ok(page.scrollHeight > page.clientHeight, 'the list is longer than the window');
+    equal(document.activeElement, page.querySelector('.notes-act button'), 'Continue has the focus');
+    equal(page.scrollTop, 0, 'the title and the first entries stay in view');
+  } finally {
+    dispose();
+    host.remove();
+  }
+});
+
 check('notes: after Continue the whole screen is gone from the page', () => mounted((host) => host.querySelector('button')!.click()));
 
 check('notes: after Esc the whole screen is gone from the page', () =>
