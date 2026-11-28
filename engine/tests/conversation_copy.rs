@@ -426,6 +426,51 @@ async fn move_chat_to_project_makes_its_separate_copy_only_at_the_next_turn_even
     reopened.shutdown();
 }
 
+const MANIFEST: &str = "[package]
+name = \"app\"
+version = \"0.1.0\"
+";
+
+/// Task 203: a new copy starts its `target` from the project's, without the project's own program, on a thread of its
+/// own; a staging folder a crash left beside the copies goes with the next sweep.
+#[tokio::test]
+async fn a_new_copy_starts_its_build_folder_from_the_project_and_leftovers_are_swept() {
+    faber_engine::project::seed::keep_free_for_tests(0);
+    let s = setup();
+    let root = s.folder.path().to_path_buf();
+    std::fs::write(root.join("Cargo.toml"), MANIFEST).unwrap();
+    let debug = root.join("target").join("debug");
+    std::fs::create_dir_all(debug.join(".fingerprint").join("serde-fedcba9876543210")).unwrap();
+    std::fs::create_dir_all(debug.join(".fingerprint").join("app-0123456789abcdef")).unwrap();
+    std::fs::write(debug.join(".fingerprint").join("serde-fedcba9876543210").join("lib-serde"), "dependency").unwrap();
+    std::fs::write(debug.join("app.exe"), "the project's program").unwrap();
+    // Git checks the tracked manifest out into the new copy.
+    let copies = faber_engine::project::copy::home(s.data.path());
+    let checkout = copies.clone();
+    s.git.lock().unwrap().on_add = Some(Box::new(move || {
+        for entry in std::fs::read_dir(&checkout).unwrap().flatten() {
+            if entry.file_name().to_str().is_some_and(|n| !n.starts_with('.')) && entry.path().is_dir() {
+                std::fs::write(entry.path().join("Cargo.toml"), MANIFEST).unwrap();
+            }
+        }
+    }));
+    let id = sent(&s.engine, ask(&s.project, "Build it")).await;
+    let copy = PathBuf::from(s.engine.open(&id).unwrap().copy.unwrap().path);
+    let kept = copy.join("target").join("debug").join(".fingerprint").join("serde-fedcba9876543210").join("lib-serde");
+    support::until("the copy's build folder was never started from the project's", || kept.is_file()).await;
+    assert!(!copy.join("target").join("debug").join("app.exe").exists(), "the project's program never reaches the copy");
+    assert!(!copy.join("target").join("debug").join(".fingerprint").join("app-0123456789abcdef").exists());
+    assert!(debug.join("app.exe").is_file(), "the project's folder is untouched");
+    let leftover = copies.join(".seed-c0ffee00-0000-4000-8000-000000000009");
+    std::fs::create_dir_all(leftover.join("0")).unwrap();
+    // The sweep leaves it while the seeding holds the lock, and runs once an hour: it waits for the seeding to end.
+    support::until("the seeding did not end", || !faber_engine::project::seed::seeding(&copy)).await;
+    s.engine.sweep_copies();
+    support::until("a leftover staging folder was not swept", || !leftover.exists()).await;
+    assert!(copy.join("Cargo.toml").is_file(), "the copy itself stays");
+    s.engine.shutdown();
+}
+
 #[tokio::test]
 async fn r_next_each_project_conversation_works_in_a_copy_of_its_own_on_a_faber_branch() {
     let s = setup();

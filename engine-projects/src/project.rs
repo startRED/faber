@@ -17,6 +17,7 @@ pub mod proof;
 pub mod remote;
 pub use faber_engine_store::project_rules as rules;
 pub mod run_app;
+pub mod seed;
 
 use crate::model::Project;
 pub use crate::model::{Extra, FolderState, ProcessId, valid_id};

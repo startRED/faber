@@ -101,9 +101,13 @@ impl Engine {
             return Err("error.storage.unreachable".into());
         }
         let Some(mut exec) = (plan.run)() else { return Ok(None) };
-        copy::make(&mut *exec, &plan.folder, &plan.data, &plan.id, &plan.branch, plan.from.as_deref(), plan.at.as_deref())
-            .map(|made| made.map(|c| (plan.id, c)))
-            .map_err(str::to_string)
+        let fresh = std::fs::symlink_metadata(copy::home(&plan.data).join(&plan.id)).is_err();
+        let made = copy::make(&mut *exec, &plan.folder, &plan.data, &plan.id, &plan.branch, plan.from.as_deref(), plan.at.as_deref())
+            .map_err(str::to_string)?;
+        if fresh && let Some(copy) = &made {
+            seed_build_folders(&plan.data, &plan.id, copy);
+        }
+        Ok(made.map(|c| (plan.id, c)))
     }
 
     /// Sends a message. A project conversation's copy is made after the message is recorded, away from the lock, and the
@@ -258,10 +262,15 @@ impl Engine {
             .chain(roots.into_iter().map(|root| (*root).clone()))
             .filter(|root| storage_available(&profile, root));
         for (data, id) in roots
+            .inspect(|root| crate::project::seed::sweep_leftovers(root))
             .flat_map(|root| copy::found(&root, || self.with(|c| c.copy_sweep_allowed())).into_iter().map(move |id| (root.clone(), id)))
         {
             if !self.with(|c| c.copy_sweep_allowed()) {
                 break;
+            }
+            // A copy whose build folders are being copied in stays as it is until that ends.
+            if crate::project::seed::seeding(&copy::home(&data).join(&id)) {
+                continue;
             }
             let saved = profile.join("conversations").join(format!("{id}.json"));
             let known = |c: &Core| c.copying.contains_key(&id) || c.convs.contains_key(&id) || saved.exists();
@@ -347,6 +356,21 @@ impl Engine {
         }
         counts
     }
+}
+
+/// A new copy starts its build folders from the project's on a thread of its own, so the answer never waits for the copying
+/// (task 203). The thread reads and writes files only, starts no process and ends when the folders are in place.
+fn seed_build_folders(data: &Path, id: &str, copy: &WorkCopy) {
+    let Some(plan) = crate::project::seed::plan(data, id, Path::new(&copy.root), Path::new(&copy.path)) else { return };
+    // Marked before the thread starts, so a sweep in between never retires the copy.
+    let seeding = crate::project::seed::begin(plan);
+    let id = id.to_string();
+    let _ = std::thread::Builder::new().name("faber-copy-seed".into()).spawn(move || {
+        let free = |path: &Path| faber_winproc::rewind::Root::open(path).ok()?.available_space().ok();
+        for (folder, outcome) in seeding.run(crate::project::seed::limits(), free) {
+            eprintln!("faber: copy {id} build folder {} {outcome:?}", folder.display());
+        }
+    });
 }
 
 fn storage_available(profile: &Path, root: &Path) -> bool {

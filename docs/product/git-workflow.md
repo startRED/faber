@@ -29,6 +29,19 @@ automatically retired. Unknown unique work and uncommitted changes stay. Rebuild
 only in a stopped copy unused for seven days, with the existing path, tracked-file and idle checks. Source worktrees
 outside Faber's data folder are never removed by this sweep.
 
+A new copy starts its own `target` (beside a `Cargo.toml`) and `node_modules` (beside a `package.json`) as a real copy of
+the project's, on a thread of its own after the copy is made, so its first build reuses the dependencies already built
+(task 203, the owner's choice of 2026-11-28: each copy keeps folders of its own, never a shared one). The copy keeps file
+times, and in a copied `target` everything the project's own packages left (fingerprints, build-script output, finished
+programs) is removed, so they always build again from the copy's files. Only the copy's top folders are seeded. Each is staged
+beside the copies, one at a time in every Faber on the data folder, and moved in with a move that never replaces: a
+build the agent started first keeps its own, even an empty folder. `node_modules` comes only when the copy's lockfile
+matches the project's, checked again right before the move, and `target` only when every manifest of the project and
+the copy reads. A folder above 8 GB or the room above 10 GB free (counted again once it is copied), any link but npm's `.bin` links on macOS and Linux,
+or a file that is not a plain file seeds nothing. Staging folders a crash left are swept with the copies, never while
+a seeding holds the lock beside them. A small Rust project's first build in a new copy: 8.0 s and 30 crates
+without, 1.8 s and 1 crate with.
+
 ## Checks and dependencies
 
 The existing `verify` tool is available in Projects. Its fast mode selects affected checks and reuses successful

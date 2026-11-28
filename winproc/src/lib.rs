@@ -65,7 +65,7 @@ pub use locale::user_language;
 mod pipe;
 #[cfg(windows)]
 mod user_file;
-pub use files::{open_catalog_file, open_plain_file};
+pub use files::{open_catalog_file, open_plain_file, open_regular, rename_new};
 #[cfg(windows)]
 pub use pipe::{PipeClient, pipe_peer_is_user, user_pipe};
 #[cfg(windows)]
